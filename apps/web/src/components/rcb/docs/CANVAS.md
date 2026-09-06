@@ -227,7 +227,7 @@ rcb/
 | `createSceneRenderer` / `createWebglSceneRenderer` | 世界墨水 |
 | `canIdlePaintOnCanvas` | 能否走 SoA/idle 位图路径 |
 | `pickFullAndCanvasIds` | 拆 `fullIds`(host) / `canvasIds`(SoA)；板内 raise/reveal → host |
-| `idleMediaNeedsSharpHost` 等 | 放大后是否必须升 host |
+| `backingInsufficientForAtlas` | 媒体 atlas  backing 不足时需 restamp（非升 DomHost） |
 | `applySoaHostInkFlags` | host 占用时关掉 SoA 槽，防双画 |
 | `paintArtboardInkSurface`（frames） | 板内墨水；reveal id **不进** FO collect |
 | `artboardWebglInk` / `onlyFrameId` | 共享 WebGL→FO；同样跳过 reveal |

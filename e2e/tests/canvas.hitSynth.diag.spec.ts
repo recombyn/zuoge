@@ -1,4 +1,4 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { E2E_TOKEN_SKIP_REASON, resolveE2EToken } from './e2eAuth';
 const ROOT = path.resolve(__dirname, '../..');
@@ -79,7 +79,7 @@ test('dispatch hit on canvas', async ({ page }) => {
       view: window,
     });
     canvas.dispatchEvent(ev);
-    const chromeAfter = document.querySelectorAll('[data-rcb-sel-box]').length;
+    const chromeAfter = document.querySelectorAll('[data-sel-box]').length;
     return {
       cx, cy, sceneX, sceneY, camX, camY, z, localX, localY,
       nodeId: el.getAttribute('data-scene-node-id'),
@@ -91,5 +91,5 @@ test('dispatch hit on canvas', async ({ page }) => {
   });
   console.log(JSON.stringify(probe, null, 2));
   await page.waitForTimeout(300);
-  console.log('chrome after wait', await page.locator('[data-rcb-sel-box]').count());
+  console.log('chrome after wait', await page.locator('[data-sel-box]').count());
 });

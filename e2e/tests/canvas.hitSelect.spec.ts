@@ -90,7 +90,7 @@ async function openBlankEditor(page: Page) {
   return stage;
 }
 
-/** Stage bbox is often full viewport â€” never click the left rail. */
+/** Stage bbox is often full viewport â€?never click the left rail. */
 async function focusStage(page: Page, stage: Locator) {
   const box = await stage.boundingBox();
   if (!box) throw new Error('no stage box');
@@ -125,7 +125,7 @@ function rectCenter(
 }
 
 async function hasActiveSelection(page: Page) {
-  return page.locator('[data-sel-box], [data-rcb-sel-box]').count();
+  return page.locator('[data-sel-box]').count();
 }
 
 async function chromeCount(page: Page) {
@@ -148,7 +148,7 @@ async function sceneProbe(page: Page) {
       hitLayerAlive: Boolean(hitLayer),
       hitLayerUnderWorld: Boolean(hitLayer?.closest('[data-rcb-world="1"]')),
       chrome: {
-        selBox: document.querySelectorAll('[data-rcb-sel-box]').length,
+        selBox: document.querySelectorAll('[data-sel-box]').length,
         selChrome: document.querySelectorAll('[data-rcb-sel-chrome]').length,
         screenChrome: document.querySelectorAll('[data-rcb-screen-chrome]').length,
       },

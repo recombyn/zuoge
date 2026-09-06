@@ -152,14 +152,14 @@ else
 ```
 文档 shape/rect|ellipse|polygon|star|triangle
   → canIdlePaintOnCanvas = true
-  → 产品 WebGL：ATLAS_STAMP + CANVAS_IDLE
+  → 产品 WebGL：CANVAS_IDLE + 向量 mesh
   → collectSoaWebglInstances
-       · bakeShapeInkForAtlas（含 stroke pad）→ atlas 格
-       · WebGL kind 3 贴图 quad
+       · tessellateFill / tessellateStroke → GPU triangles
+       · WebGL mesh draw
   → 画在「世界墨水 canvas」上
 ```
 
-闭合形统一走烤图+pad，不再分几何实例 / 贴图两条墨水路径。
+闭合形走向量三角化，不再烤 atlas 格。
 
 ### 4.2 有渐变 / 大旋转 / 复杂填充
 

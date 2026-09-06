@@ -1,6 +1,6 @@
 /**
  * Live editor stress for recent outline / path-edit / text-outline bugs:
- * - After 轮廓化, path-edit anchors use world HTML pads (clickable at high zoom)
+ * - After 轮廓�? path-edit anchors use world HTML pads (clickable at high zoom)
  * - Text outline keeps multi-ring path + chrome that tracks ink (not collapsed junk)
  */
 import { test, expect, type Page, type Locator } from '@playwright/test';
@@ -52,15 +52,15 @@ async function zoomInHard(page: Page, cx: number, cy: number, n = 40) {
 }
 
 async function clickOutline(page: Page) {
-  let btn = page.getByRole('button', { name: /^Outline$|^轮廓化$|^轮廓$/i }).first();
+  let btn = page.getByRole('button', { name: /^Outline$|^轮廓�?|^轮廓$/i }).first();
   if (!(await btn.isVisible({ timeout: 2_000 }).catch(() => false))) {
     const more = page.getByRole('button', { name: /^More$|^更多$/i }).first();
     await expect(more).toBeVisible({ timeout: 12_000 });
     await more.click({ force: true });
     await sleep(250);
     btn = page
-      .getByRole('menuitem', { name: /^Outline$|^轮廓化$|^轮廓$/i })
-      .or(page.getByRole('button', { name: /^Outline$|^轮廓化$|^轮廓$/i }))
+      .getByRole('menuitem', { name: /^Outline$|^轮廓�?|^轮廓$/i })
+      .or(page.getByRole('button', { name: /^Outline$|^轮廓�?|^轮廓$/i }))
       .first();
   }
   await expect(btn).toBeVisible({ timeout: 12_000 });
@@ -71,7 +71,7 @@ async function clickOutline(page: Page) {
       async () =>
         page.evaluate(() => {
           const toast = document.body.innerText || '';
-          if (/Outlined|轮廓化成功|已轮廓/.test(toast)) return 1;
+          if (/Outlined|轮廓化成功|已轮�?.test(toast)) return 1;
           if (document.querySelector('[data-pen-path-edit-preview]')) return 1;
           const hosts = document.querySelectorAll('[data-scene-node-id]');
           for (const n of Array.from(hosts)) {
@@ -111,7 +111,7 @@ async function enterPathEdit(page: Page) {
     await page.mouse.dblclick(inkBox.x + inkBox.width / 2, inkBox.y + inkBox.height / 2);
     await sleep(400);
   } else {
-    const sel = page.locator('[data-sel-box], [data-rcb-sel-box]').first();
+    const sel = page.locator('[data-sel-box]').first();
     const selBox = await sel.boundingBox().catch(() => null);
     if (selBox) {
       await page.mouse.dblclick(selBox.x + selBox.width / 2, selBox.y + selBox.height / 2);
@@ -153,7 +153,7 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
     await injectAuth(page);
   });
 
-  test('rect outline → path-edit: geometry knobs (no HTML pads) @ high zoom', async ({ page }) => {
+  test('rect outline �?path-edit: geometry knobs (no HTML pads) @ high zoom', async ({ page }) => {
     const stage = await openBlankEditor(page, 'outline-path-edit');
     await waitForEditorToolbar(page);
     const box = await focusStage(page, stage);
@@ -229,7 +229,7 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
     expect(report.registryCount).toBeGreaterThan(0);
     expect(report.zoom).toBeGreaterThan(5);
 
-    // Drag via painted knob screen center — geometry registry must move with drag.
+    // Drag via painted knob screen center �?geometry registry must move with drag.
     const drag = await page.evaluate(() => {
       const circle = document.querySelector(
         'g[data-pen-path-edit-preview] circle'
@@ -297,7 +297,7 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
       expect(moved).toBe(true);
     } else if (drag.ok) {
       // eslint-disable-next-line no-console
-      console.log('[e2e:outline-path-edit] skip drag — knob off-viewport');
+      console.log('[e2e:outline-path-edit] skip drag �?knob off-viewport');
     }
   });
 
@@ -317,13 +317,13 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
         { timeout: 12_000 }
       )
       .toBeGreaterThan(0);
-    await page.keyboard.type('撒的撤河算', { delay: 25 });
+    await page.keyboard.type('撒的撤河�?, { delay: 25 });
     await page.mouse.click(box.x + box.width * 0.15, box.y + box.height * 0.15);
     await sleep(400);
     await page.keyboard.press('v');
     await sleep(200);
 
-    const painted = page.getByText('撒的撤河算').first();
+    const painted = page.getByText('撒的撤河�?).first();
     await expect(painted).toBeAttached({ timeout: 12_000 });
     const pb = await painted.boundingBox();
     expect(pb).toBeTruthy();
@@ -336,7 +336,7 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
     const hasOutlineBtn = (await btn.count()) > 0;
     if (!hasOutlineBtn) {
       // eslint-disable-next-line no-console
-      console.log('[e2e:text-outline] Outline toolbar missing — CJK paint ok; unit covers precision');
+      console.log('[e2e:text-outline] Outline toolbar missing �?CJK paint ok; unit covers precision');
       return;
     }
 
@@ -356,7 +356,7 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
           const baseline = document.querySelector('[data-baseline="1"]') as SVGPathElement | null;
           const ink = baseline?.getBoundingClientRect();
           const chrome =
-            document.querySelector('[data-rcb-sel-box]')?.getBoundingClientRect() ||
+            document.querySelector('[data-sel-box]')?.getBoundingClientRect() ||
             document.querySelector('[data-rcb-screen-chrome="1"]')?.getBoundingClientRect();
           return {
             rings: d.split(/(?=[Mm])/).filter((s) => s.trim()).length,
@@ -374,9 +374,9 @@ test.describe('canvas outline / path-edit / text-outline stress', () => {
     }
 
     if (!live) {
-      // Canvas/fontkit Outline must not freeze the suite — paint assert is enough.
+      // Canvas/fontkit Outline must not freeze the suite �?paint assert is enough.
       // eslint-disable-next-line no-console
-      console.log('[e2e:text-outline] Outline slow/failed — CJK paint ok; unit covers precision');
+      console.log('[e2e:text-outline] Outline slow/failed �?CJK paint ok; unit covers precision');
       return;
     }
 

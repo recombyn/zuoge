@@ -89,7 +89,7 @@ export async function openBlankEditor(page: Page, namePrefix = 'canvas-product')
     throw new Error('editor behind login');
   }
   await expect(
-    page.getByRole('button', { name: /Image generator|图像生成器/i }).first()
+    page.getByRole('button', { name: /Image generator|图像生成�?i }).first()
   ).toBeVisible({ timeout: 45_000 });
   const stage = page.locator('[data-rcb-canvas="1"], [data-canvas-stage="1"]').first();
   await expect(stage).toBeVisible({ timeout: 45_000 });
@@ -167,9 +167,9 @@ export async function expectShapeInk(page: Page, min = 1, timeout = 15_000) {
     .toBeGreaterThanOrEqual(min);
 }
 
-/** Selection chrome may use data-sel-box (current) or legacy data-rcb-sel-box probes. */
+/** Selection chrome probes (current attrs). */
 export const CHROME_SEL =
-  '[data-sel-box], [data-rcb-sel-box], [data-rcb-sel-chrome], [data-rcb-screen-chrome="1"], [data-rcb-sel-knob], [data-sel-handle]';
+  '[data-sel-box], [data-rcb-sel-chrome], [data-rcb-screen-chrome="1"], [data-rcb-sel-knob], [data-sel-handle]';
 
 export async function selectionChromeCount(page: Page): Promise<number> {
   return page.locator(CHROME_SEL).count();

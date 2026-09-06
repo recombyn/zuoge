@@ -48,7 +48,7 @@ Default config loads from seed JSON under `apps/api/seeds/` on first API start.
 |------|------------------------------|--------|
 | Prompt packs | `design_prompt_packs/` (`_index.json` + `stages/*.md` + `snippets.md`) | `type=system` stage protocols; `type=template` inject lines — git seed upserts DB on boot |
 | AgentProfile | `agents/profiles/*.yaml` + `agents/bindings.yaml` | Topology / roles / subagents — see [agent-profile.md](./agent-profile.md) |
-| Skills | `design_skills/<key>/` | Deliverable/tool playbooks only: `poster_craft`, `image_gen`, `banner_ad`, … — not vision/edit/taste system protocols (those live in prompt packs). Also Admin zip / folders |
+| Skills | `skills/foundation|domains/` + `plugins/skills/` | Deliverable/tool playbooks only: `poster_craft`, `image_gen`, `banner_ad`, … — not vision/edit/taste system protocols (those live in prompt packs). Also Admin zip / folders |
 | Tokens / models | Shipped | Expand further via Admin after install |
 | Canvas actions, fonts, dicts, stages | Shipped | |
 
@@ -259,7 +259,7 @@ Canonical layout: `_meta.json` + `SKILL.md` (+ optional `schema.json`, `handler.
 | Change | Edit |
 |--------|------|
 | Stage must-follow rules | `stages/*.md` section for that kind (e.g. `decide.md` → `ask_system`, `paint.md` → `paint_system`) |
-| How a design job is done | Skill seed or `design_skills/<pack>/SKILL.md` |
+| How a design job is done | Skill pack `SKILL.md` under `skills/` or `plugins/skills/` |
 | One inject line | `snippets.md` section — keep short |
 
 Do not duplicate craft into `paint_system` / `react_system`. Brush / Animation → ext skills `brush_ops` / `motion_animation`; core skills only route to them.

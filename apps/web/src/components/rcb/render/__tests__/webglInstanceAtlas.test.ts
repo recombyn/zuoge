@@ -10,13 +10,13 @@ import {
   SOA_ATLAS_CELL,
   SOA_ATLAS_INNER,
   SOA_ATLAS_SEG_THRESHOLD,
-  idleMediaNeedsSharpHost,
   idleMediaScreenEdgePx,
   atlasBakePixelScale,
   atlasStampSceneScale,
   atlasCoverageBucket,
   atlasZoomBucket,
 } from '../webglInstanceAtlas';
+import { backingInsufficientForAtlas } from '../paintIntent';
 import {
   createSceneRenderBuffer,
   SOA_KIND_IMAGE,
@@ -54,40 +54,38 @@ describe('webglInstanceAtlas', () => {
     expect(region!.w).toBeGreaterThan(20);
   });
 
-  it('idleMediaNeedsSharpHost is backing-insufficient only (never DomHost gate)', () => {
+  it('backingInsufficientForAtlas is screen-edge vs atlas inner (never DomHost gate)', () => {
     expect(SOA_ATLAS_INNER).toBe(SOA_ATLAS_CELL - 4);
     expect(idleMediaScreenEdgePx(80, 60, 1, 1)).toBe(80);
-    expect(idleMediaNeedsSharpHost({ key: 'image', width: 80, height: 60 }, 1, 1)).toBe(false);
+    expect(backingInsufficientForAtlas({ key: 'image', width: 80, height: 60 }, 1, 1)).toBe(false);
     expect(
-      idleMediaNeedsSharpHost(
+      backingInsufficientForAtlas(
         { key: 'image', width: SOA_ATLAS_INNER + 40, height: 300 },
         1,
         1
       )
     ).toBe(true);
-    expect(idleMediaNeedsSharpHost({ key: 'image', width: 80, height: 60 }, 8, 1)).toBe(true);
-    // Empty generators: no longer force "sharp host" — restamp via zoomBucket.
+    expect(backingInsufficientForAtlas({ key: 'image', width: 80, height: 60 }, 8, 1)).toBe(true);
     expect(
-      idleMediaNeedsSharpHost(
-        { key: 'image', width: 40, height: 40, attrs: { imageGenerator: true } },
+      backingInsufficientForAtlas(
+        { key: 'image', width: 40, height: 40 },
         1,
         1
       )
     ).toBe(false);
     expect(
-      idleMediaNeedsSharpHost(
-        { key: 'audio', width: 200, height: 80, attrs: { audioGenerator: true } },
+      backingInsufficientForAtlas(
+        { key: 'audio', width: 200, height: 80 },
         1,
         1
       )
     ).toBe(false);
     expect(
-      idleMediaNeedsSharpHost(
+      backingInsufficientForAtlas(
         {
           key: 'image',
           width: SOA_ATLAS_INNER + 40,
           height: SOA_ATLAS_INNER + 40,
-          attrs: { src: 'https://example.com/a.png', imageGenerator: true },
         },
         1,
         1

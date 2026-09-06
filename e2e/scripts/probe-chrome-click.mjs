@@ -48,7 +48,7 @@ async function main() {
 
   const report = await page.evaluate(() => {
     const world = document.querySelector('[data-rcb-world]');
-    const chromeBox = document.querySelector('[data-rcb-sel-box]');
+    const chromeBox = document.querySelector('[data-sel-box]');
     const baseline = document.querySelector('[data-baseline="1"]');
     const node = document.querySelector('[data-scene-node-id]');
     const grid = document.querySelector('[data-rcb-scene-canvas]');
@@ -84,7 +84,7 @@ async function main() {
     await page.mouse.click(report.ink.l + report.ink.w / 2, report.ink.t + report.ink.h / 2);
     await page.waitForTimeout(400);
     afterClick = await page.evaluate(() => ({
-      selectedChrome: document.querySelectorAll('[data-rcb-sel-box]').length,
+      selectedChrome: document.querySelectorAll('[data-sel-box]').length,
       screenChrome: document.querySelectorAll('[data-rcb-screen-chrome]').length,
     }));
   }
@@ -93,14 +93,14 @@ async function main() {
   await page.mouse.click(box.x + 40, box.y + 40);
   await page.waitForTimeout(200);
   const afterDeselect = await page.evaluate(
-    () => document.querySelectorAll('[data-rcb-sel-box]').length
+    () => document.querySelectorAll('[data-sel-box]').length
   );
   if (report.ink) {
     await page.mouse.click(report.ink.l + report.ink.w / 2, report.ink.t + report.ink.h / 2);
     await page.waitForTimeout(400);
   }
   const afterReselect = await page.evaluate(
-    () => document.querySelectorAll('[data-rcb-sel-box]').length
+    () => document.querySelectorAll('[data-sel-box]').length
   );
 
   console.log(

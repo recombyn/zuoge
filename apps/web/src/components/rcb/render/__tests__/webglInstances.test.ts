@@ -12,10 +12,9 @@ import {
 } from '../sceneRenderBuffer';
 import {
   collectSoaWebglInstances,
-  soaPathPrefersAtlasStamp,
   SOA_WEBGL_NO_CLIP,
 } from '../webglSceneRenderer';
-import { createSoaWebglAtlas, SOA_ATLAS_SEG_THRESHOLD } from '../webglInstanceAtlas';
+import { createSoaWebglAtlas } from '../webglInstanceAtlas';
 
 describe('collectSoaWebglInstances', () => {
   it('packs rect and ellipse as vector meshes in view', () => {
@@ -324,14 +323,6 @@ describe('collectSoaWebglInstances', () => {
     });
     expect(kinds.length).toBe(0);
     expect(meshPos.length).toBeGreaterThanOrEqual(6);
-  });
-
-  it('prefers atlas stamp only for closed pens (open stays crisp segments)', () => {
-    // Historical helper: closed pens used to prefer atlas; open never did.
-    // Shape ink no longer stamps — helper remains for media/path policy checks.
-    expect(soaPathPrefersAtlasStamp(true, 3)).toBe(true);
-    expect(soaPathPrefersAtlasStamp(false, 3)).toBe(false);
-    expect(soaPathPrefersAtlasStamp(false, SOA_ATLAS_SEG_THRESHOLD)).toBe(false);
   });
 
   it('open pen stroke mesh uses strokeColors when fill colors is 0', () => {

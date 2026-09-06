@@ -108,8 +108,7 @@ export function resolveGpuDofBackendEnv(): GpuDofBackend | null {
   if (typeof import.meta === 'undefined') return null;
   const raw = String(import.meta.env?.VITE_GPU_DOF_BACKEND ?? '').toLowerCase();
   if (!raw) return null;
-  // Accept legacy `webgpu` as WebGL2 so old .env files keep working.
-  if (raw === 'webgl2' || raw === 'webgl' || raw === 'webgpu') return 'webgl2';
+  if (raw === 'webgl2' || raw === 'webgl') return 'webgl2';
   return null;
 }
 

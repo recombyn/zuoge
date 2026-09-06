@@ -653,24 +653,6 @@ function syncHostSelHandles(
   clearChromeHitPads(`sel-chrome:${o.id}`);
 }
 
-/**
- * Selection chrome hit pads are retired: SelectionFeature picks via
- * pickChromeHandleByGeometry. Keep this as a clear-only cleanup so leftover
- * overlay/world divs from older builds cannot steal clicks or clutter inspect.
- */
-function syncHostSelHitPads(
-  o: ShapeOutlineItem,
-  _camera?: RcbCamera,
-  _dpr?: number,
-  _bx?: number,
-  _by?: number,
-  _bw?: number,
-  _bh?: number,
-  _knobs?: Array<[string, number, number]>
-) {
-  clearChromeHitPads(`sel-chrome:${o.id}`);
-}
-
 /** Multi-select / frame AABB control box on the screen overlay. */
 function syncHostSelUnionChrome(
   o: ShapeOutlineItem,

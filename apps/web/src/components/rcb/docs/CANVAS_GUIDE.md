@@ -290,9 +290,7 @@ SOA_ATLAS_CELL / SOA_ATLAS_INNER
 atlasZoomBucket(zoom): number
 idleMediaScreenEdgePx(w, h, zoom, dpr)
 // 调整后语义：
-backingInsufficientForAtlas(node, zoom, dpr): boolean  // ★ 替代「升 host」
-// 过渡期别名（不再驱动 DomHost）：
-idleMediaNeedsSharpHost
+backingInsufficientForAtlas(node, zoom, dpr): boolean
 
 // Bake / 手势
 setSoaCameraGestureActive(active: boolean)

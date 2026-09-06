@@ -24,7 +24,6 @@ Skills are **playbooks** by default (LLM paint). With the ops runner enabled, `h
 | `skills/foundation/` | Shipped core craft (open) |
 | `skills/domains/` | Shipped surfaces / deliverables (open) |
 | `plugins/skills/` | Private deploy mount |
-| `apps/api/seeds/design_skills/` | Legacy empty shim (still scanned) |
 
 `.agents/skills/` is for Cursor/IDE agents only — **not** loaded by the Design Agent.
 
