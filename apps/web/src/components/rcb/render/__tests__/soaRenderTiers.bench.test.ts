@@ -699,17 +699,31 @@ describe('SoA render tier benches', () => {
         hostCanvasAtMotion: hostMotion.canvasIds.length,
       };
 
-      expect(dirtyStripePaintFrameMs).toBeLessThan(16);
-      expect(fullViewportPaintFrameMs).toBeLessThan(20);
-      expect(row.syncMs).toBeLessThan(1500);
-
       const outPath = resolve(__dirname, '../../../../../soa-mixed-10k.bench.json');
       writeFileSync(
         outPath,
-        JSON.stringify({ generatedAt: new Date().toISOString(), row }, null, 2)
+        JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            env: 'vitest+jsdom (SoA sync/cull/Canvas2D paint proxy)',
+            budgets: { dirtyStripePaintFrameMs: 16, fullViewportPaintFrameMs: 20 },
+            row,
+            pass: {
+              dirty: dirtyStripePaintFrameMs < 16,
+              fullViewport: fullViewportPaintFrameMs < 20,
+              sync: row.syncMs < 1500,
+            },
+          },
+          null,
+          2
+        )
       );
       // eslint-disable-next-line no-console
       console.log('\nSOA_MIXED_10K_BENCH\n', JSON.stringify({ row }, null, 2));
+
+      expect(dirtyStripePaintFrameMs).toBeLessThan(16);
+      expect(fullViewportPaintFrameMs).toBeLessThan(20);
+      expect(row.syncMs).toBeLessThan(1500);
     } finally {
       setSoaCanvasShapesEnabledForTests(null);
     }

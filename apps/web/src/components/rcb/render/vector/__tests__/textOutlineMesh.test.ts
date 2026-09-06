@@ -14,6 +14,7 @@ import { densifyPathDJs } from '@/components/rcb/render/vector/densifyPathDJs';
 import {
   clearTextOutlineMeshCache,
   setTextOutlineMeshForTests,
+  getTextOutlineMesh,
 } from '@/components/rcb/render/vector/textOutlineMesh';
 import { shapeInkForbidsAtlas } from '@/components/rcb/render/vector/inkBackend';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
@@ -87,5 +88,23 @@ describe('text outline mesh idle collect', () => {
     );
     expect(kinds.some((k) => k === 3)).toBe(false);
     expect(meshPos.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('keeps prior mesh visible when zoom LOD fingerprint changes (SWR)', () => {
+    const node = {
+      id: 't-swr',
+      key: 'text',
+      width: 80,
+      height: 40,
+      attrs: { text: 'Hi', fontSize: 20, fill: '#111' },
+    } as SceneNodeInput;
+    setTextOutlineMeshForTests(
+      't-swr',
+      node,
+      'M0 0H20V20H0Z',
+      { width: 80, height: 40, zoom: 1, dpr: 1 }
+    );
+    const stale = getTextOutlineMesh('t-swr', node, { width: 80, height: 40, zoom: 4, dpr: 1 });
+    expect(stale?.fill?.triangleCount ?? 0).toBeGreaterThan(0);
   });
 });

@@ -133,6 +133,10 @@ export function getOrBuildShapeMesh(
     const hole = ellipseHoleRing(paintNode, w, h, flat);
     if (hole) holes.push(hole);
   }
+  const fillRule =
+    String(paintNode.attrs?.['fill-rule'] || 'nonzero').toLowerCase() === 'evenodd'
+      ? 'evenodd'
+      : 'nonzero';
   const pencilSil = Boolean(contour.pencilSilhouette);
   const { fill, stroke } = buildShapeMeshes(contour.points, {
     closed: contour.closed,
@@ -142,6 +146,7 @@ export function getOrBuildShapeMesh(
     linejoin: resolveStrokeLinejoin(paintNode.attrs),
     miterLimit: resolveStrokeMiterlimit(paintNode.attrs),
     holes: holes.length ? holes : undefined,
+    fillRule,
   });
   const entry: CachedShapeMesh = { geomFp: fp, fill, stroke };
   cache.set(id, entry);

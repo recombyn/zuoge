@@ -1155,7 +1155,7 @@ describe('Canvas idle path / text / shape paint', () => {
         height: 24,
         opacity: 1,
       });
-      expect(ops).toContain('fill');
+      expect(ops.some((o) => o === 'fill' || o.startsWith('fill:'))).toBe(true);
       expect(ops).not.toContain('fillText');
     } finally {
       if (Prev) g.Path2D = Prev;
@@ -1497,12 +1497,13 @@ describe('Canvas idle path / text / shape paint', () => {
         attrs: { src: '', audioGenerator: true },
       } as SceneNodeInput)
     ).toBe(false);
+    // Empty image generator plates idle on atlas (zoomBucket restamp), not DomHost.
     expect(
       canIdlePaintOnCanvas({
         key: 'image',
         attrs: { src: '', imageGenerator: true },
       } as SceneNodeInput)
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canIdlePaintOnCanvas({
         key: 'audio',

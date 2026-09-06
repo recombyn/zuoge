@@ -72,6 +72,7 @@ import {
   adaptivePathStrokeMaxSegs,
   floorContentStrokeSceneWidth,
 } from '@/components/rcb/render/strokeScreenFloor';
+import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
 
 /** Scene-space LTRB when the slot has no clipContent owner (or reveal-overflow). */
 export const SOA_WEBGL_NO_CLIP: [number, number, number, number] = [-1e8, -1e8, 1e8, 1e8];
@@ -139,7 +140,8 @@ void main() {
   if (vKind > 2.5 && vKind < 3.5) {
     vec4 tex = texture(uAtlas, vAtlasUv);
     if (tex.a < 0.01) discard;
-    outColor = tex;
+    // Straight→premultiplied (canvas context uses premultipliedAlpha:true).
+    outColor = vec4(tex.rgb * tex.a, tex.a);
     return;
   }
   // Open stroke segment (line/arrow/pen): soft long-edge AA.
@@ -149,13 +151,15 @@ void main() {
     float aa = max(fwidth(d), 1e-4);
     float cover = 1.0 - smoothstep(1.0 - aa, 1.0, d);
     if (cover < 0.01) discard;
-    outColor = vec4(vColor.rgb, vColor.a * cover);
+    float a = vColor.a * cover;
+    outColor = vec4(vColor.rgb * a, a);
     return;
   }
   if (vKind > 0.5 && vKind < 1.5) {
     if (dot(vUv, vUv) > 1.0) discard;
   }
-  outColor = vColor;
+  // Premultiply solid/ellipse ink so layer opacity composites correctly.
+  outColor = vec4(vColor.rgb * vColor.a, vColor.a);
 }`;
 
 /** World-space triangle mesh program (vector fill/stroke). */
@@ -192,7 +196,8 @@ void main() {
   if (vWorld.x < vClip.x || vWorld.y < vClip.y || vWorld.x > vClip.z || vWorld.y > vClip.w) {
     discard;
   }
-  outColor = vColor;
+  // Premultiply — matches premultipliedAlpha:true + ONE / ONE_MINUS_SRC_ALPHA.
+  outColor = vec4(vColor.rgb * vColor.a, vColor.a);
 }`;
 
 const VS = SOA_WEBGL_INK_VS;
@@ -793,7 +798,7 @@ export function collectSoaWebglInstances(
         dpr: Math.max(1, Number(opts?.dpr) || 1),
       });
       if (textMesh?.fill && meshPos && meshCol && meshClip) {
-        const opacity = Math.min(1, Math.max(0, Number(paintNode.attrs?.opacity) || 1));
+        const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1);
         const fillRgba: [number, number, number, number] = [
           rgba[0],
           rgba[1],
@@ -855,7 +860,7 @@ export function collectSoaWebglInstances(
           dpr: Math.max(1, Number(opts?.dpr) || 1),
         });
         if (mesh) {
-          const opacity = Math.min(1, Math.max(0, Number(paintNode.attrs?.opacity) || 1));
+          const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1);
           const isPencil =
             String(paintNode.attrs?.shapeType || '').toLowerCase() === 'pencil';
           const fillRgba: [number, number, number, number] = [
@@ -929,9 +934,12 @@ export function collectSoaWebglInstances(
         if (Number.isFinite(liveAngle) && Math.abs(Number(liveAngle)) > 0.5) {
           rotRad = (Number(liveAngle) * Math.PI) / 180;
         }
+        const node = paintDoc?.deltaSetLike?.[id];
+        const opacity = parseLayerOpacity(node?.attrs?.opacity, 1);
+        const a = rgba[3] * opacity;
         for (const activeClip of paintClips) {
           rects.push(x, y, w, h);
-          colors.push(rgba[0], rgba[1], rgba[2], rgba[3]);
+          colors.push(rgba[0], rgba[1], rgba[2], a);
           kinds.push(kind === SOA_KIND_ELLIPSE ? 1 : 0);
           angles.push(rotRad);
           uvs.push(0, 0, 1, 1);
@@ -1355,7 +1363,8 @@ export function createWebglSceneRenderer(
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      // Premultiplied fragment output (see SOA_WEBGL_*_FS).
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
       const z = rcbCameraCssZoom(req.camera);
       const pan = rcbCameraScreenOffset(req.camera, dpr);

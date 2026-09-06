@@ -1,0 +1,186 @@
+/**
+ * Browser Canvas2D paint FPS probe — approximates SoA idle ink cost for
+ * homogeneous shape batches (not full RCB WebGL). Open via Vite or file://.
+ */
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>RCB browser stress probe</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        margin: 16px;
+        background: #f4f4f5;
+        color: #18181b;
+      }
+      canvas {
+        background: #fff;
+        border: 1px solid #d4d4d8;
+        display: block;
+        margin: 12px 0;
+      }
+      pre {
+        background: #18181b;
+        color: #e4e4e7;
+        padding: 12px;
+        overflow: auto;
+        font-size: 12px;
+      }
+      button {
+        margin-right: 8px;
+        padding: 6px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>RCB browser paint probe</h1>
+    <p>Measures Canvas2D fill/stroke of N shapes in a 960×640 viewport (cull ~same as product).</p>
+    <div>
+      <button id="run">Run matrix</button>
+      <span id="status">idle</span>
+    </div>
+    <canvas id="c" width="960" height="640"></canvas>
+    <pre id="out">Click Run matrix…</pre>
+    <script type="module">
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const status = document.getElementById('status');
+      const out = document.getElementById('out');
+
+      function makeShapes(n, kind) {
+        const cols = Math.ceil(Math.sqrt(n));
+        const shapes = [];
+        for (let i = 0; i < n; i++) {
+          const x = (i % cols) * 28;
+          const y = Math.floor(i / cols) * 28;
+          if (kind === 'ellipse') {
+            shapes.push({ kind, x: x + 12, y: y + 12, rx: 10, ry: 8 });
+          } else if (kind === 'polygon') {
+            const pts = [];
+            for (let k = 0; k < 6; k++) {
+              const a = (k / 6) * Math.PI * 2 - Math.PI / 2;
+              pts.push([x + 12 + Math.cos(a) * 10, y + 12 + Math.sin(a) * 10]);
+            }
+            shapes.push({ kind, pts });
+          } else {
+            shapes.push({ kind: 'rect', x, y, w: 20, h: 16, stroke: kind === 'strokedRect' });
+          }
+        }
+        return shapes;
+      }
+
+      function paint(shapes, view) {
+        ctx.fillStyle = '#fafafa';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        let drawn = 0;
+        for (const s of shapes) {
+          let minX, minY, maxX, maxY;
+          if (s.kind === 'rect') {
+            minX = s.x;
+            minY = s.y;
+            maxX = s.x + s.w;
+            maxY = s.y + s.h;
+          } else if (s.kind === 'ellipse') {
+            minX = s.x - s.rx;
+            minY = s.y - s.ry;
+            maxX = s.x + s.rx;
+            maxY = s.y + s.ry;
+          } else {
+            minX = Infinity;
+            minY = Infinity;
+            maxX = -Infinity;
+            maxY = -Infinity;
+            for (const [px, py] of s.pts) {
+              if (px < minX) minX = px;
+              if (py < minY) minY = py;
+              if (px > maxX) maxX = px;
+              if (py > maxY) maxY = py;
+            }
+          }
+          if (maxX < view.minX || maxY < view.minY || minX > view.maxX || minY > view.maxY) continue;
+          drawn++;
+          ctx.beginPath();
+          if (s.kind === 'rect') {
+            ctx.rect(s.x, s.y, s.w, s.h);
+          } else if (s.kind === 'ellipse') {
+            ctx.ellipse(s.x, s.y, s.rx, s.ry, 0, 0, Math.PI * 2);
+          } else {
+            ctx.moveTo(s.pts[0][0], s.pts[0][1]);
+            for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i][0], s.pts[i][1]);
+            ctx.closePath();
+          }
+          ctx.fillStyle = '#fff';
+          ctx.fill();
+          if (s.stroke || s.kind !== 'rect') {
+            ctx.strokeStyle = '#111';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+        return drawn;
+      }
+
+      async function bench(kind, n, frames = 40) {
+        const shapes = makeShapes(n, kind);
+        const view = { minX: 0, minY: 0, maxX: 960, maxY: 640 };
+        // warmup
+        paint(shapes, view);
+        const t0 = performance.now();
+        let drawn = 0;
+        for (let f = 0; f < frames; f++) {
+          const pan = f * 24;
+          drawn = paint(shapes, {
+            minX: pan,
+            minY: pan * 0.4,
+            maxX: pan + 960,
+            maxY: pan * 0.4 + 640,
+          });
+        }
+        const ms = performance.now() - t0;
+        return {
+          kind,
+          n,
+          frames,
+          frameMs: Math.round((ms / frames) * 100) / 100,
+          fps: Math.round((1000 / (ms / frames)) * 10) / 10,
+          drawnAvg: drawn,
+        };
+      }
+
+      document.getElementById('run').onclick = async () => {
+        status.textContent = 'running…';
+        const rows = [];
+        const matrix = [
+          ['rect', 1000],
+          ['rect', 5000],
+          ['rect', 10000],
+          ['strokedRect', 1000],
+          ['strokedRect', 5000],
+          ['strokedRect', 10000],
+          ['ellipse', 1000],
+          ['ellipse', 5000],
+          ['ellipse', 10000],
+          ['polygon', 1000],
+          ['polygon', 5000],
+          ['polygon', 10000],
+        ];
+        for (const [kind, n] of matrix) {
+          status.textContent = `${kind} × ${n}`;
+          await new Promise((r) => requestAnimationFrame(r));
+          rows.push(await bench(kind, n));
+        }
+        const report = {
+          generatedAt: new Date().toISOString(),
+          ua: navigator.userAgent,
+          dpr: devicePixelRatio,
+          note: 'Browser Canvas2D homogeneous paint + viewport cull (proxy for SoA idle ink).',
+          rows,
+        };
+        out.textContent = JSON.stringify(report, null, 2);
+        status.textContent = 'done — copy JSON below';
+        window.__RCB_BROWSER_STRESS__ = report;
+      };
+    </script>
+  </body>
+</html>

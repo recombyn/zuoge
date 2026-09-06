@@ -70,7 +70,7 @@ import { serializeFillGradient, serializeFillImageAttrs } from '@/components/rcb
 import { createMeshGrid, type MeshSize } from '@/components/rcb/scene/document/sceneDiffuseMesh';
 import { isStrokeStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
 import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
+import { sceneToDocumentCoords, storedOriginForSceneResult } from '@/components/rcb/scene/paint/svgToScene';
 import { resolveBooleanResultFrameId } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
 import {
   tagCreatedNodeForWorkbenchSurround,
@@ -3620,13 +3620,14 @@ function execBooleanOp(
     const operandFrameIds = boxes
       .map((b) => String(doc?.deltaSetLike?.[b.id]?.attrs?.frameId || '').trim())
       .filter(Boolean);
-    const origin = sceneToDocumentCoords(doc, result.x, result.y);
+    const abs = sceneToDocumentCoords(doc, result.x, result.y);
     const frameId = resolveBooleanResultFrameId(
       doc,
       operandFrameIds,
-      origin.x + result.width / 2,
-      origin.y + result.height / 2
+      abs.x + result.width / 2,
+      abs.y + result.height / 2
     );
+    const origin = storedOriginForSceneResult(doc, result.x, result.y, frameId);
     const { id, node } = createShapeNode({
       x: origin.x,
       y: origin.y,

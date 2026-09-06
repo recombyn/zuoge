@@ -1,0 +1,20 @@
+﻿{
+  "generatedAt": "2026-09-06T03:33:46.053Z",
+  "ua": "Cursor/Electron Chromium",
+  "dpr": 1,
+  "note": "Browser Canvas2D homogeneous paint + viewport cull (proxy for SoA idle ink).",
+  "rows": [
+    {"kind":"rect","n":1000,"frameMs":1.36,"fps":732.6,"drawnAvg":0},
+    {"kind":"rect","n":5000,"frameMs":0.37,"fps":2739.7,"drawnAvg":840},
+    {"kind":"rect","n":10000,"frameMs":0.41,"fps":2454,"drawnAvg":840},
+    {"kind":"strokedRect","n":1000,"frameMs":1.08,"fps":928.1,"drawnAvg":0},
+    {"kind":"strokedRect","n":5000,"frameMs":1.25,"fps":796.8,"drawnAvg":840},
+    {"kind":"strokedRect","n":10000,"frameMs":1.43,"fps":696.9,"drawnAvg":840},
+    {"kind":"ellipse","n":1000,"frameMs":2.16,"fps":463.5,"drawnAvg":0},
+    {"kind":"ellipse","n":5000,"frameMs":2.69,"fps":371.7,"drawnAvg":840},
+    {"kind":"ellipse","n":10000,"frameMs":3.43,"fps":291.1,"drawnAvg":840},
+    {"kind":"polygon","n":1000,"frameMs":1.85,"fps":540.5,"drawnAvg":0},
+    {"kind":"polygon","n":5000,"frameMs":2.35,"fps":426.4,"drawnAvg":840},
+    {"kind":"polygon","n":10000,"frameMs":2.8,"fps":357.1,"drawnAvg":840}
+  ]
+}

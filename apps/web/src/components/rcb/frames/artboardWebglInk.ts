@@ -294,7 +294,7 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
   setSoaPaintDocument(args.document);
   const buf = getSharedSceneRenderBuffer();

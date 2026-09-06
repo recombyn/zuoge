@@ -274,19 +274,7 @@ export function tessellateFillWithHolesWasm(
   holes: Vec2[][]
 ): FillMesh | null {
   const t0 = geomNow();
-  let mesh: FillMesh | null;
-  if (wasmLive() && outer.length >= 3) {
-    const packed = packHoles(holes);
-    mesh = meshFromFlat(
-      api!.tessellate_fill_with_holes(
-        pointsToFlat(outer),
-        packed.flat,
-        packed.counts
-      )
-    );
-  } else {
-    mesh = tessellateFillWithHolesJs(outer, holes);
-  }
+  const mesh = fillMeshFor(outer, holes);
   recordOp('fill', t0, outer.length, mesh?.triangleCount ?? 0, 0);
   return mesh;
 }
@@ -321,20 +309,19 @@ function fillMeshFor(
   holes: Vec2[][] | undefined
 ): FillMesh | null {
   const hasHoles = Boolean(holes?.length);
-  if (wasmLive()) {
-    if (hasHoles) {
-      const packed = packHoles(holes!);
-      return meshFromFlat(
-        api!.tessellate_fill_with_holes(
-          pointsToFlat(points),
-          packed.flat,
-          packed.counts
-        )
-      );
-    }
-    return meshFromFlat(api!.tessellate_fill(pointsToFlat(points)));
-  }
+  // WASM keyhole bridge + ear-clip returns 0 tris for donuts (boolean subtract,
+  // ellipse inner ratio). Always use the JS slit/boolean path for holes.
   if (hasHoles) return tessellateFillWithHolesJs(points, holes!);
+
+  if (wasmLive()) {
+    try {
+      const mesh = meshFromFlat(api!.tessellate_fill(pointsToFlat(points)));
+      if (mesh && mesh.triangleCount > 0) return mesh;
+      return mesh;
+    } catch {
+      /* fall through to JS */
+    }
+  }
   return tessellateFillJs(points);
 }
 
@@ -510,6 +497,8 @@ export function buildShapeMeshes(
     linejoin?: 'miter' | 'round' | 'bevel';
     miterLimit?: number;
     holes?: Vec2[][];
+    /** Boolean compound paths — nest subpaths when evenodd/nonzero multi-M. */
+    fillRule?: 'nonzero' | 'evenodd';
   }
 ): { fill: FillMesh | null; stroke: StrokeMesh | null } {
   const t0 = geomNow();
@@ -523,8 +512,19 @@ export function buildShapeMeshes(
 
   if (opts.wantFill && opts.closed && primary.length >= 3) {
     const a = geomNow();
-    // Fill uses the first contour; holes come from opts (ellipse donut).
-    fill = fillMeshFor(primary, opts.holes);
+    if (opts.holes?.length) {
+      // Explicit holes (ellipse donut attrs).
+      fill = fillMeshFor(primary, opts.holes);
+    } else if (runs.length > 1) {
+      // Boolean subtract / compound path: nest subpaths → outer+holes.
+      // (Previously only the first M-run was filled → solid plate, no hollow.)
+      fill = buildCompoundFillMeshes(
+        points,
+        opts.fillRule === 'nonzero' ? 'nonzero' : 'evenodd'
+      );
+    } else {
+      fill = fillMeshFor(primary, undefined);
+    }
     tFill = geomNow() - a;
   }
   if (opts.strokeWidth > 0) {

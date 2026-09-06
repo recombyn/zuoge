@@ -142,12 +142,73 @@ function appendMeshPositions(dst: number[], mesh: FillMesh): void {
 }
 
 /**
- * Outer + holes → difference → ear-clip.
+ * Cut a hairline channel from outside the AABB into the hole so the donut
+ * becomes a single simple ring (ear-clip safe). Avoids zero-area keyhole bridges.
+ */
+function openHoleWithSlit(
+  poly: Array<Array<[number, number]>>
+): Array<Array<Array<[number, number]>>> {
+  if (poly.length < 2) return [poly];
+  const outer = poly[0]!;
+  const hole = poly[1]!;
+  if (!outer?.length || !hole?.length) return [poly];
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of outer) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  let hx = 0;
+  let hy = 0;
+  for (const [x, y] of hole) {
+    hx += x;
+    hy += y;
+  }
+  hx /= hole.length;
+  hy /= hole.length;
+
+  // Find hole point closest to the left exterior (short horizontal slit).
+  let best = hole[0]!;
+  let bestD = Infinity;
+  for (const p of hole) {
+    const d = (p[0]! - minX) * (p[0]! - minX) + (p[1]! - hy) * (p[1]! - hy);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  const span = Math.max(1, maxX - minX, maxY - minY);
+  const eps = Math.max(1e-3, span * 1e-5);
+  const x0 = minX - Math.max(1, span * 0.02);
+  const slit: Array<Array<[number, number]>> = [
+    [
+      [x0, best[1]! - eps],
+      [best[0]! + eps, best[1]! - eps],
+      [best[0]! + eps, best[1]! + eps],
+      [x0, best[1]! + eps],
+      [x0, best[1]! - eps],
+    ],
+  ];
+  try {
+    const opened = polygonClipping.difference([poly], [slit]);
+    if (opened?.length) return opened;
+  } catch {
+    /* fall through */
+  }
+  return [poly];
+}
+
+/**
+ * Outer + holes → difference → open slits with a slit → ear-clip.
  */
 export function tessellateFillWithHoles(
   outer: Vec2[],
-  holes: Vec2[][],
-  depth = 0
+  holes: Vec2[][]
 ): FillMesh | null {
   const outerRing = cleanRing(outer);
   if (outerRing.length < 3) return null;
@@ -158,33 +219,48 @@ export function tessellateFillWithHoles(
     const h = cleanRing(hole);
     if (h.length < 3) continue;
     const clipHole: Array<Array<[number, number]>> = [toClosedRing(h)];
-    // WASM fold is pairwise on polygons — only safe when subject is one polygon.
+    // polygon-clipping is the reliable hole path. WASM boolean can return an
+    // empty multipolygon on dense glyph rings → skeletal / blank text fills.
     let next: typeof geom | null = null;
-    if (geom.length === 1 && geom[0]) {
-      next = booleanPolygonsWasm('difference', [geom[0], clipHole]);
+    try {
+      next = polygonClipping.difference(geom, [clipHole]);
+    } catch {
+      next = null;
     }
-    if (next != null) {
-      geom = next;
-    } else {
-      geom = polygonClipping.difference(geom, [clipHole]);
+    if (next == null || next.length === 0) {
+      // Last resort: WASM fold (pairwise only).
+      if (geom.length === 1 && geom[0]) {
+        const wasmNext = booleanPolygonsWasm('difference', [geom[0], clipHole]);
+        if (wasmNext != null && wasmNext.length > 0) next = wasmNext;
+      }
     }
+    if (next != null && next.length > 0) geom = next;
+  }
+
+  // Turn leftover hole rings into simple C-rings before ear-clip.
+  const opened: typeof geom = [];
+  for (const poly of geom) {
+    if (poly.length > 1) opened.push(...openHoleWithSlit(poly));
+    else opened.push(poly);
   }
 
   const tris: number[] = [];
-  for (const poly of geom) {
+  for (const poly of opened) {
     if (!poly.length) continue;
-    const outerPts = poly[0]!.slice(0, -1).map(([x, y]) => ({ x, y }));
-    const holePts = poly
-      .slice(1)
-      .map((ring) => ring.slice(0, -1).map(([x, y]) => ({ x, y })))
-      .filter((r) => r.length >= 3);
-
-    let mesh: FillMesh | null;
-    if (holePts.length > 0 && depth < 2) {
-      mesh = tessellateFillWithHoles(outerPts, holePts, depth + 1);
-    } else {
-      mesh = tessellateFill(outerPts);
+    // Prefer the outer ring; if a slit left nested rings, keep differencing via slit
+    // until a single ring remains (cap iterations).
+    let rings = poly;
+    let guard = 4;
+    while (rings.length > 1 && guard-- > 0) {
+      const next = openHoleWithSlit(rings);
+      rings = next[0] ?? rings.slice(0, 1);
+      if (next.length > 1) {
+        // Extra islands — tessellate separately below by flattening.
+        for (let i = 1; i < next.length; i += 1) opened.push(next[i]!);
+      }
     }
+    const outerPts = rings[0]!.slice(0, -1).map(([x, y]) => ({ x, y }));
+    const mesh = tessellateFill(outerPts);
     if (mesh) appendMeshPositions(tris, mesh);
   }
   return meshFromTris(tris);
