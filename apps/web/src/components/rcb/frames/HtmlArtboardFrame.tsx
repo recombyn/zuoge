@@ -8,8 +8,8 @@ import {
   memo,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { useRcbCamera } from '../camera/context';
-import { rcbCameraCssZoom } from '../core/math';
+import { useRcbCamera, useRcbViewportEl } from '../camera/context';
+import { rcbCameraCssZoom, rcbViewportSceneBounds } from '../core/math';
 import { createSvgBoard } from '@/components/rcb/scene/paint/sceneToSvg';
 import { append, setAttrs, setFill, setStroke, svgEl } from '@/components/rcb/scene/paint/svgDom';
 import {
@@ -269,7 +269,8 @@ function paintFramePlate(
   selected: boolean,
   highlighted: boolean,
   generating: boolean,
-  zoom: number
+  zoom: number,
+  getViewScene?: () => { left: number; top: number; width: number; height: number } | null
 ): SVGGElement {
   const prevPlate = layer.querySelector<SVGGElement>(':scope > g[data-rcb-frame-plate="1"]');
   const prevHost = prevPlate as PlateInkHost | null;
@@ -308,7 +309,7 @@ function paintFramePlate(
     return g;
   }
 
-  mountArtboardInk(g, frame, w, h, selected, highlighted, zoom);
+  mountArtboardInk(g, frame, w, h, selected, highlighted, zoom, getViewScene);
   return g;
 }
 
@@ -341,7 +342,8 @@ function mountArtboardInk(
   h: number,
   selected: boolean,
   highlighted: boolean,
-  zoom: number
+  zoom: number,
+  getViewScene?: () => { left: number; top: number; width: number; height: number } | null
 ): void {
   // SVG fill owns the plate silhouette so selection chrome AABB matches pixels
   // (Canvas FO fill under CSS scale could bleed past the blue box by ~1px).
@@ -378,9 +380,13 @@ function mountArtboardInk(
   const canvas = document.createElement('canvas');
   canvas.setAttribute('data-rcb-artboard-ink-canvas', frame.id);
   canvas.style.display = 'block';
+  canvas.style.position = 'absolute';
+  canvas.style.left = '0';
+  canvas.style.top = '0';
   canvas.style.width = `${w}px`;
   canvas.style.height = `${h}px`;
   // Do not force pixelated — AA strokes + nearest-neighbor looked soft inside plates.
+  fo.style.position = 'relative';
   fo.appendChild(canvas);
 
   g.__artboardInkCanvas = canvas;
@@ -392,6 +398,7 @@ function mountArtboardInk(
     zoom,
     getFrame: () => inkPaintFrameFrom(frame),
     getDocument: () => getSceneCanvasIdlePaint()?.document ?? getSoaPaintDocument() ?? null,
+    getViewScene,
   });
 
   const plate = svgEl('rect', {
@@ -434,9 +441,25 @@ function HtmlArtboardFrame({
   aiProcessLabel,
 }: HtmlArtboardFrameProps): ReactNode {
   const camera = useRcbCamera();
+  const viewportEl = useRcbViewportEl();
   const z = rcbCameraCssZoom(camera);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<SVGGElement | null>(null);
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
+  const viewportElRef = useRef(viewportEl);
+  viewportElRef.current = viewportEl;
+
+  function readInkViewScene() {
+    const el = viewportElRef.current;
+    const cam = cameraRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const sw = Math.max(1, rect.width);
+    const sh = Math.max(1, rect.height);
+    const b = rcbViewportSceneBounds(cam, { width: sw, height: sh });
+    return { left: b.x, top: b.y, width: b.width, height: b.height };
+  }
   const generating = Boolean(aiGenerating);
   const processLabel = String(aiProcessLabel || 'Preparing…');
   // Remount into shared world SVG when it appears (same as RcbShapeHost).
@@ -475,7 +498,15 @@ function HtmlArtboardFrame({
     sceneLayer.setAttribute('data-rcb-frame-layer', frame.id);
     sceneLayer.setAttribute('data-z', String(zIndex));
     const paintFrame = { ...frame, ...resolvePaintFrameGeometry(frame) };
-    const el = paintFramePlate(sceneLayer, paintFrame, selected, highlighted, generating, z);
+    const el = paintFramePlate(
+      sceneLayer,
+      paintFrame,
+      selected,
+      highlighted,
+      generating,
+      z,
+      readInkViewScene
+    );
     registerShapeHost({ nodeId: frame.id, root, layer: sceneLayer, el, kind: 'svg' });
     updateShapeHostElement(frame.id, el);
 
@@ -523,11 +554,24 @@ function HtmlArtboardFrame({
     // makes bound content look like it is sliding inside the plate.
     const live = getLiveArtboardFrameGeometry(frame.id);
     if (live) {
-      updateArtboardInkChrome(frame.id, { selected, highlighted, zoom: z });
+      updateArtboardInkChrome(frame.id, {
+        selected,
+        highlighted,
+        zoom: z,
+        getViewScene: readInkViewScene,
+      });
       return;
     }
     const paintFrame = { ...frame, ...resolvePaintFrameGeometry(frame) };
-    const el = paintFramePlate(sceneLayer, paintFrame, selected, highlighted, generating, z);
+    const el = paintFramePlate(
+      sceneLayer,
+      paintFrame,
+      selected,
+      highlighted,
+      generating,
+      z,
+      readInkViewScene
+    );
     // Avoid bumpHostEpoch on every parent render when only the frame object
     // identity changed (SelectionFeature hostEpoch would thrash).
     const prev = getShapeHost(frame.id)?.el;

@@ -30,6 +30,41 @@ describe('SoaQuadtree', () => {
     expect(tree.searchPoint(105, 105).map((x) => x.id)).toEqual(['b']);
   });
 
+  it('bulkUpsert restamps without compact until dirty threshold', () => {
+    const tree = new SoaQuadtree({ maxItems: 8 });
+    tree.upsert({ id: 'seed', minX: 0, minY: 0, maxX: 10, maxY: 10 });
+    const items = [];
+    for (let i = 0; i < 40; i += 1) {
+      items.push({
+        id: `p${i}`,
+        minX: i * 20,
+        minY: 0,
+        maxX: i * 20 + 10,
+        maxY: 10,
+      });
+    }
+    tree.bulkUpsert(items, 512);
+    expect(tree.dirtySize).toBe(40);
+    expect(tree.search(0, 0, 15, 15).map((x) => x.id).sort()).toEqual(
+      expect.arrayContaining(['p0', 'seed'])
+    );
+    // Moved dirty id: tree still has old leaf; search must use byId AABB.
+    tree.restamp({ id: 'seed', minX: 1000, minY: 1000, maxX: 1010, maxY: 1010 });
+    expect(tree.search(0, 0, 15, 15).map((x) => x.id)).not.toContain('seed');
+    expect(tree.search(995, 995, 1015, 1015).map((x) => x.id)).toContain('seed');
+    tree.bulkUpsert(
+      Array.from({ length: 512 }, (_, i) => ({
+        id: `storm${i}`,
+        minX: i,
+        minY: 100,
+        maxX: i + 1,
+        maxY: 101,
+      })),
+      512
+    );
+    expect(tree.dirtySize).toBe(0);
+  });
+
   it('upsert replaces bounds without duplicate ids', () => {
     const tree = new SoaQuadtree({ maxItems: 4 });
     tree.upsert({ id: 'a', minX: 0, minY: 0, maxX: 10, maxY: 10 });

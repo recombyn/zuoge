@@ -1,13 +1,14 @@
 /**
  * Shared geometry fingerprint for Path2D cache + WebGL meshCache.
- * Zoom/dpr must NOT appear — vector caches are resolution-independent.
+ * Includes densify LOD bucket so zoom-driven remesh invalidates correctly.
  */
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
 import { getPencilBrushPaintRev } from '@/components/rcb/tools/pencilBrushes';
+import { densifyLodBucket } from '@/components/rcb/render/vector/densifyPathDJs';
 
 export function shapeGeomFingerprint(
   node: SceneNodeInput | null | undefined,
-  opts?: { width?: number; height?: number }
+  opts?: { width?: number; height?: number; zoom?: number; dpr?: number; lodBucket?: number }
 ): string {
   if (!node) return '';
   const attrs = node.attrs || {};
@@ -15,9 +16,14 @@ export function shapeGeomFingerprint(
   const h = Math.max(1, Number(opts?.height ?? node.height) || 1);
   const key = String(node.key || '');
   const t = String(attrs.shapeType || (key === 'shape' ? 'rect' : key) || '');
+  const lod =
+    opts?.lodBucket != null
+      ? Number(opts.lodBucket)
+      : densifyLodBucket(opts?.zoom ?? 1, opts?.dpr ?? 1);
   const parts = [
     'strokeTess:v4',
-    'densify:v3',
+    'densify:v4',
+    `flat:${lod}`,
     'pencilSil:v1',
     key,
     t,

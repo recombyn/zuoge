@@ -81,6 +81,7 @@ import { DEFAULT_GRID_SIZE, shouldShowPixelGrid } from '../selection/alignGuides
 import { textFrameBlocksBrowserZoom, wheelShouldStayLocal } from './wheelScrollOwners';
 import { tryConsumeLottieTimelineSpace } from '@/components/editor/nodes/AnimationNode/animationTimelineHotkeys';
 import { markInteractionPerf } from '@/components/editor/sceneEvents';
+import { ensureRcbPaintDebugInstalled } from '@/components/rcb/render/paintDebug';
 
 const EMPTY_SCENE_DOC: SceneDocument = {
   deltaSetLike: {
@@ -274,6 +275,10 @@ function RcbCanvas({
       if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
       setSoaCameraGestureActive(false);
     };
+  }, []);
+
+  useEffect(() => {
+    ensureRcbPaintDebugInstalled();
   }, []);
 
   const cameraMotion = useMemo(

@@ -81,9 +81,11 @@ export function atlasCoverageBucket(
 
 /**
  * Idle image/video/audio stamps into a fixed atlas cell. When the on-screen
- * edge exceeds that cell, the stamp looks soft — promote to a DOM host.
+ * edge exceeds that cell, backing is insufficient — callers must restamp /
+ * raise texels (never DomHost-for-blur).
  *
- * Empty generators always promote (crisp center glyph; few plates).
+ * @deprecated Prefer {@link backingInsufficientForAtlas} from paintIntent.
+ * Kept as a thin alias for transitional call sites / tests.
  */
 export function idleMediaNeedsSharpHost(
   node:
@@ -101,30 +103,15 @@ export function idleMediaNeedsSharpHost(
   if (!node) return false;
   const key = String(node.key || '');
   if (key !== 'image' && key !== 'video' && key !== 'audio') return false;
-  const attrs = node.attrs || {};
-  const screenEdge = idleMediaScreenEdgePx(
-    Number(node.width) || 1,
-    Number(node.height) || 1,
-    zoom,
-    dpr
+  // Empty generators no longer force "sharp host" — restamp via zoomBucket.
+  return (
+    idleMediaScreenEdgePx(
+      Number(node.width) || 1,
+      Number(node.height) || 1,
+      zoom,
+      dpr
+    ) > SOA_ATLAS_INNER
   );
-  const isGen =
-    attrs.imageGenerator === true ||
-    String(attrs.imageGenerator || '') === 'true' ||
-    attrs.videoGenerator === true ||
-    String(attrs.videoGenerator || '') === 'true' ||
-    attrs.audioGenerator === true ||
-    String(attrs.audioGenerator || '') === 'true' ||
-    attrs.lottieGenerator === true ||
-    String(attrs.lottieGenerator || '') === 'true';
-  const src = String(
-    (key === 'video' ? attrs.poster : null) || attrs.src || ''
-  ).trim();
-
-  // Empty generator plates — never atlas-upscale the center icon.
-  if (isGen && (key === 'audio' || !src)) return true;
-
-  return screenEdge > SOA_ATLAS_INNER;
 }
 
 export type SoaAtlasRegion = {

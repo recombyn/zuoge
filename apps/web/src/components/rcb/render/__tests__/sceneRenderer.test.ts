@@ -49,7 +49,7 @@ import { PIXEL_GRID_MIN_ZOOM } from '@/components/rcb/selection/alignGuides';
 import {
   setFrameClipRevealOverflowIds,
   setSelectionPaintRaiseIds,
-} from '@/components/rcb/frames/frameContentClip';
+} from '@/components/rcb/selection/selectionPaintRaise';
 import {
   createSceneRenderBuffer,
   getSharedSceneRenderBuffer,

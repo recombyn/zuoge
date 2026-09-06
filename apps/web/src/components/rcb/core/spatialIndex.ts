@@ -439,7 +439,7 @@ export class SceneSpatialRuntime {
         // Grow-only paste: restamp into byId + dirty set. Full bulkUpsert/rebuild
         // of 2k+ overlapping paste stacks dominated paste #2+ (seconds).
         for (const item of added) this.index.restamp(item);
-        if (this.index.dirtySize > 512) this.index.compact();
+        if (this.index.dirtySize >= 512) this.index.compact();
       }
       // Adds already stamped AABBs — skip patchNodes for ids we just inserted.
       const geomOnly = patched.filter((id) => {
@@ -502,7 +502,10 @@ export class SceneSpatialRuntime {
       else upserts.push({ id, ...box });
     }
     if (upserts.length === 1) this.index.upsert(upserts[0]!);
-    else if (upserts.length > 1) this.index.bulkUpsert(upserts);
+    else if (upserts.length > 1) {
+      for (const item of upserts) this.index.restamp(item);
+      if (this.index.dirtySize >= 512) this.index.compact();
+    }
   }
 
   /** Bottom→top ids intersecting rect (rank-sorted). Nodes only — frames excluded. */

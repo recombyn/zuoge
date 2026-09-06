@@ -10,6 +10,7 @@ import type { StrokeMesh } from '@/components/rcb/render/vector/tessellateStroke
 import { buildShapeMeshes } from '@/components/rcb/render/vector/wasmGeom';
 import type { Vec2 } from '@/components/rcb/render/vector/contour';
 import { ellipseInnerRatioFromAttrs } from '@/components/rcb/scene/document/sceneShapes';
+import { sceneFlatness } from '@/components/rcb/render/vector/densifyPathDJs';
 import {
   resolveStrokeLinejoin,
   resolveStrokeMiterlimit,
@@ -79,7 +80,8 @@ function nodeWantsSolidFill(node: SceneNodeInput): boolean {
 function ellipseHoleRing(
   node: SceneNodeInput,
   w: number,
-  h: number
+  h: number,
+  flatness: number
 ): Vec2[] | null {
   const ratio = ellipseInnerRatioFromAttrs(node.attrs);
   if (!(ratio > 1e-4)) return null;
@@ -88,7 +90,7 @@ function ellipseHoleRing(
   const rx = Math.max(0.5, (w / 2) * (1 - ratio));
   const ry = Math.max(0.5, (h / 2) * (1 - ratio));
   if (rx < 0.5 || ry < 0.5) return null;
-  const steps = Math.max(64, Math.min(256, Math.ceil(Math.PI * (rx + ry) / 0.4)));
+  const steps = Math.max(64, Math.min(1024, Math.ceil((Math.PI * (rx + ry)) / Math.max(0.05, flatness))));
   const pts: Vec2[] = [];
   for (let i = 0; i < steps; i += 1) {
     const t = (i / steps) * Math.PI * 2;
@@ -101,12 +103,10 @@ function ellipseHoleRing(
 export function getOrBuildShapeMesh(
   nodeId: string,
   node: SceneNodeInput,
-  opts?: { width?: number; height?: number }
+  opts?: { width?: number; height?: number; zoom?: number; dpr?: number }
 ): CachedShapeMesh | null {
   const id = String(nodeId || '');
   if (!id || !node) return null;
-  // Mid-drag corner / sides live in preview stores — document attrs stay idle.
-  // WebGL mesh must merge here (SoA canvas already uses resolveSoaSlotCornerRadii).
   const liveAttrs = mergeLiveCornerRadiiIntoAttrs(
     id,
     mergeLiveShapeParamsIntoAttrs(id, node.attrs)
@@ -122,6 +122,7 @@ export function getOrBuildShapeMesh(
     touch(id);
     return hit;
   }
+  const flat = sceneFlatness(opts?.zoom ?? 1, opts?.dpr ?? 1);
   const contour = contourFromNode(paintNode, opts);
   if (!contour) return null;
   const w = Math.max(1, Number(opts?.width ?? paintNode.width) || 1);
@@ -129,10 +130,9 @@ export function getOrBuildShapeMesh(
   const t = String(paintNode.attrs?.shapeType || '').toLowerCase();
   const holes: Vec2[][] = [];
   if (t === 'ellipse' || t === 'circle' || t === 'oval') {
-    const hole = ellipseHoleRing(paintNode, w, h);
+    const hole = ellipseHoleRing(paintNode, w, h, flat);
     if (hole) holes.push(hole);
   }
-  // Pencil: filled freehand silhouette (taper/caps) — not centerline stroke ribbon.
   const pencilSil = Boolean(contour.pencilSilhouette);
   const { fill, stroke } = buildShapeMeshes(contour.points, {
     closed: contour.closed,

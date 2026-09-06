@@ -12,7 +12,6 @@ import {
   sortIdsByRank,
 } from '../core/spatialIndex';
 import {
-  isGeneratorNode,
   isImageProcessRunning,
   isNodeOverlayHidden,
   isNodeStructurallyHiddenInDocument,
@@ -20,15 +19,14 @@ import {
 import {
   nodePaintZIndex,
   uniqueStringIds,
-  worldNodeStacksAboveAnyFrame,
 } from '@/components/rcb/scene/document/sceneDocument';
 import { syncStackPaintOrder } from '@/components/rcb/scene/document/sceneStackPainter';
+import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
-  findClippingFrameForNode,
   setFrameClipRevealOverflowIds,
   setSelectionPaintRaiseIds,
   setSelectionPaintRaiseFrameIds,
-} from '@/components/rcb/frames/frameContentClip';
+} from '@/components/rcb/selection/selectionPaintRaise';
 import { nodeOwnerFrameId } from '@/components/rcb/frames/frameNodeBinding';
 import { scheduleArtboardInkPaint } from '@/components/rcb/frames/artboardInkSurface';
 import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
@@ -43,7 +41,7 @@ import {
   requestIdleCanvasFullRepaint,
   setSceneCanvasIdlePaint,
 } from '@/components/rcb/render/sceneRenderer';
-import { idleMediaNeedsSharpHost } from '@/components/rcb/render/webglInstanceAtlas';
+import { paintIntentNeedsDomHost } from '@/components/rcb/render/paintIntent';
 import {
   getLiveCornerRadiusPreviewNodeId,
   subscribeLiveCornerRadiusPreview,
@@ -521,26 +519,22 @@ export function pickFullAndCanvasIds(opts: {
           ? revealIds.has(id)
           : (revealIds as readonly string[]).includes(id))
     );
-    // Plate-bound siblings must share ArtboardLayer ink when idle. Zoom-based
-    // SVG promote splits some onto data-z hosts while others stay on the plate
-    // canvas → apparent layer-order flips when the camera zooms.
-    const plateBound = Boolean(nodeOwnerFrameId(node));
-    // Selection raise / overflow reveal: plate-bound basics must leave SoA/FO —
-    // world WebGL sits under plates, so raise-within-ink cannot cover the
-    // artboard. Promote to SVG host at max+1 data-z (same as generators).
-    const raiseHost =
-      (isPaintRaised && isGeneratorNode(node)) ||
-      (plateBound && (isPaintRaised || isRevealed));
-    const forceHost =
-      forceFullSet.has(id) ||
-      Boolean(holdHostIds?.has(id)) ||
-      raiseHost ||
-      // World nodes stacked above any plate still need hosts on the shared mount.
-      worldNodeStacksAboveAnyFrame(document, id) ||
-      // Shape/text sharpness promote retired — media may still leave SoA for crisp hosts.
-      (!plateBound && idleMediaNeedsSharpHost(node, zoom, dpr));
-    if (nodeNeedsDomShapeHost(node, forceHost)) fullIds.push(id);
-    else canvasRaw.push(id);
+    // Sole route: paintIntent — DomHost only for obligatory / raise / stack.
+    // Sharpness never promotes media via SharpHost.
+    if (
+      paintIntentNeedsDomHost(document, id, node, {
+        zoom,
+        dpr,
+        forceFull: forceFullSet.has(id),
+        holdHost: Boolean(holdHostIds?.has(id)),
+        raised: isPaintRaised,
+        revealed: isRevealed,
+      })
+    ) {
+      fullIds.push(id);
+    } else {
+      canvasRaw.push(id);
+    }
   }
   return {
     fullIds,

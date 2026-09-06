@@ -321,18 +321,17 @@ export class SoaQuadtree {
   }
 
   /**
-   * Merge `items` into the index, then rebuild the tree once.
+   * Merge `items` into byId via restamp; compact only when dirty storm exceeds threshold.
    * Prefer over many {@link upsert} calls when the batch is large or spread out.
    */
-  bulkUpsert(items: Iterable<SoaQuadItem>): void {
+  bulkUpsert(items: Iterable<SoaQuadItem>, compactAt = 512): void {
     let any = false;
     for (const raw of items) {
-      const normalized = normalizeItem(raw);
-      this.byId.set(normalized.id, normalized);
+      this.restamp(raw);
       any = true;
     }
     if (!any) return;
-    this.compact();
+    if (this.dirtySize >= compactAt) this.compact();
   }
 
   /** Rebuild the tree from `byId` and clear dirty marks. */
@@ -401,16 +400,28 @@ export class SoaQuadtree {
       return kept;
     }
 
-    // No liveAabb — rescue from byId (restamp path).
+    // No liveAabb — rescue from byId (restamp path). Dirty tree hits may still
+    // carry stale AABBs; replace with byId and drop misses.
+    const kept: SoaQuadItem[] = [];
+    for (const hit of out) {
+      if (!this.dirtyIds.has(hit.id)) {
+        kept.push(hit);
+        continue;
+      }
+      const box = this.byId.get(hit.id);
+      if (!box) continue;
+      if (!itemIntersectsQuery(box, qMinX, qMinY, qMaxX, qMaxY)) continue;
+      kept.push(box);
+    }
     for (const id of this.dirtyIds) {
       if (seen.has(id)) continue;
       const box = this.byId.get(id);
       if (!box) continue;
       if (!itemIntersectsQuery(box, qMinX, qMinY, qMaxX, qMaxY)) continue;
       seen.add(id);
-      out.push(box);
+      kept.push(box);
     }
-    return out;
+    return kept;
   }
 
   searchPoint(

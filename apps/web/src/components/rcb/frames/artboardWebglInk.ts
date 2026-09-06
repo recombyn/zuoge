@@ -25,6 +25,7 @@ import {
   soaWebglInkShadersOk,
 } from '@/components/rcb/render/webglSceneRenderer';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
+import { releaseArtboardTileCache } from '@/components/rcb/frames/artboardInkTiles';
 
 type ArtboardGlResources = {
   canvas: HTMLCanvasElement;
@@ -253,6 +254,11 @@ export type PaintArtboardWebglInkArgs = {
   /** Scene→backing scale (after MAX_EDGE clamp). */
   effectiveScale: number;
   dpr?: number;
+  /**
+   * Optional plate-local region (tile). When set, collect/pan cover only that
+   * AABB so the target canvas maps 1:1 to the region at effectiveScale.
+   */
+  plateLocalView?: { left: number; top: number; width: number; height: number };
 };
 
 /**
@@ -269,6 +275,11 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
   const fy = Number(args.frame.y) || 0;
   const scale = Math.max(1e-6, Number(args.effectiveScale) || 1);
   const dpr = Math.max(1, Number(args.dpr) || 1);
+  const local = args.plateLocalView;
+  const regionLeft = local ? Math.max(0, local.left) : 0;
+  const regionTop = local ? Math.max(0, local.top) : 0;
+  const regionW = local ? Math.max(1e-6, local.width) : w;
+  const regionH = local ? Math.max(1e-6, local.height) : h;
   const bw = Math.max(1, args.targetCanvas.width);
   const bh = Math.max(1, args.targetCanvas.height);
 
@@ -305,26 +316,38 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
   const meshCol: number[] = [];
   const meshClipArr: number[] = [];
 
-  // Plate-local via pan: screen = world * scale + (-fx,-fy)*scale.
+  // World view for collect = plate origin + plate-local region.
+  const viewLeft = fx + regionLeft;
+  const viewTop = fy + regionTop;
+  // Plate-local via pan: screen = world * scale + (-viewOrigin)*scale.
   // screen is in *backing* px (same as 2D setTransform(scale)); uStage must match
   // (bw,bh) — using plate CSS (w,h) mis-projects whenever scale ≠ 1 (zoom drift).
-  collectSoaWebglInstances(buf, { left: fx, top: fy, width: w, height: h }, rects, colors, kinds, angles, uvs, {
-    atlas,
-    bufferRevision: buf.revision,
-    clips,
-    document: args.document,
-    zoom: scale,
-    dpr,
-    onlyFrameId: args.frameId,
-    meshPos,
-    meshCol,
-    meshClip: meshClipArr,
-  });
+  collectSoaWebglInstances(
+    buf,
+    { left: viewLeft, top: viewTop, width: regionW, height: regionH },
+    rects,
+    colors,
+    kinds,
+    angles,
+    uvs,
+    {
+      atlas,
+      bufferRevision: buf.revision,
+      clips,
+      document: args.document,
+      zoom: scale,
+      dpr,
+      onlyFrameId: args.frameId,
+      meshPos,
+      meshCol,
+      meshClip: meshClipArr,
+    }
+  );
 
   const count = kinds.length;
   const meshVertCount = Math.floor(meshPos.length / 2);
-  const panX = -fx * scale;
-  const panY = -fy * scale;
+  const panX = -viewLeft * scale;
+  const panY = -viewTop * scale;
   const stageW = bw;
   const stageH = bh;
 
@@ -422,9 +445,8 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
  * Drop per-plate GPU scratch when a FO unregisters.
  * Shared GL stays alive (cheap while no plates; recreates on next paint).
  */
-export function releaseArtboardWebglTarget(_frameId: string): void {
-  // Present path blits via a shared scratch canvas (no per-plate FBO yet).
-  // Hook kept so unregister can grow into FBO release without API churn.
+export function releaseArtboardWebglTarget(frameId: string): void {
+  releaseArtboardTileCache(frameId);
 }
 
 /** Test-only: reset shared GL so probes can re-init. */

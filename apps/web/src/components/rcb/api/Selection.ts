@@ -22,4 +22,9 @@ export {
   listSelectionRevealOverflowIds,
   selectionPaintRaises,
   selectionPaintRaisesFrame,
-} from '@/components/rcb/frames/frameContentClip';
+  frameClipRevealsOverflow,
+  hasSelectionPaintRaise,
+  hasFrameClipRevealOverflow,
+  listSelectionPaintRaiseIds,
+  listSelectionPaintRaiseFrameIds,
+} from '@/components/rcb/selection/selectionPaintRaise';

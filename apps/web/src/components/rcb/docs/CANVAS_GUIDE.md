@@ -51,7 +51,7 @@ rcb/
 │   ├── types.ts
 │   └── geometry/
 ├── render/                    # 墨水后端（性能 + 锐利 restamp）
-│   ├── paintIntent.ts         # ★ 新建：唯一绘制意图
+│   ├── paintIntent.ts         # ★ 唯一绘制意图（gpu-mesh / atlas-stamp / artboard-tile / dom-obligatory）
 │   ├── sceneRenderer.ts
 │   ├── webglSceneRenderer.ts
 │   ├── webglInstanceAtlas.ts
@@ -291,9 +291,8 @@ atlasZoomBucket(zoom): number
 idleMediaScreenEdgePx(w, h, zoom, dpr)
 // 调整后语义：
 backingInsufficientForAtlas(node, zoom, dpr): boolean  // ★ 替代「升 host」
-markAtlasRestampNeeded(…)                              // ★
-// 过渡期仍存在（将弃用升 host 语义）：
-idleMediaNeedsSharpHost / idleStrokedAtlasNeedsSharpHost / idleAtlasInkNeedsSharpHost
+// 过渡期别名（不再驱动 DomHost）：
+idleMediaNeedsSharpHost
 
 // Bake / 手势
 setSoaCameraGestureActive(active: boolean)
@@ -352,7 +351,7 @@ hitTestSoaBuffer / hitTestSoaBufferOrdered / hitTestSoaSlot
 
 ```ts
 listSingleSelectionPaintRaiseNodeIds(doc, nodeIds, frameIds)
-setSelectionPaintRaiseIds / setSelectionPaintRaiseFrameIds   // 今在 frameContentClip
+setSelectionPaintRaiseIds / setSelectionPaintRaiseFrameIds   // selection/selectionPaintRaise.ts
 setFrameClipRevealOverflowIds
 selectionPaintRaises(id) / selectionPaintRaisesFrame(id)
 

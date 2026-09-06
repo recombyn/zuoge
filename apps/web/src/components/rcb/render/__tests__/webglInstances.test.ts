@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, addNodeToDocument } from '@/components/rcb/scene/document/sceneDocument';
-import { setSelectionPaintRaiseIds } from '@/components/rcb/frames/frameContentClip';
+import { setSelectionPaintRaiseIds } from '@/components/rcb/selection/selectionPaintRaise';
 import {
   createSceneRenderBuffer,
   rebuildSoaPathSamples,

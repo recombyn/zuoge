@@ -30,8 +30,21 @@ export {
   atlasZoomBucket,
   atlasCoverageBucket,
   idleMediaScreenEdgePx,
+  /** @deprecated Use backingInsufficientForAtlas — never DomHost-for-blur. */
   idleMediaNeedsSharpHost,
 } from '@/components/rcb/render/webglInstanceAtlas';
+
+export {
+  resolvePaintIntent,
+  paintIntentNeedsDomHost,
+  backingInsufficientForAtlas,
+  getPaintIntentDebugStats,
+  resetPaintIntentDebugStats,
+  notePaintRestamp,
+  noteArtboardTiles,
+  type PaintIntent,
+  type PaintIntentCtx,
+} from '@/components/rcb/render/paintIntent';
 
 export {
   shouldUseSoaBake,
@@ -45,13 +58,3 @@ export {
   pickFullAndCanvasIds,
   nodeNeedsDomShapeHost,
 } from '@/components/rcb/shapes/RcbShapesLayer';
-
-/**
- * Target sole paint router (Phase C). Until `paintIntent.ts` lands, resolve
- * via pickFullAndCanvasIds + canIdlePaintOnCanvas + atlas gates.
- */
-export type PaintIntent =
-  | { kind: 'gpu-instance' }
-  | { kind: 'atlas-stamp'; zoomBucket: number }
-  | { kind: 'artboard-tile' }
-  | { kind: 'dom-obligatory'; reason: string };

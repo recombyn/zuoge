@@ -18,8 +18,9 @@ import {
 } from '@/components/rcb/scene/document/sceneRadii';
 import { getShapeHost } from '@/components/rcb/shapes/shapeHostRegistry';
 import {
-  isEmptyGeneratorPlate,
+  isAudioGeneratorNode,
   isImageProcessRunning,
+  isLottieGeneratorNode,
 } from '@/components/rcb/scene/document/nodeCapabilities';
 import { PROCESS_PLATE_STROKE } from '@/components/rcb/process/processGlow';
 import { paintProcessPlateCanvas } from '@/components/rcb/process/processPlateSvg';
@@ -85,12 +86,12 @@ import {
   type InnerShadowSpec,
 } from '@/components/rcb/scene/document/sceneEffects';
 import { resolveTextFramePlateFill } from '@/components/rcb/scene/document/nodeFactories';
+import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
-  findClippingFrameForNode,
   frameClipRevealsOverflow,
   hasFrameClipRevealOverflow,
   selectionPaintRaises,
-} from '@/components/rcb/frames/frameContentClip';
+} from '@/components/rcb/selection/selectionPaintRaise';
 import { hasLiveArtboardFrameGeometry } from '@/components/rcb/frames/HtmlArtboardFrame';
 import {
   nodeNeedsPuppetWarp,
@@ -986,9 +987,9 @@ export function canIdlePaintOnCanvas(node: SceneNodeInput | null | undefined): b
     return false;
   }
 
-  // Empty generator plates: always SVG hosts. Atlas-cell upscale of the center
-  // glyph looks soft; there are only a few plates, not mass paste ink.
-  if (isEmptyGeneratorPlate(node)) return false;
+  // Audio / Lottie generators stay DomHost (HTML decoder / player).
+  // Empty image/video generator plates: atlas restamp at zoomBucket (not forever SVG).
+  if (isAudioGeneratorNode(node) || isLottieGeneratorNode(node)) return false;
 
   // Product WebGL: basic geom + Canvas2D Path2D for rich fills; media/text idle.
   // Lottie stays DOM. Puppet-warp images stay DOM hosts.
@@ -2835,6 +2836,18 @@ export function clipCanvasIdleToOwningFrame(
  * One Canvas2D idle node (path / text / media / shape fill).
  * Scene coords; applies node angle when needed.
  */
+export type CanvasIdleNodePaintOpts = {
+  node: SceneNodeInput;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  angle?: number;
+  zoom?: number;
+  document?: SceneDocument | null;
+  nodeId?: string;
+};
+
 export function paintCanvasIdleNode(
   ctx: CanvasRenderingContext2D,
   opts: CanvasIdleNodePaintOpts
