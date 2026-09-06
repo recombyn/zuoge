@@ -8,7 +8,7 @@ import { parseNodeText, parseNodeTextStyle } from '@/components/rcb/scene/docume
 import { buildOutlinePathAsync } from '@/components/rcb/scene/paint/outlineToPath';
 import { densifyPathD, sceneFlatness } from '@/components/rcb/render/vector/contour';
 import { densifyLodBucket } from '@/components/rcb/render/vector/densifyPathDJs';
-import { buildCompoundFillMeshes } from '@/components/rcb/render/vector/wasmGeom';
+import { buildCompoundFillMeshes, buildTextGlyphFillMeshes } from '@/components/rcb/render/vector/wasmGeom';
 import type { FillMesh } from '@/components/rcb/render/vector/tessellateFill';
 
 export type CachedTextOutlineMesh = {
@@ -190,8 +190,10 @@ export function ensureTextOutlineMesh(
         return;
       }
       const fillRule = outline?.fillRule === 'nonzero' ? 'nonzero' : 'evenodd';
-      const points = densifyPathD(d, flat);
-      const fill = buildCompoundFillMeshes(points, fillRule);
+      const glyphDs = outline?.glyphPathDs?.filter((g) => String(g || '').trim()) ?? [];
+      const fill = glyphDs.length
+        ? buildTextGlyphFillMeshes(glyphDs, fillRule, flat)
+        : buildCompoundFillMeshes(densifyPathD(d, flat), fillRule);
       const latest2 = wanted.get(id);
       if (latest2 && latest2.fp !== req.fp) return;
       if (!fillUsable(fill)) {

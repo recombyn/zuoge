@@ -234,7 +234,17 @@ export function tessellateFillWithHoles(
         if (wasmNext != null && wasmNext.length > 0) next = wasmNext;
       }
     }
-    if (next != null && next.length > 0) geom = next;
+    if (next == null || next.length === 0) {
+      // Do not silently keep a solid outer — slit the hole open so counters stay hollow.
+      const outerRingPts = geom[0]?.[0];
+      const holeRingPts = clipHole[0];
+      if (outerRingPts && holeRingPts) {
+        const slit = openHoleWithSlit([outerRingPts, holeRingPts]);
+        if (slit.length) geom = slit;
+      }
+      continue;
+    }
+    geom = next;
   }
 
   // Turn leftover hole rings into simple C-rings before ear-clip.

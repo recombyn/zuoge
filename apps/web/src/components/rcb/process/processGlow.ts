@@ -21,10 +21,11 @@ export function processGlowForeignObjectBounds(
   };
 }
 
-export const PROCESS_PILL_BOTTOM_PAD_PX = 14;
+/** Screen px inset from plate bottom to pill bottom (inside, bottom-center). */
+export const PROCESS_PILL_BOTTOM_PAD_PX = 10;
 
 export const PROCESS_PILL_CLASS =
-  'absolute z-[1] inline-flex h-7 w-max items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-[rgba(55,55,55,0.72)] px-2.5 text-[11px] font-medium leading-none text-white shadow-[0_2px_8px_rgba(15,23,42,0.18)]';
+  'inline-flex h-7 w-max max-w-[min(280px,70vw)] items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-[rgba(55,55,55,0.72)] px-2.5 text-[11px] font-medium leading-none text-white shadow-[0_2px_8px_rgba(15,23,42,0.18)]';
 
 /** All nodes with in-flight `processStatus === 'running'`. */
 export function listProcessingNodeIds(

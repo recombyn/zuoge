@@ -7,14 +7,15 @@
 export type InkBackend = 'webgl-vector' | 'canvas2d-vector';
 
 /**
- * Shape / text / path ink must never use atlas bake.
- * Media (image/video/audio) still uses GPU atlas textures.
+ * Text idle is true Chlumsky MSDF (msdfgen WASM) + median shader — not fillText bake,
+ * not bitmap EDT. Catalog WOFF/WOFF2 is decoded to SFNT before FreeType load.
+ * Media idle uses per-node textured mesh quads (not shared atlas stamps).
  */
 export function isShapeInkKey(key: string, shapeType?: string): boolean {
   const k = String(key || '').toLowerCase();
   const t = String(shapeType || '').toLowerCase();
   if (k === 'image' || k === 'video' || k === 'audio' || k === 'lottie') return false;
-  // Text idle is glyph outline mesh — not atlas.
+  // Text idle is MSDF glyphs — not media atlas bake.
   if (k === 'text' || t === 'text') return true;
   if (k === 'shape' || k === 'path') return true;
   return (

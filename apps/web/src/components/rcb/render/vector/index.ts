@@ -47,6 +47,7 @@ export {
   tessellateBatchFill,
   buildShapeMeshes,
   buildCompoundFillMeshes,
+  buildTextGlyphFillMeshes,
   booleanPolygonsWasm,
   offsetPolylineWasm,
   simplifyRdpWasm,

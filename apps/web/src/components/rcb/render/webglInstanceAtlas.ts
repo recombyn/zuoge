@@ -1,6 +1,7 @@
 /**
  * WebGL instance atlas — fixed-cell LRU packer for media bake tiles (ADR 0027).
- * Shape / text ink is vector (mesh / Path2D); never stamped here.
+ * Shape ink is vector (mesh / Path2D). Text idle uses a dedicated MSDF glyph
+ * atlas (see textMsdfAtlas.ts) — never media `txt:` stamps.
  */
 import {
   SOA_KIND_IMAGE,
@@ -241,8 +242,9 @@ export function releaseSoaAtlasPrefix(atlas: SoaWebglAtlas, prefix: string): num
 }
 
 /**
- * Drop stale atlas stamps. Legacy shape keys (`rich:` / `path:` / `round:` / `txt:`)
- * are always released. Media (`img:` / `aud:`) kept while the slot remains.
+ * Drop stale atlas stamps. Legacy shape keys (`rich:` / `path:` / `round:`)
+ * and any leftover `txt:` text stamps are always released. Media (`img:` /
+ * `aud:`) kept while the slot remains.
  */
 export function pruneSoaAtlasForBuffer(atlas: SoaWebglAtlas, buf: SceneRenderBuffer): number {
   const keep = new Set<string>();

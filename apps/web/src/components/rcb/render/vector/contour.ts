@@ -83,16 +83,22 @@ export function pencilSilhouettePathD(
   const pressureEnabled =
     node.attrs?.pressureEnabled !== false &&
     String(node.attrs?.pressureEnabled || 'true') !== 'false';
+  // Legacy strokes without baked outline: RDP before getStroke so idle remesh
+  // does not freeze the main thread on dense centerlines.
   const outline = pencilInkPathFromPoints(pts, Math.max(0.5, strokeWidth), brushId, {
     linecap,
     pressures,
     pressureEnabled,
-    // Capture path is already the centerline — RDP here kinked commit vs live.
-    simplify: false,
+    simplify: true,
     dasharray:
       String(node.attrs?.strokeDasharray || node.attrs?.dasharray || '').trim() || undefined,
   });
   return outline || null;
+}
+
+/** Flatness for freehand fill meshes — coarser than shape curves (silhouette already dense). */
+export function pencilSilhouetteFlatness(zoom = 1, dpr = 1): number {
+  return Math.max(0.55, sceneFlatness(zoom, dpr) * 2.5);
 }
 
 export function contourFromNode(
@@ -117,7 +123,8 @@ export function contourFromNode(
     );
     const outlineD = pencilSilhouettePathD(node, sw);
     if (outlineD) {
-      const points = densifyPathD(outlineD, flat);
+      const pencilFlat = pencilSilhouetteFlatness(opts?.zoom ?? 1, opts?.dpr ?? 1);
+      const points = densifyPathD(outlineD, pencilFlat);
       if (points.length >= 3) {
         return { d: outlineD, closed: true, points, geomFp, pencilSilhouette: true };
       }

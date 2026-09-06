@@ -7,7 +7,6 @@ import {
   type ReactNode,
   memo,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { useRcbCamera, useRcbViewportEl } from '../camera/context';
 import { rcbCameraCssZoom, rcbViewportSceneBounds } from '../core/math';
 import { createSvgBoard } from '@/components/rcb/scene/paint/sceneToSvg';
@@ -16,7 +15,6 @@ import {
   getShapeHost,
   getSceneShapesMount,
   getSceneWorldRoot,
-  getSceneSelectionChromeMount,
   getSceneWorldEpoch,
   registerShapeHost,
   subscribeShapeHosts,
@@ -26,7 +24,6 @@ import {
 } from '@/components/rcb/shapes/shapeHostRegistry';
 import NodeTitleLabel from '../selection/chrome/NodeTitleLabel';
 import { ProcessGlowShell } from '@/components/rcb/process/ProcessGlowShell';
-import { processGlowForeignObjectBounds } from '@/components/rcb/process/processGlow';
 import { appendProcessPlatePaths, syncProcessPlateGeometry } from '@/components/rcb/process/processPlateSvg';
 import { roundedRectPath } from '@/components/rcb/scene/document/sceneRadii';
 import type { ArtboardFrame } from '@/components/rcb/frames/types';
@@ -637,29 +634,18 @@ function HtmlArtboardFrame({
   // Above SvgCanvas so paint/review/retry stays covered until the AI overlay clears.
   if (layer === 'process') {
     if (!generating) return null;
-    const mount = getSceneSelectionChromeMount();
-    if (!mount) return null;
-    const foBox = processGlowForeignObjectBounds(frame.width, frame.height);
-    return createPortal(
-      <g data-artboard-process-layer={frame.id} pointerEvents="none">
-        <foreignObject
-          x={frame.x + foBox.x}
-          y={frame.y + foBox.y}
-          width={foBox.width}
-          height={foBox.height}
-          pointerEvents="none"
-          style={{ overflow: 'hidden' }}
-        >
-          <ProcessGlowShell
-            seed={frame.id}
-            label={processLabel}
-            width={frame.width}
-            zoom={z}
-            labelDataAttr="data-artboard-process-label"
-          />
-        </foreignObject>
-      </g>,
-      mount
+    return (
+      <ProcessGlowShell
+        seed={frame.id}
+        label={processLabel}
+        box={{
+          left: frame.x,
+          top: frame.y,
+          width: frame.width,
+          height: frame.height,
+        }}
+        labelDataAttr="data-artboard-process-label"
+      />
     );
   }
 

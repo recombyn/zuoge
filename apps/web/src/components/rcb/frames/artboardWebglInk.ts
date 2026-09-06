@@ -24,6 +24,19 @@ import {
   SOA_WEBGL_UNIT_QUAD,
   soaWebglInkShadersOk,
 } from '@/components/rcb/render/webglSceneRenderer';
+import {
+  createMediaTexBatch,
+  disposeAllMediaNodeTextures,
+  drawMediaTexBatch,
+  pruneMediaNodeTextures,
+  SOA_WEBGL_TEX_MESH_FS,
+  SOA_WEBGL_TEX_MESH_VS,
+} from '@/components/rcb/render/mediaTextureMesh';
+import {
+  ensureSharedMsdfAtlas,
+  MSDF_ATLAS_SIZE,
+  MSDF_PX_RANGE,
+} from '@/components/rcb/render/vector/textMsdfAtlas';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 import { releaseArtboardTileCache } from '@/components/rcb/frames/artboardInkTiles';
 
@@ -32,8 +45,10 @@ type ArtboardGlResources = {
   gl: WebGL2RenderingContext;
   prog: WebGLProgram;
   meshProg: WebGLProgram | null;
+  texProg: WebGLProgram | null;
   vao: WebGLVertexArrayObject;
   meshVao: WebGLVertexArrayObject | null;
+  texVao: WebGLVertexArrayObject | null;
   cornerBuf: WebGLBuffer;
   rectBuf: WebGLBuffer;
   colorBuf: WebGLBuffer;
@@ -44,10 +59,17 @@ type ArtboardGlResources = {
   meshPosBuf: WebGLBuffer | null;
   meshColBuf: WebGLBuffer | null;
   meshClipBuf: WebGLBuffer | null;
+  meshEdgeBuf: WebGLBuffer | null;
+  texPosBuf: WebGLBuffer | null;
+  texUvBuf: WebGLBuffer | null;
+  texColBuf: WebGLBuffer | null;
+  texClipBuf: WebGLBuffer | null;
   atlasTex: WebGLTexture;
+  msdfTex: WebGLTexture;
   instanceCap: number;
   atlasUploadedRevision: number;
   atlasBufferRevision: number;
+  msdfUploadedRevision: number;
   scratchRect: Float32Array;
   scratchColor: Float32Array;
   scratchKind: Float32Array;
@@ -104,10 +126,14 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
   const meshVs = compileSoaWebglShader(gl, gl.VERTEX_SHADER, SOA_WEBGL_MESH_VS);
   const meshFs = compileSoaWebglShader(gl, gl.FRAGMENT_SHADER, SOA_WEBGL_MESH_FS);
   const meshProg = meshVs && meshFs ? linkSoaWebglProgram(gl, meshVs, meshFs) : null;
+  const texVs = compileSoaWebglShader(gl, gl.VERTEX_SHADER, SOA_WEBGL_TEX_MESH_VS);
+  const texFs = compileSoaWebglShader(gl, gl.FRAGMENT_SHADER, SOA_WEBGL_TEX_MESH_FS);
+  const texProg = texVs && texFs ? linkSoaWebglProgram(gl, texVs, texFs) : null;
   if (!prog) return null;
 
   const vao = gl.createVertexArray();
   const meshVao = gl.createVertexArray();
+  const texVao = gl.createVertexArray();
   const cornerBuf = gl.createBuffer();
   const rectBuf = gl.createBuffer();
   const colorBuf = gl.createBuffer();
@@ -118,7 +144,13 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
   const meshPosBuf = gl.createBuffer();
   const meshColBuf = gl.createBuffer();
   const meshClipBuf = gl.createBuffer();
+  const meshEdgeBuf = gl.createBuffer();
+  const texPosBuf = gl.createBuffer();
+  const texUvBuf = gl.createBuffer();
+  const texColBuf = gl.createBuffer();
+  const texClipBuf = gl.createBuffer();
   const atlasTex = gl.createTexture();
+  const msdfTex = gl.createTexture();
   if (
     !vao ||
     !cornerBuf ||
@@ -128,7 +160,8 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
     !angleBuf ||
     !uvBuf ||
     !clipBuf ||
-    !atlasTex
+    !atlasTex ||
+    !msdfTex
   ) {
     return null;
   }
@@ -171,7 +204,7 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
   gl.vertexAttribDivisor(6, 1);
   gl.bindVertexArray(null);
 
-  if (meshProg && meshVao && meshPosBuf && meshColBuf && meshClipBuf) {
+  if (meshProg && meshVao && meshPosBuf && meshColBuf && meshClipBuf && meshEdgeBuf) {
     gl.bindVertexArray(meshVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshPosBuf);
     gl.enableVertexAttribArray(0);
@@ -182,6 +215,26 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
     gl.bindBuffer(gl.ARRAY_BUFFER, meshClipBuf);
     gl.enableVertexAttribArray(2);
     gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshEdgeBuf);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+
+  if (texProg && texVao && texPosBuf && texUvBuf && texColBuf && texClipBuf) {
+    gl.bindVertexArray(texVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texPosBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texUvBuf);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texColBuf);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texClipBuf);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
   }
 
@@ -201,6 +254,22 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
     gl.UNSIGNED_BYTE,
     new Uint8Array([0, 0, 0, 0])
   );
+  gl.bindTexture(gl.TEXTURE_2D, msdfTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([128, 128, 128, 255])
+  );
   gl.bindTexture(gl.TEXTURE_2D, null);
 
   return {
@@ -208,8 +277,10 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
     gl,
     prog,
     meshProg,
+    texProg,
     vao,
     meshVao: meshProg ? meshVao : null,
+    texVao: texProg ? texVao : null,
     cornerBuf,
     rectBuf,
     colorBuf,
@@ -220,10 +291,17 @@ function createSharedArtboardGl(): ArtboardGlResources | null {
     meshPosBuf: meshProg ? meshPosBuf : null,
     meshColBuf: meshProg ? meshColBuf : null,
     meshClipBuf: meshProg ? meshClipBuf : null,
+    meshEdgeBuf: meshProg ? meshEdgeBuf : null,
+    texPosBuf: texProg ? texPosBuf : null,
+    texUvBuf: texProg ? texUvBuf : null,
+    texColBuf: texProg ? texColBuf : null,
+    texClipBuf: texProg ? texClipBuf : null,
     atlasTex,
+    msdfTex,
     instanceCap: 0,
     atlasUploadedRevision: -1,
     atlasBufferRevision: -1,
+    msdfUploadedRevision: -1,
     scratchRect: new Float32Array(0),
     scratchColor: new Float32Array(0),
     scratchKind: new Float32Array(0),
@@ -315,6 +393,8 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
   const meshPos: number[] = [];
   const meshCol: number[] = [];
   const meshClipArr: number[] = [];
+  const meshEdgeArr: number[] = [];
+  const mediaTex = createMediaTexBatch();
 
   // World view for collect = plate origin + plate-local region.
   const viewLeft = fx + regionLeft;
@@ -341,11 +421,14 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
       meshPos,
       meshCol,
       meshClip: meshClipArr,
+      meshEdge: meshEdgeArr,
+      mediaTex,
     }
   );
 
   const count = kinds.length;
   const meshVertCount = Math.floor(meshPos.length / 2);
+  const mediaVertCount = Math.floor(mediaTex.pos.length / 2);
   const panX = -viewLeft * scale;
   const panY = -viewTop * scale;
   const stageW = bw;
@@ -395,13 +478,37 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
       }
     }
 
+    const msdf = ensureSharedMsdfAtlas();
+    if (msdf && msdf.revision !== res.msdfUploadedRevision) {
+      gl.bindTexture(gl.TEXTURE_2D, res.msdfTex);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+      try {
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          msdf.canvas as TexImageSource
+        );
+        res.msdfUploadedRevision = msdf.revision;
+      } catch {
+        res.msdfUploadedRevision = -1;
+      }
+    }
+
     gl.useProgram(res.prog);
     gl.uniform2f(gl.getUniformLocation(res.prog, 'uPan'), panX, panY);
     gl.uniform1f(gl.getUniformLocation(res.prog, 'uZoom'), scale);
     gl.uniform2f(gl.getUniformLocation(res.prog, 'uStage'), stageW, stageH);
+    gl.uniform1f(gl.getUniformLocation(res.prog, 'uMsdfSize'), MSDF_ATLAS_SIZE);
+    gl.uniform1f(gl.getUniformLocation(res.prog, 'uMsdfPxRange'), MSDF_PX_RANGE);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, res.atlasTex);
     gl.uniform1i(gl.getUniformLocation(res.prog, 'uAtlas'), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, res.msdfTex);
+    gl.uniform1i(gl.getUniformLocation(res.prog, 'uMsdf'), 1);
     gl.bindVertexArray(res.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
     gl.bindVertexArray(null);
@@ -413,7 +520,8 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
     res.meshVao &&
     res.meshPosBuf &&
     res.meshColBuf &&
-    res.meshClipBuf
+    res.meshClipBuf &&
+    res.meshEdgeBuf
   ) {
     gl.useProgram(res.meshProg);
     gl.uniform2f(gl.getUniformLocation(res.meshProg, 'uPan'), panX, panY);
@@ -426,8 +534,41 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(meshCol), gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, res.meshClipBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(meshClipArr), gl.DYNAMIC_DRAW);
+    while (meshEdgeArr.length < meshVertCount) meshEdgeArr.push(0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, res.meshEdgeBuf);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array(meshEdgeArr.slice(0, meshVertCount)),
+      gl.DYNAMIC_DRAW
+    );
     gl.drawArrays(gl.TRIANGLES, 0, meshVertCount);
     gl.bindVertexArray(null);
+  }
+
+  if (
+    mediaVertCount >= 3 &&
+    res.texProg &&
+    res.texVao &&
+    res.texPosBuf &&
+    res.texUvBuf &&
+    res.texColBuf &&
+    res.texClipBuf
+  ) {
+    pruneMediaNodeTextures(
+      gl,
+      mediaTex.draws.map((d) => d.nodeId)
+    );
+    drawMediaTexBatch(
+      gl,
+      res.texProg,
+      res.texVao,
+      res.texPosBuf,
+      res.texUvBuf,
+      res.texColBuf,
+      res.texClipBuf,
+      mediaTex,
+      { panX, panY, zoom: scale, stageW, stageH }
+    );
   }
 
   const ctx = args.targetCanvas.getContext('2d');
@@ -452,6 +593,7 @@ export function releaseArtboardWebglTarget(frameId: string): void {
 /** Test-only: reset shared GL so probes can re-init. */
 export function resetArtboardWebglInkForTests(): void {
   if (shared) {
+    disposeAllMediaNodeTextures(shared.gl);
     shared.gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
   shared = null;

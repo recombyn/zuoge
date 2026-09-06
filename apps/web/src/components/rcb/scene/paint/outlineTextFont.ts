@@ -148,7 +148,7 @@ function commandsToPathD(commands: FkCommand[], ox: number, oy: number, scale: n
 /** Decimal places for glyph coords so small scene fontSize keeps counters. */
 export function outlinePathDecimals(scale: number): number {
   const s = Math.max(1e-9, Number(scale) || 0);
-  if (s >= 0.05) return 1;
+  // Never use 1dp — counters in o/d/4 collapse into solid blobs at common sizes.
   if (s >= 0.01) return 2;
   if (s >= 0.002) return 3;
   return 4;
@@ -307,6 +307,7 @@ export async function outlineTextFromFont(node: SceneNodeInput): Promise<Outline
     }
     return {
       pathD: parts.join(' '),
+      glyphPathDs: parts,
       closed: true,
       fillColor: String(style.fill || '#333333'),
       // TrueType / CFF glyph contours use nonzero winding (not evenodd).

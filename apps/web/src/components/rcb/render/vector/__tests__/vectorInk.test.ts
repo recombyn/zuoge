@@ -231,7 +231,7 @@ describe('vector ink', () => {
     expect(
       shapeInkForbidsAtlas({ key: 'shape', attrs: { shapeType: 'arrow' } })
     ).toBe(true);
-    // Text idle is glyph outline mesh — forbids atlas.
+    // Text idle is MSDF glyphs — forbids media atlas bake.
     expect(shapeInkForbidsAtlas({ key: 'text', attrs: {} })).toBe(true);
     expect(shapeInkForbidsAtlas({ key: 'image', attrs: {} })).toBe(false);
     expect(shapeInkForbidsAtlas({ key: 'video', attrs: {} })).toBe(false);
@@ -279,6 +279,8 @@ describe('vector ink', () => {
 
     const mesh = getOrBuildShapeMesh('ar', node, { width: 100, height: 24 });
     expect(mesh?.stroke).not.toBeNull();
+    // Open chevron: stroke shaft + V only (matches live Canvas / SVG).
+    expect(mesh?.fill).toBeNull();
     // Bridged shaft→wing would place verts far off the centerline mid=12.
     const pos = mesh!.stroke!.positions;
     let minY = Infinity;
@@ -288,11 +290,10 @@ describe('vector ink', () => {
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
-    // Head wing ±0.55*14 ≈ ±7.7 around mid 12 → roughly [0, 24] plus stroke half-width 2.
-    expect(minY).toBeGreaterThan(-8);
-    expect(maxY).toBeLessThan(32);
-    // Bridged diagonal would also inflate Y span beyond a sane arrow head.
-    expect(maxY - minY).toBeLessThan(40);
+    // Shaft is centerline ribbon around mid=12; half-width 2 → roughly [8, 16] + pad.
+    expect(minY).toBeGreaterThan(0);
+    expect(maxY).toBeLessThan(28);
+    expect(maxY - minY).toBeLessThan(24);
   });
 
   it('densifyPathDJs inserts NaN between subpaths', () => {

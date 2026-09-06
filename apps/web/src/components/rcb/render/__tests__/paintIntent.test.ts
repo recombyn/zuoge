@@ -4,10 +4,9 @@ import {
   resolvePaintIntent,
 } from '@/components/rcb/render/paintIntent';
 import { createEmptyDocument, addNodeToDocument } from '@/components/rcb/scene/document/sceneDocument';
-import { atlasZoomBucket } from '@/components/rcb/render/webglInstanceAtlas';
 
 describe('paintIntent', () => {
-  it('routes idle images to atlas-stamp with zoomBucket (never DomHost-for-blur)', () => {
+  it('routes idle images to gpu-mesh textured media (never DomHost-for-blur)', () => {
     let doc = createEmptyDocument();
     doc = addNodeToDocument(doc, 'img', {
       id: 'img',
@@ -22,10 +21,7 @@ describe('paintIntent', () => {
       zoom: 8,
       dpr: 1,
     });
-    expect(intent.kind).toBe('atlas-stamp');
-    if (intent.kind === 'atlas-stamp') {
-      expect(intent.zoomBucket).toBe(atlasZoomBucket(8));
-    }
+    expect(intent.kind).toBe('gpu-mesh');
     expect(backingInsufficientForAtlas(doc.deltaSetLike!.img, 8, 1)).toBe(true);
   });
 

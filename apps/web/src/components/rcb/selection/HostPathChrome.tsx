@@ -5,7 +5,7 @@ import type { SceneNode, SceneNodeInput } from '@/components/rcb/sceneNode';
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRcbCamera, useRcbDevicePixelRatio } from '@/components/rcb/camera/context';
-import { HEAVY_PATH_D_CHARS, rememberNodePath2D } from '@/components/rcb/scene/document/sceneShapes';
+import { HEAVY_PATH_D_CHARS, rememberNodePath2D, mergeLiveShapeParamsIntoAttrs, subscribeLiveShapeParamsPreview } from '@/components/rcb/scene/document/sceneShapes';
 import { geometryIndicatorPathD } from '@/components/rcb/scene/paint/outlineToPath';
 import { pathPaintDFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
 import {
@@ -516,23 +516,32 @@ export function isVectorStrokeNode(node: SceneNodeInput, shapeType?: string): bo
 /**
  * Object-outline path `d` in local geom space (HostPathChrome silhouette).
  * Vector strokes always use painted path; heavy geo falls back to AABB stand-in.
+ * Merges live polygon/star/ellipse params so side-count drag matches ink.
  */
-export function resolveOutlinePathD(node: SceneNodeInput, gw: number, gh: number): string {
-  const rawPath = String(node?.attrs?.path || '');
-  const shapeType = String(node?.attrs?.shapeType || '');
-  if (isVectorStrokeNode(node, shapeType)) {
+export function resolveOutlinePathD(
+  node: SceneNodeInput,
+  gw: number,
+  gh: number,
+  nodeId?: string
+): string {
+  const id = String(nodeId || node.id || '').trim();
+  const attrs = id
+    ? mergeLiveShapeParamsIntoAttrs(id, node.attrs as Record<string, unknown>)
+    : ((node.attrs || {}) as Record<string, unknown>);
+  const paintNode: SceneNodeInput = { ...node, attrs };
+  const rawPath = String(attrs.path || '');
+  const shapeType = String(attrs.shapeType || '');
+  if (isVectorStrokeNode(paintNode, shapeType)) {
     if (rawPath.trim().length >= 2) {
       // Match Canvas/SVG paint: closed path + radius* uses filleted silhouette.
-      return (
-        pathPaintDFromAttrs(node.attrs as Record<string, unknown>, { shapeType }) || rawPath
-      );
+      return pathPaintDFromAttrs(attrs, { shapeType }) || rawPath;
     }
-    return geometryIndicatorPathD(node, { width: gw, height: gh });
+    return geometryIndicatorPathD(paintNode, { width: gw, height: gh });
   }
   if (rawPath.length >= HEAVY_PATH_D_CHARS) {
     return `M 0 0 H ${gw} V ${gh} H 0 Z`;
   }
-  return geometryIndicatorPathD(node, { width: gw, height: gh });
+  return geometryIndicatorPathD(paintNode, { width: gw, height: gh });
 }
 
 type BoxResizeKnob = ['n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw', number, number];
@@ -810,6 +819,13 @@ function ShapeOutlineSvg({ outlines }: { outlines: ShapeOutlineItem[] }) {
   outlinesRef.current = outlines;
 
   useEffect(() => subscribeShapeHosts(() => setHostEpoch((n) => n + 1)), []);
+  useEffect(
+    () =>
+      subscribeLiveShapeParamsPreview(() => {
+        setHostEpoch((n) => n + 1);
+      }),
+    []
+  );
 
   // Same beat as SoA ink / frame-plate move: TransformPreview writers paint
   // immediately — re-sync path chrome in that callback so blue outline cannot

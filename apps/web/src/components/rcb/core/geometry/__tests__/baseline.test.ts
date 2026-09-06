@@ -150,11 +150,11 @@ describe('getShapeBaseline', () => {
     expect(lineBaselinePath(80, 24)).toBe('M 0 12 L 80 12');
   });
 
-  it('arrow shaft stops at head base; only V meets the tip', () => {
+  it('arrow shaft tucks under head; only V meets the tip', () => {
     const d = arrowBaselinePath(100, 24);
     expect(d).toContain('M 0 12');
-    // Default ARROW_HEAD=14 → shaft ends at 86, tip at 100.
-    expect(d).toContain('L 86 12');
+    // Default ARROW_HEAD=14 → head base at 86; shaft tucks slightly past base.
+    expect(d).toMatch(/L 87\.?\d* 12/);
     expect(d).not.toMatch(/M 0 12 L 100 12/);
     // V still shares the tip once.
     expect(d.match(/L 100 12/g)?.length).toBe(1);

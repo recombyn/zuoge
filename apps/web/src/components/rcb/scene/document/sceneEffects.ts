@@ -118,33 +118,44 @@ export function strokeCanvasAligned(
     trace: () => void;
     path?: Path2D;
     fillRule?: CanvasFillRule;
+    /** SVG stroke-dasharray; empty/undefined = solid. */
+    dasharray?: string;
   }
 ): void {
-  const { align, stroke, strokeWidth, trace, path, fillRule } = opts;
+  const { align, stroke, strokeWidth, trace, path, fillRule, dasharray } = opts;
   if (!(strokeWidth > 0) || !stroke || stroke === 'transparent') return;
+  ctx.save();
   ctx.strokeStyle = stroke;
   ctx.lineWidth = canvasStrokeLineWidth(align, strokeWidth);
-  if (align === 'inside') {
-    ctx.save();
-    if (path) {
-      if (fillRule) ctx.clip(path, fillRule);
-      else ctx.clip(path);
-      ctx.stroke(path);
-    } else {
-      trace();
-      ctx.clip();
-      trace();
-      ctx.stroke();
+  const dash = String(dasharray || '')
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  ctx.setLineDash(dash.length ? dash : []);
+  try {
+    if (align === 'inside') {
+      if (path) {
+        if (fillRule) ctx.clip(path, fillRule);
+        else ctx.clip(path);
+        ctx.stroke(path);
+      } else {
+        trace();
+        ctx.clip();
+        trace();
+        ctx.stroke();
+      }
+      return;
     }
+    if (path) {
+      ctx.stroke(path);
+      return;
+    }
+    trace();
+    ctx.stroke();
+  } finally {
     ctx.restore();
-    return;
   }
-  if (path) {
-    ctx.stroke(path);
-    return;
-  }
-  trace();
-  ctx.stroke();
 }
 
 function strokePaintMeta(node: SceneNodeInput): { align: StrokeAlign; strokeWidth: number } | null {

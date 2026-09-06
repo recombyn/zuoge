@@ -2,11 +2,16 @@
  * Stroke → triangle list. Default join is miter (matches attrs / Canvas).
  * Bevel only when miterLength/half exceeds miterLimit — never always-bevel
  * (that clipped star tips and square corners flat).
+ *
+ * `edges` is per-vertex signed side across the ribbon (±1 at rims, 0 on the
+ * centerline) for mesh fragment-shader AA (same idea as kind-2 vUv.y).
  */
 import type { Vec2 } from '@/components/rcb/render/vector/contour';
 
 export type StrokeMesh = {
   positions: Float32Array;
+  /** Parallel to positions (one float per vertex). */
+  edges: Float32Array;
   triangleCount: number;
 };
 
@@ -19,6 +24,8 @@ export type StrokeTessOpts = {
   linejoin?: 'miter' | 'round' | 'bevel';
   /** Default 100 — keep acute tips (see resolveStrokeMiterlimit). */
   miterLimit?: number;
+  /** Open ends only — 'butt' | 'round' | 'square' (default butt). */
+  linecap?: 'butt' | 'round' | 'square' | string;
 };
 
 type SegOff = {
@@ -35,8 +42,11 @@ function leftNormal(dx: number, dy: number): Vec2 {
 }
 
 function strokeBias(align: string, half: number): number {
-  if (align === 'inside') return -half * 0.5;
-  if (align === 'outside') return half * 0.5;
+  // Full shift: inside/outside put the entire ribbon on one side of the path
+  // (matches Canvas 2× + clip/fill semantics). ±0.5*half only half-shifted —
+  // UI inside/outside looked almost like center.
+  if (align === 'inside') return -half;
+  if (align === 'outside') return half;
   return 0;
 }
 
@@ -51,29 +61,48 @@ function closePolylineIfNeeded(points: Vec2[], closed: boolean): Vec2[] {
 
 function pushTri(
   tris: number[],
+  edges: number[],
   ax: number,
   ay: number,
+  ea: number,
   bx: number,
   by: number,
+  eb: number,
   cx: number,
-  cy: number
+  cy: number,
+  ec: number
 ) {
   tris.push(ax, ay, bx, by, cx, cy);
+  edges.push(ea, eb, ec);
 }
 
-function pushQuad(tris: number[], s: SegOff) {
-  pushTri(tris, s.l0.x, s.l0.y, s.r0.x, s.r0.y, s.l1.x, s.l1.y);
-  pushTri(tris, s.l1.x, s.l1.y, s.r0.x, s.r0.y, s.r1.x, s.r1.y);
+function pushQuad(tris: number[], edges: number[], s: SegOff) {
+  // Four tris sharing the centerline (edge=0). Avoids a two-triangle diagonal
+  // where fwidth(edge) discontinuities look like a mid-shaft hole at high zoom.
+  // Pair with coverage-preserving MESH_FS (no low-cover discard).
+  const c0x = (s.l0.x + s.r0.x) * 0.5;
+  const c0y = (s.l0.y + s.r0.y) * 0.5;
+  const c1x = (s.l1.x + s.r1.x) * 0.5;
+  const c1y = (s.l1.y + s.r1.y) * 0.5;
+  pushTri(tris, edges, s.l0.x, s.l0.y, -1, c0x, c0y, 0, s.l1.x, s.l1.y, -1);
+  pushTri(tris, edges, s.l1.x, s.l1.y, -1, c0x, c0y, 0, c1x, c1y, 0);
+  pushTri(tris, edges, c0x, c0y, 0, s.r0.x, s.r0.y, 1, c1x, c1y, 0);
+  pushTri(tris, edges, c1x, c1y, 0, s.r0.x, s.r0.y, 1, s.r1.x, s.r1.y, 1);
 }
 
-function pushBevelWedges(tris: number[], cur: Vec2, a: SegOff, b: SegOff) {
-  pushTri(tris, cur.x, cur.y, a.l1.x, a.l1.y, b.l0.x, b.l0.y);
-  pushTri(tris, cur.x, cur.y, a.r1.x, a.r1.y, b.r0.x, b.r0.y);
+function pushBevelWedges(tris: number[], edges: number[], cur: Vec2, a: SegOff, b: SegOff) {
+  pushTri(tris, edges, cur.x, cur.y, 0, a.l1.x, a.l1.y, -1, b.l0.x, b.l0.y, -1);
+  pushTri(tris, edges, cur.x, cur.y, 0, a.r1.x, a.r1.y, 1, b.r0.x, b.r0.y, 1);
 }
 
-/** Round join: fan on the outer side, bevel the inner. */
+/**
+ * Round join: fan on the side that actually has stroke extent.
+ * Inside align puts the whole ribbon on the right (hr); outside on the left (hl).
+ * Geometric “outer” alone fails for inside — hl≈0 so the fan was invisible.
+ */
 function pushRoundJoin(
   tris: number[],
+  edges: number[],
   cur: Vec2,
   a: SegOff,
   b: SegOff,
@@ -81,17 +110,28 @@ function pushRoundJoin(
   hr: number
 ) {
   const cross = a.n.x * b.n.y - a.n.y * b.n.x;
-  const leftOuter = cross < 0;
-  if (leftOuter) {
-    pushTri(tris, cur.x, cur.y, a.r1.x, a.r1.y, b.r0.x, b.r0.y);
-    fanOuterArc(tris, cur, a.l1, b.l0, Math.max(hl, 1e-4));
+  let roundLeft: boolean;
+  if (hl > hr + 1e-6) roundLeft = true;
+  else if (hr > hl + 1e-6) roundLeft = false;
+  else roundLeft = cross < 0;
+  if (roundLeft) {
+    pushTri(tris, edges, cur.x, cur.y, 0, a.r1.x, a.r1.y, 1, b.r0.x, b.r0.y, 1);
+    fanOuterArc(tris, edges, cur, a.l1, b.l0, Math.max(hl, 1e-4), -1);
   } else {
-    pushTri(tris, cur.x, cur.y, a.l1.x, a.l1.y, b.l0.x, b.l0.y);
-    fanOuterArc(tris, cur, a.r1, b.r0, Math.max(hr, 1e-4));
+    pushTri(tris, edges, cur.x, cur.y, 0, a.l1.x, a.l1.y, -1, b.l0.x, b.l0.y, -1);
+    fanOuterArc(tris, edges, cur, a.r1, b.r0, Math.max(hr, 1e-4), 1);
   }
 }
 
-function fanOuterArc(tris: number[], cur: Vec2, from: Vec2, to: Vec2, radius: number) {
+function fanOuterArc(
+  tris: number[],
+  edges: number[],
+  cur: Vec2,
+  from: Vec2,
+  to: Vec2,
+  radius: number,
+  rimEdge: number
+) {
   let a0 = Math.atan2(from.y - cur.y, from.x - cur.x);
   let a1 = Math.atan2(to.y - cur.y, to.x - cur.x);
   let d = a1 - a0;
@@ -110,7 +150,7 @@ function fanOuterArc(tris: number[], cur: Vec2, from: Vec2, to: Vec2, radius: nu
       p.x = to.x;
       p.y = to.y;
     }
-    pushTri(tris, cur.x, cur.y, prev.x, prev.y, p.x, p.y);
+    pushTri(tris, edges, cur.x, cur.y, 0, prev.x, prev.y, rimEdge, p.x, p.y, rimEdge);
     prev = p;
   }
 }
@@ -179,6 +219,7 @@ export function tessellateStroke(points: Vec2[], opts: StrokeTessOpts): StrokeMe
   if (!segs.length) return null;
 
   const tris: number[] = [];
+  const edges: number[] = [];
   const joinCount = segs.length - (closed ? 0 : 1);
 
   for (let j = 0; j < joinCount; j += 1) {
@@ -200,14 +241,82 @@ export function tessellateStroke(points: Vec2[], opts: StrokeTessOpts): StrokeMe
       }
     }
     if (wantRound) {
-      pushRoundJoin(tris, cur, a, b, hl, hr);
+      pushRoundJoin(tris, edges, cur, a, b, hl, hr);
       continue;
     }
-    pushBevelWedges(tris, cur, a, b);
+    pushBevelWedges(tris, edges, cur, a, b);
   }
 
-  for (const s of segs) pushQuad(tris, s);
+  for (const s of segs) pushQuad(tris, edges, s);
+
+  if (!closed && segs.length) {
+    const cap = String(opts.linecap || 'butt').toLowerCase();
+    const rad = Math.max(hl, hr, 1e-4);
+    if (cap === 'round' || cap === 'square') {
+      const first = segs[0]!;
+      const last = segs[segs.length - 1]!;
+      const a0 = pts[0]!;
+      const a1 = pts[1]!;
+      const b0 = pts[pts.length - 2]!;
+      const b1 = pts[pts.length - 1]!;
+      const t0len = Math.hypot(a1.x - a0.x, a1.y - a0.y) || 1;
+      const t1len = Math.hypot(b1.x - b0.x, b1.y - b0.y) || 1;
+      const out0 = { x: -(a1.x - a0.x) / t0len, y: -(a1.y - a0.y) / t0len };
+      const out1 = { x: (b1.x - b0.x) / t1len, y: (b1.y - b0.y) / t1len };
+      if (cap === 'square') {
+        pushSquareCap(tris, edges, first.l0, first.r0, a0, out0, rad);
+        pushSquareCap(tris, edges, last.l1, last.r1, b1, out1, rad);
+      } else {
+        // Semicircle: fan the diameter rim through the outward tip.
+        pushRoundCap(tris, edges, a0, first.l0, first.r0, out0, rad);
+        pushRoundCap(tris, edges, b1, last.r1, last.l1, out1, rad);
+      }
+    }
+  }
 
   if (tris.length < 6) return null;
-  return { positions: new Float32Array(tris), triangleCount: tris.length / 6 };
+  return {
+    positions: new Float32Array(tris),
+    edges: new Float32Array(edges),
+    triangleCount: tris.length / 6,
+  };
+}
+
+function pushSquareCap(
+  tris: number[],
+  edges: number[],
+  left: Vec2,
+  right: Vec2,
+  center: Vec2,
+  outward: Vec2,
+  radius: number
+) {
+  const ox = outward.x * radius;
+  const oy = outward.y * radius;
+  const l2 = { x: left.x + ox, y: left.y + oy };
+  const r2 = { x: right.x + ox, y: right.y + oy };
+  const c2 = { x: center.x + ox, y: center.y + oy };
+  // Two quads as four tris (rim edges ±1, centerline 0).
+  pushTri(tris, edges, left.x, left.y, -1, c2.x, c2.y, 0, l2.x, l2.y, -1);
+  pushTri(tris, edges, left.x, left.y, -1, center.x, center.y, 0, c2.x, c2.y, 0);
+  pushTri(tris, edges, right.x, right.y, 1, r2.x, r2.y, 1, c2.x, c2.y, 0);
+  pushTri(tris, edges, right.x, right.y, 1, c2.x, c2.y, 0, center.x, center.y, 0);
+}
+
+function pushRoundCap(
+  tris: number[],
+  edges: number[],
+  center: Vec2,
+  from: Vec2,
+  to: Vec2,
+  outward: Vec2,
+  radius: number
+) {
+  const tip = {
+    x: center.x + outward.x * radius,
+    y: center.y + outward.y * radius,
+  };
+  // Two quarter-arcs: from → tip → to (always the outward hemisphere).
+  fanOuterArc(tris, edges, center, from, tip, radius, -1);
+  fanOuterArc(tris, edges, center, tip, to, radius, 1);
 }

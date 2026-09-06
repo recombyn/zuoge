@@ -1,14 +1,86 @@
 /**
  * Content strokes are authored in **scene** units and scale with the camera.
- * No on-screen hairline floor, no hard cull, no zoom-out thickening — paint
- * the geometric width; far zoom may drop below 1 CSS px uniformly.
+ *
+ * Hairline policy (WebGL ribbons):
+ * 1. Always tessellate the full stroke ribbon at geometric scene width.
+ * 2. Measure projected screen width: `sceneWidth * zoom * dpr`.
+ * 3. Screen width > 1px → submit the ribbon for draw.
+ * 4. Screen width ≤ 1px → skip draw submission; cached geometry stays intact.
+ *
+ * This avoids sub-pixel ribbon raster instability (ants / broken dashes) without
+ * expanding width or inventing a solid min-width floor.
  *
  * `floorContentStrokeSceneWidth` keeps the historic name/signature for callers
- * (WebGL / SVG / atlas bake) but returns geometric scene width unchanged.
+ * that still want geometric scene width (default minCssPx = 0).
  */
 
-/** @deprecated Content ink no longer floors to a minimum CSS px. Kept as 0. */
+/** @deprecated Prefer strokeRibbonPaint for WebGL ribbons. */
 export const CONTENT_STROKE_MIN_CSS_PX = 0;
+
+/**
+ * Screen-pixel threshold for submitting stroke ribbons.
+ * At or below this, geometry is kept but not drawn.
+ */
+export const STROKE_SUBMIT_MIN_SCREEN_PX = 1;
+
+export type StrokeRibbonPaint = {
+  /** Scene-space ribbon width to tessellate (always authored / geometric). */
+  width: number;
+  /** Projected screen width (`scene * zoom * dpr`). */
+  screenWidth: number;
+  /** True when the ribbon should be submitted for GPU draw this frame. */
+  submit: boolean;
+};
+
+/**
+ * Projected stroke width in screen pixels (includes devicePixelRatio).
+ */
+export function strokeScreenWidth(sceneWidth: number, zoom: number, dpr = 1): number {
+  const sw = Math.max(0, Number(sceneWidth) || 0);
+  if (!(sw > 0)) return 0;
+  const z = Math.max(0.05, Number(zoom) || 1) * Math.max(1, Number(dpr) || 1);
+  return sw * z;
+}
+
+/** Submit ribbon only when projected screen width is strictly greater than 1px. */
+export function shouldSubmitStrokeRibbon(screenWidthPx: number): boolean {
+  return Number(screenWidthPx) > STROKE_SUBMIT_MIN_SCREEN_PX;
+}
+
+/**
+ * Stroke ribbon paint decision for WebGL.
+ * Geometry width is always geometric; `submit` gates draw only.
+ */
+export function strokeRibbonPaint(
+  sceneWidth: number,
+  zoom: number,
+  dpr = 1
+): StrokeRibbonPaint {
+  const width = Math.max(0, Number(sceneWidth) || 0);
+  if (!(width > 0)) return { width: 0, screenWidth: 0, submit: false };
+  const screenWidth = strokeScreenWidth(width, zoom, dpr);
+  return {
+    width,
+    screenWidth,
+    submit: shouldSubmitStrokeRibbon(screenWidth),
+  };
+}
+
+/**
+ * @deprecated Use strokeRibbonPaint. Kept for call-site migration:
+ * returns geometric `width` and `alphaScale` 1 when submit else 0.
+ */
+export function coverageConservingStrokePaint(
+  sceneWidth: number,
+  zoom: number,
+  dpr = 1
+): { width: number; alphaScale: number } {
+  const p = strokeRibbonPaint(sceneWidth, zoom, dpr);
+  return { width: p.width, alphaScale: p.submit ? 1 : 0 };
+}
+
+/** @deprecated Alias — coverage expansion removed; threshold is STROKE_SUBMIT_MIN_SCREEN_PX. */
+export const STROKE_COVERAGE_CSS_PX = STROKE_SUBMIT_MIN_SCREEN_PX;
 
 /**
  * Scene stroke width for paint. Returns geometric `sceneWidth` (no screen floor

@@ -238,13 +238,20 @@ describe('wasm geom adapter', () => {
       attrs: {
         shapeType: 'ellipse',
         'fill-color': '#abc',
-        'ellipse-inner-ratio': 0.4,
+        ellipseInnerRatio: 0.4,
         'stroke-enabled': false,
       },
     } as SceneNodeInput;
     const mesh = getOrBuildShapeMesh('donut', node, { width: 80, height: 80 });
     expect(mesh?.fill).not.toBeNull();
     expect(mesh!.fill!.triangleCount).toBeGreaterThanOrEqual(4);
+    // Fingerprint must include camelCase IR so live/commit remesh.
+    const solid = {
+      ...node,
+      attrs: { ...node.attrs, ellipseInnerRatio: 0 },
+    } as SceneNodeInput;
+    const solidMesh = getOrBuildShapeMesh('donut-solid', solid, { width: 80, height: 80 });
+    expect(solidMesh!.fill!.triangleCount).not.toBe(mesh!.fill!.triangleCount);
   });
 
   it('buildShapeMeshes nests multi-M path holes', () => {

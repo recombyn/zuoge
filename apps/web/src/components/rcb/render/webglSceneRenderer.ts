@@ -1,6 +1,8 @@
 /**
- * WebGL2 backend for SoA vector meshes + media atlas stamps (ADR 0027).
+ * WebGL2 backend for SoA vector meshes + textured media quads (ADR 0027).
  * Shape fill/stroke are GPU triangles (never atlas bake).
+ * Text idle uses dedicated MSDF glyph atlas (kind 4).
+ * Media idle: per-node TEXTURE_2D + textured mesh (not shared atlas stamps).
  */
 import { rcbCameraCssZoom, rcbCameraScreenOffset, rcbViewportSceneBounds } from '@/components/rcb/core/math';
 import { getNodeTransformPreview } from '@/components/rcb/core/transformPreview';
@@ -36,16 +38,14 @@ import {
   ensureSharedSoaWebglAtlas,
   recreateSharedSoaWebglAtlas,
   pruneSoaAtlasForBuffer,
-  pushAtlasRegionInstance,
   releaseSoaAtlasPrefix,
-  stampImageToAtlas,
-  atlasZoomBucket,
   type SoaWebglAtlas,
 } from '@/components/rcb/render/webglInstanceAtlas';
 import {
   bakeAudioInkForAtlas,
   bakeMediaInkForAtlas,
   bumpSceneCanvasIdlePaint,
+  getSceneCanvasIdlePaint,
   isFillImageWebglUnsafe,
   hitTestWithSpatialIndex,
   mediaPaintSrc,
@@ -56,9 +56,24 @@ import {
 import { getOrBuildShapeMesh } from '@/components/rcb/render/vector/meshCache';
 import { appendMeshLocal } from '@/components/rcb/render/vector/appendMesh';
 import {
-  ensureTextOutlineMesh,
-  getTextOutlineMesh,
-} from '@/components/rcb/render/vector/textOutlineMesh';
+  appendTexturedMediaQuad,
+  createMediaTexBatch,
+  disposeAllMediaNodeTextures,
+  drawMediaTexBatch,
+  mediaTextureFingerprint,
+  pruneMediaNodeTextures,
+  SOA_WEBGL_TEX_MESH_FS,
+  SOA_WEBGL_TEX_MESH_VS,
+  type MediaTexBatch,
+} from '@/components/rcb/render/mediaTextureMesh';
+
+import {
+  ensureSharedMsdfAtlas,
+  layoutMsdfTextQuads,
+  parseCssColorRgb,
+  MSDF_ATLAS_SIZE,
+  MSDF_PX_RANGE,
+} from '@/components/rcb/render/vector/textMsdfAtlas';
 import {
   buildNormalizedDepthLookup,
   shouldRunGpuDepthOfField,
@@ -70,7 +85,7 @@ import {
 } from '@/components/rcb/render/webglDepthOfFieldPass';
 import {
   adaptivePathStrokeMaxSegs,
-  floorContentStrokeSceneWidth,
+  strokeRibbonPaint,
 } from '@/components/rcb/render/strokeScreenFloor';
 import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
 
@@ -124,7 +139,10 @@ void main() {
 export const SOA_WEBGL_INK_FS = `#version 300 es
 precision mediump float;
 uniform sampler2D uAtlas;
+uniform sampler2D uMsdf;
 uniform float uZoom;
+uniform float uMsdfSize;
+uniform float uMsdfPxRange;
 in vec2 vUv;
 in vec2 vAtlasUv;
 in vec4 vColor;
@@ -132,11 +150,30 @@ in float vKind;
 in vec2 vWorld;
 in vec4 vClip;
 out vec4 outColor;
+float median3(float r, float g, float b) {
+  return max(min(r, g), min(max(r, g), b));
+}
 void main() {
   if (vWorld.x < vClip.x || vWorld.y < vClip.y || vWorld.x > vClip.z || vWorld.y > vClip.w) {
     discard;
   }
-  // Atlas stamp (closed fills / paths / bake tiles).
+  // MSDF glyph (dedicated distance atlas — not media bake).
+  // screenPxRange (msdfgen-style): fwidth(sd) alone hardens the jagged EDT
+  // contour when zoomed in → mosaic blocks. Range scales AA with screen size.
+  if (vKind > 3.5 && vKind < 4.5) {
+    vec3 msdf = texture(uMsdf, vAtlasUv).rgb;
+    float sd = median3(msdf.r, msdf.g, msdf.b);
+    vec2 unitRange = vec2(uMsdfPxRange) / max(uMsdfSize, 1.0);
+    vec2 screenTexSize = 1.0 / max(fwidth(vAtlasUv), vec2(1e-6));
+    float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    float screenPxDistance = screenPxRange * (sd - 0.5);
+    float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);
+    if (alpha < 0.004) discard;
+    float a = vColor.a * alpha;
+    outColor = vec4(vColor.rgb * a, a);
+    return;
+  }
+  // Atlas stamp (media bake tiles).
   if (vKind > 2.5 && vKind < 3.5) {
     vec4 tex = texture(uAtlas, vAtlasUv);
     if (tex.a < 0.01) discard;
@@ -144,14 +181,15 @@ void main() {
     outColor = vec4(tex.rgb * tex.a, tex.a);
     return;
   }
-  // Open stroke segment (line/arrow/pen): soft long-edge AA.
-  // Canvas2D atlas (pencil) already AA-bakes; hard quads look staircased on diagonals.
+  // Open stroke segment (line/arrow/pen): coverage-preserving long-edge AA.
+  // Never discard low cover — sub-pixel ribbons must deposit fractional alpha
+  // (hard discard → dotted "ant lines" that flicker with zoom/pan).
   if (vKind > 1.5 && vKind < 2.5) {
     float d = abs(vUv.y);
-    float aa = max(fwidth(d), 1e-4);
-    float cover = 1.0 - smoothstep(1.0 - aa, 1.0, d);
-    if (cover < 0.01) discard;
+    float w = max(fwidth(d), 1e-4);
+    float cover = clamp((1.0 - d) / w + 0.5, 0.0, 1.0);
     float a = vColor.a * cover;
+    if (a < 1e-4) discard;
     outColor = vec4(vColor.rgb * a, a);
     return;
   }
@@ -171,9 +209,11 @@ uniform vec2 uStage;
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec4 aColor;
 layout(location = 2) in vec4 aClip;
+layout(location = 3) in float aEdge;
 out vec4 vColor;
 out vec2 vWorld;
 out vec4 vClip;
+out float vEdge;
 void main() {
   vec2 screen = aPos * uZoom + uPan;
   vec2 clip = vec2(
@@ -184,6 +224,7 @@ void main() {
   vColor = aColor;
   vWorld = aPos;
   vClip = aClip;
+  vEdge = aEdge;
 }`;
 
 export const SOA_WEBGL_MESH_FS = `#version 300 es
@@ -191,13 +232,27 @@ precision mediump float;
 in vec4 vColor;
 in vec2 vWorld;
 in vec4 vClip;
+in float vEdge;
 out vec4 outColor;
 void main() {
   if (vWorld.x < vClip.x || vWorld.y < vClip.y || vWorld.x > vClip.z || vWorld.y > vClip.w) {
     discard;
   }
+  // Stroke ribbon AA (fills push aEdge=0 → cover stays 1).
+  // Coverage is continuous in edge-space: distToRim / fwidth + 0.5.
+  // Do not cap fwidth or discard low cover — that turned sub-pixel rect edges
+  // into zoom-dependent dotted "ant lines" (H edges worse than V).
+  // High zoom: fwidth small → sharp rim, shaft stays solid (center dist≈1).
+  float d = abs(vEdge);
+  float cover = 1.0;
+  if (d > 1e-4) {
+    float w = max(fwidth(d), 1e-4);
+    cover = clamp((1.0 - d) / w + 0.5, 0.0, 1.0);
+  }
+  float a = vColor.a * cover;
+  if (a < 1e-4) discard;
   // Premultiply — matches premultipliedAlpha:true + ONE / ONE_MINUS_SRC_ALPHA.
-  outColor = vec4(vColor.rgb * vColor.a, vColor.a);
+  outColor = vec4(vColor.rgb * a, a);
 }`;
 
 const VS = SOA_WEBGL_INK_VS;
@@ -615,11 +670,16 @@ export type CollectSoaWebglOpts = {
   meshCol?: number[];
   /** Per-vertex LTRB clip for meshPos. */
   meshClip?: number[];
+  /** Per-vertex stroke rim (±1); fills use 0. */
+  meshEdge?: number[];
+  /** Idle media textured quads (per-node textures — not atlas kind 3). */
+  mediaTex?: MediaTexBatch;
 };
 
 /**
  * Pack visible SoA instances intersecting the view.
- * kinds: 0=rect, 1=ellipse, 2=open stroke segment, 3=atlas stamp.
+ * kinds: 0=rect, 1=ellipse, 2=open stroke segment, 3=legacy atlas tile, 4=MSDF glyph.
+ * Media (image/video/audio) goes to {@link CollectSoaWebglOpts.mediaTex}.
  */
 export function collectSoaWebglInstances(
   buf: SceneRenderBuffer,
@@ -631,7 +691,6 @@ export function collectSoaWebglInstances(
   uvs: number[] = [],
   opts?: CollectSoaWebglOpts
 ) {
-  const atlas = opts?.atlas ?? null;
   const depthOut = opts?.depths;
   const depthForId = opts?.depthForId;
   const clips = opts?.clips;
@@ -643,10 +702,16 @@ export function collectSoaWebglInstances(
   const meshPos = opts?.meshPos;
   const meshCol = opts?.meshCol;
   const meshClip = opts?.meshClip;
+  const meshEdge = opts?.meshEdge;
+  const mediaTex = opts?.mediaTex;
   const vl = view.left ?? view.x ?? 0;
   const vt = view.top ?? view.y ?? 0;
   const vr = vl + view.width;
   const vb = vt + view.height;
+
+  // Match Canvas2D `listSceneCanvasIdlePaintIds`: hide the inline-edit node
+  // so WebGL mesh does not draw under TextInlineEditor (double layer / ghost).
+  const hiddenNodeId = String(getSceneCanvasIdlePaint()?.hiddenNodeId || '').trim();
 
   // Buffer order ≠ stackOrder. Collect candidates then paint back→front so
   // selection max+1 and permanent z match Canvas2D idle / SVG data-z.
@@ -655,6 +720,7 @@ export function collectSoaWebglInstances(
     const flags = buf.flags[i];
     if (!(flags & SOA_FLAG_VISIBLE) || !(flags & SOA_FLAG_CANVAS_IDLE)) continue;
     const idEarly = buf.ids[i];
+    if (idEarly && hiddenNodeId && idEarly === hiddenNodeId) continue;
     if (idEarly && getNodeTransformPreview(idEarly)?.hidden) continue;
     if (onlyFrameId && paintDoc && idEarly) {
       const node = paintDoc.deltaSetLike?.[idEarly];
@@ -702,8 +768,17 @@ export function collectSoaWebglInstances(
     const kind = buf.kinds[i];
     const { x, y, w, h, dx: odx, dy: ody } = resolveSoaPaintBox(buf, i);
     const rgba = argbToRgba(buf.colors[i]);
-    const strokeRgba = soaWebglStrokeRgba(buf, i);
-    const lineW = floorContentStrokeSceneWidth(soaStrokeWidth(buf, i), zoom);
+    const strokeBaseRgba = soaWebglStrokeRgba(buf, i);
+    const strokePaint = strokeRibbonPaint(soaStrokeWidth(buf, i), zoom, dpr);
+    // Geometric scene width for fallback segments; mesh tessellation is also geometric.
+    const lineW = strokePaint.width;
+    const submitStroke = strokePaint.submit;
+    const strokeRgba: [number, number, number, number] = [
+      strokeBaseRgba[0],
+      strokeBaseRgba[1],
+      strokeBaseRgba[2],
+      strokeBaseRgba[3],
+    ];
     const pathMaxSegs = adaptivePathStrokeMaxSegs(zoom, SOA_WEBGL_PATH_MAX_SEGS);
     const forceStamp = (flags & SOA_FLAG_DIRTY) !== 0;
     const nodeId = buf.ids[i] || '';
@@ -716,29 +791,17 @@ export function collectSoaWebglInstances(
 
     if (kind === SOA_KIND_IMAGE) {
       const node = paintDoc?.deltaSetLike?.[id];
-      if (!node || !atlas) {
+      if (!node || !mediaTex) {
         clearSoaDirtyFlag(buf, i, flags, forceStamp);
         continue;
       }
       const isAudio = String(node.key || '') === 'audio';
-      // Empty vs filled must not share atlas keys — otherwise a prior photo
-      // stamp is cache-hit and the empty plate shows the old image colors.
       const mediaSrc = isAudio ? '' : mediaPaintSrc(node, id);
-      const zBucket = atlasZoomBucket(zoom);
-      // Always include zoomBucket so bucket changes force a new stamp (restamp).
-      const atlasKey = isAudio
-        ? `aud:${id}:z${zBucket}`
-        : mediaSrc
-          ? `img:${id}:z${zBucket}`
-          : `img:${id}:empty:z${zBucket}`;
       const baked = isAudio
         ? bakeAudioInkForAtlas(node, w, h, zoom)
         : bakeMediaInkForAtlas(node, w, h, id, zoom);
       if (!baked) {
         const src = mediaSrc;
-        // Pending decode → bump. CORS/tainted → stop retrying; host will paint.
-        // Empty src should bake a plate — if bake still failed, clear dirty
-        // (do not eternal-bump; that burned CPU and never drew).
         if (isAudio || !src || (src && isFillImageWebglUnsafe(src))) {
           clearSoaDirtyFlag(buf, i, flags, forceStamp);
         } else {
@@ -746,22 +809,42 @@ export function collectSoaWebglInstances(
         }
         continue;
       }
-      const region = stampImageToAtlas(
-        atlas,
-        atlasKey,
-        baked as CanvasImageSource,
-        { left: x, top: y, width: w, height: h },
-        { force: forceStamp }
-      );
-      if (region) {
-        for (const activeClip of paintClips) {
-          // Stamp world is already live x/y — never re-add odx/ody (ghost fill).
-          pushAtlasRegionInstance(atlas, region, rects, colors, kinds, angles, uvs, 0, 0, 0);
-          if (depthOut) depthOut.push(slotDepth);
-          pushInstanceClip(clips, activeClip);
-        }
-        if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+      const preview = id ? getNodeTransformPreview(id) : undefined;
+      const liveAngle = Number.isFinite(preview?.angle)
+        ? Number(preview!.angle)
+        : Number(node.attrs?.angle) || 0;
+      const opacity = parseLayerOpacity(node.attrs?.opacity, 1);
+      const rgbaOut: [number, number, number, number] = [1, 1, 1, opacity];
+      const fingerprint = mediaTextureFingerprint(node, id, w, h, zoom);
+      const vertStart = Math.floor(mediaTex.pos.length / 2);
+      let wrote = 0;
+      for (const activeClip of paintClips) {
+        wrote += appendTexturedMediaQuad(
+          w,
+          h,
+          x,
+          y,
+          rgbaOut,
+          activeClip,
+          mediaTex,
+          {
+            angleDeg: liveAngle,
+            pivotW: w,
+            pivotH: h,
+          }
+        );
       }
+      if (wrote > 0) {
+        mediaTex.draws.push({
+          nodeId: id,
+          fingerprint,
+          source: baked as TexImageSource,
+          force: forceStamp,
+          vertStart,
+          vertCount: wrote,
+        });
+      }
+      if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
       continue;
     }
 
@@ -780,49 +863,36 @@ export function collectSoaWebglInstances(
         Math.abs(liveAngle - (Number(node.attrs?.angle) || 0)) > 1e-4
           ? { ...node, attrs: { ...(node.attrs || {}), angle: liveAngle } }
           : node;
-      ensureTextOutlineMesh(id, paintNode, {
-        width: w,
-        height: h,
-        zoom,
-        dpr: Math.max(1, Number(opts?.dpr) || 1),
-      });
-      const textMesh = getTextOutlineMesh(id, paintNode, {
-        width: w,
-        height: h,
-        zoom,
-        dpr: Math.max(1, Number(opts?.dpr) || 1),
-      });
-      if (textMesh?.fill && meshPos && meshCol && meshClip) {
-        const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1);
-        const fillRgba: [number, number, number, number] = [
-          rgba[0],
-          rgba[1],
-          rgba[2],
-          rgba[3] * opacity,
-        ];
-        if (fillRgba[3] > 0.01) {
-          const rotOpts = {
-            angleDeg: liveAngle,
-            pivotW: w,
-            pivotH: h,
-          };
-          for (const activeClip of paintClips) {
-            appendMeshLocal(
-              textMesh.fill.positions,
-              x,
-              y,
-              fillRgba,
-              activeClip,
-              meshPos,
-              meshCol,
-              meshClip,
-              rotOpts
-            );
-          }
-        }
-        if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+      const laid = layoutMsdfTextQuads(paintNode, { width: w, height: h });
+      if (!laid || !laid.quads.length) {
+        if (laid?.pending) bumpSceneCanvasIdlePaint();
+        continue;
       }
-      // No text atlas — wait for outline mesh (ensure already kicked).
+      const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1) * laid.opacity;
+      const [fr, fg, fb] = parseCssColorRgb(laid.fill);
+      const angleRad = (liveAngle * Math.PI) / 180;
+      const c = Math.cos(angleRad);
+      const s = Math.sin(angleRad);
+      const cx = x + w * 0.5;
+      const cy = y + h * 0.5;
+      for (const q of laid.quads) {
+        const lx = q.x + q.w * 0.5 - w * 0.5;
+        const ly = q.y + q.h * 0.5 - h * 0.5;
+        const rx = c * lx - s * ly;
+        const ry = s * lx + c * ly;
+        const gx = cx + rx - q.w * 0.5;
+        const gy = cy + ry - q.h * 0.5;
+        for (const activeClip of paintClips) {
+          rects.push(gx, gy, q.w, q.h);
+          colors.push(fr, fg, fb, opacity);
+          kinds.push(4);
+          angles.push(angleRad);
+          uvs.push(q.u0, q.v0, q.u1, q.v1);
+          if (depthOut) depthOut.push(slotDepth);
+          pushInstanceClip(clips, activeClip);
+        }
+      }
+      if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
       continue;
     }
 
@@ -856,8 +926,8 @@ export function collectSoaWebglInstances(
         });
         if (mesh) {
           const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1);
-          const isPencil =
-            String(paintNode.attrs?.shapeType || '').toLowerCase() === 'pencil';
+          const shapeType = String(paintNode.attrs?.shapeType || '').toLowerCase();
+          const isPencil = shapeType === 'pencil';
           const fillRgba: [number, number, number, number] = [
             rgba[0],
             rgba[1],
@@ -865,12 +935,13 @@ export function collectSoaWebglInstances(
             rgba[3] * opacity,
           ];
           const strokeBase = soaWebglStrokeRgba(buf, i);
-          const strokeOut: [number, number, number, number] = [
+          const strokeInk: [number, number, number, number] = [
             strokeBase[0],
             strokeBase[1],
             strokeBase[2],
             strokeBase[3] * opacity,
           ];
+          const strokeOut = strokeInk;
           const rotOpts = {
             angleDeg: liveAngle,
             pivotW: w,
@@ -878,10 +949,10 @@ export function collectSoaWebglInstances(
           };
           let wrote = 0;
           for (const activeClip of paintClips) {
-            // Pencil silhouette is a fill mesh; ink color lives in strokeColors
+            // Pencil silhouette: ink color lives in strokeColors
             // (fill attrs are typically transparent for freehand).
             const fillCol =
-              isPencil && mesh.fill && fillRgba[3] < 0.01 ? strokeOut : fillRgba;
+              isPencil && mesh.fill && fillRgba[3] < 0.01 ? strokeInk : fillRgba;
             if (mesh.fill && fillCol[3] > 0.01) {
               wrote += appendMeshLocal(
                 mesh.fill.positions,
@@ -892,14 +963,17 @@ export function collectSoaWebglInstances(
                 meshPos,
                 meshCol,
                 meshClip,
-                rotOpts
+                rotOpts,
+                meshEdge
               );
             }
             // Pencil uses silhouette fill only — skip uniform centerline ribbon.
+            // Screen ≤1px: keep mesh cached, do not submit ribbon (rule 4).
             if (
               mesh.stroke &&
+              submitStroke &&
               lineW > 0 &&
-              strokeOut[3] > 0.01 &&
+              strokeOut[3] > 0.004 &&
               !(isPencil && mesh.fill)
             ) {
               wrote += appendMeshLocal(
@@ -911,7 +985,8 @@ export function collectSoaWebglInstances(
                 meshPos,
                 meshCol,
                 meshClip,
-                rotOpts
+                { ...rotOpts, edges: mesh.stroke.edges },
+                meshEdge
               );
             }
           }
@@ -919,7 +994,14 @@ export function collectSoaWebglInstances(
             if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
             continue;
           }
-          // Mesh empty (e.g. transparent) — fall through to instance/segment fallback.
+          // Mesh was built but nothing drawn (e.g. screen ≤1px stroke cull, or
+          // transparent fill). Still own the slot — do not fall through to
+          // RECT/ELLIPSE fill instances (ghost plate).
+          if (mesh.fill || mesh.stroke) {
+            if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+            continue;
+          }
+          // Truly empty mesh — fall through to instance/segment fallback.
         }
       }
       // Fallback without mesh buffers: sharp rect/ellipse instances only.
@@ -965,6 +1047,11 @@ export function collectSoaWebglInstances(
         if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
         continue;
       }
+      // Authored stroke with screen ≤1px: do not submit ribbon segments.
+      if (strokeW > 0 && !submitStroke) {
+        if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+        continue;
+      }
       emitPathStrokeSegments({
         xy: buf.pathXY,
         start,
@@ -991,6 +1078,10 @@ export function collectSoaWebglInstances(
 
     if (kind === SOA_KIND_LINE) {
       // Fallback when mesh buffers unavailable (tests).
+      if (lineW > 0 && !submitStroke) {
+        if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+        continue;
+      }
       const node = paintDoc?.deltaSetLike?.[id];
       const preview = id ? getNodeTransformPreview(id) : undefined;
       const liveAngle = Number.isFinite(preview?.angle)
@@ -1160,7 +1251,7 @@ export function collectSoaWebglInstances(
   }
 }
 
-/** WebGL ink for SoA vector meshes + media atlas stamps. */
+/** WebGL ink for SoA vector meshes + textured media quads. */
 export function createWebglSceneRenderer(
   deps: CanvasSceneRendererDeps
 ): SceneRenderer | null {
@@ -1186,6 +1277,9 @@ export function createWebglSceneRenderer(
   const meshVs = compile(gl, gl.VERTEX_SHADER, MESH_VS);
   const meshFs = compile(gl, gl.FRAGMENT_SHADER, MESH_FS);
   const meshProg = meshVs && meshFs ? link(gl, meshVs, meshFs) : null;
+  const texVs = compile(gl, gl.VERTEX_SHADER, SOA_WEBGL_TEX_MESH_VS);
+  const texFs = compile(gl, gl.FRAGMENT_SHADER, SOA_WEBGL_TEX_MESH_FS);
+  const texProg = texVs && texFs ? link(gl, texVs, texFs) : null;
   if (!prog || !vs || !fs) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -1196,9 +1290,15 @@ export function createWebglSceneRenderer(
 
   const vao = gl.createVertexArray();
   const meshVao = gl.createVertexArray();
+  const texVao = gl.createVertexArray();
   const meshPosBuf = gl.createBuffer();
   const meshColBuf = gl.createBuffer();
   const meshClipBuf = gl.createBuffer();
+  const meshEdgeBuf = gl.createBuffer();
+  const texPosBuf = gl.createBuffer();
+  const texUvBuf = gl.createBuffer();
+  const texColBuf = gl.createBuffer();
+  const texClipBuf = gl.createBuffer();
   const cornerBuf = gl.createBuffer();
   const rectBuf = gl.createBuffer();
   const colorBuf = gl.createBuffer();
@@ -1208,10 +1308,12 @@ export function createWebglSceneRenderer(
   const clipBuf = gl.createBuffer();
   const depthBuf = gl.createBuffer();
   const atlasTex = gl.createTexture();
+  const msdfTex = gl.createTexture();
   let disposed = false;
   let instanceCap = 0;
   let atlasUploadedRevision = -1;
   let atlasBufferRevision = -1;
+  let msdfUploadedRevision = -1;
   let dofPass: WebglDepthOfFieldPass | null = null;
   let dofVao: WebGLVertexArrayObject | null = null;
   /** Scratch typed views — avoid per-frame `new Float32Array(arr)` GC. */
@@ -1222,6 +1324,7 @@ export function createWebglSceneRenderer(
   let scratchUv = new Float32Array(0);
   let scratchClip = new Float32Array(0);
   let scratchDepth = new Float32Array(0);
+
 
   function copyToScratch(src: ArrayLike<number>, prev: Float32Array): Float32Array {
     const n = src.length;
@@ -1289,7 +1392,7 @@ export function createWebglSceneRenderer(
   gl.vertexAttribDivisor(6, 1);
   gl.bindVertexArray(null);
 
-  if (meshProg && meshVao && meshPosBuf && meshColBuf && meshClipBuf) {
+  if (meshProg && meshVao && meshPosBuf && meshColBuf && meshClipBuf && meshEdgeBuf) {
     gl.bindVertexArray(meshVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshPosBuf);
     gl.enableVertexAttribArray(0);
@@ -1300,6 +1403,26 @@ export function createWebglSceneRenderer(
     gl.bindBuffer(gl.ARRAY_BUFFER, meshClipBuf);
     gl.enableVertexAttribArray(2);
     gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshEdgeBuf);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+
+  if (texProg && texVao && texPosBuf && texUvBuf && texColBuf && texClipBuf) {
+    gl.bindVertexArray(texVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texPosBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texUvBuf);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texColBuf);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, texClipBuf);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
   }
 
@@ -1309,6 +1432,22 @@ export function createWebglSceneRenderer(
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+  gl.bindTexture(gl.TEXTURE_2D, msdfTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([128, 128, 128, 255])
+  );
   gl.bindTexture(gl.TEXTURE_2D, null);
 
   function ensureInstanceCapacity(n: number) {
@@ -1398,6 +1537,8 @@ export function createWebglSceneRenderer(
       const meshPos: number[] = [];
       const meshCol: number[] = [];
       const meshClipArr: number[] = [];
+      const meshEdgeArr: number[] = [];
+      const mediaTex = createMediaTexBatch();
       // Vector dual-backend: skip shape bake tiles; draw live instances + meshes.
       collectSoaWebglInstances(buf, view, rects, colors, kinds, angles, uvs, {
         atlas,
@@ -1412,10 +1553,13 @@ export function createWebglSceneRenderer(
         meshPos,
         meshCol,
         meshClip: meshClipArr,
+        meshEdge: meshEdgeArr,
+        mediaTex,
       });
       const count = kinds.length;
       const meshVertCount = Math.floor(meshPos.length / 2);
-      if (!count && meshVertCount < 3) {
+      const mediaVertCount = Math.floor(mediaTex.pos.length / 2);
+      if (!count && meshVertCount < 3 && mediaVertCount < 3) {
         if (dof) {
           dof.unbindSceneFbo();
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1481,14 +1625,38 @@ export function createWebglSceneRenderer(
         }
       }
 
+      const msdf = ensureSharedMsdfAtlas();
+      if (msdf && msdf.revision !== msdfUploadedRevision) {
+        gl.bindTexture(gl.TEXTURE_2D, msdfTex);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+        try {
+          gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            msdf.canvas as TexImageSource
+          );
+          msdfUploadedRevision = msdf.revision;
+        } catch {
+          msdfUploadedRevision = -1;
+        }
+      }
+
       const drawProg = dof ? dof.sceneProgram : prog;
       gl.useProgram(drawProg);
       gl.uniform2f(gl.getUniformLocation(drawProg, 'uPan'), pan.x, pan.y);
       gl.uniform1f(gl.getUniformLocation(drawProg, 'uZoom'), z);
       gl.uniform2f(gl.getUniformLocation(drawProg, 'uStage'), sw, sh);
+      gl.uniform1f(gl.getUniformLocation(drawProg, 'uMsdfSize'), MSDF_ATLAS_SIZE);
+      gl.uniform1f(gl.getUniformLocation(drawProg, 'uMsdfPxRange'), MSDF_PX_RANGE);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, atlasTex);
       gl.uniform1i(gl.getUniformLocation(drawProg, 'uAtlas'), 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, msdfTex);
+      gl.uniform1i(gl.getUniformLocation(drawProg, 'uMsdf'), 1);
       gl.bindVertexArray(useDof && dofVao ? dofVao : vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
       gl.bindVertexArray(null);
@@ -1506,8 +1674,36 @@ export function createWebglSceneRenderer(
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(meshCol), gl.DYNAMIC_DRAW);
         gl.bindBuffer(gl.ARRAY_BUFFER, meshClipBuf);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(meshClipArr), gl.DYNAMIC_DRAW);
+        // Keep edge buffer length == verts (fills push 0).
+        while (meshEdgeArr.length < meshVertCount) meshEdgeArr.push(0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, meshEdgeBuf);
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          new Float32Array(meshEdgeArr.slice(0, meshVertCount)),
+          gl.DYNAMIC_DRAW
+        );
         gl.drawArrays(gl.TRIANGLES, 0, meshVertCount);
         gl.bindVertexArray(null);
+      }
+
+      if (
+        mediaVertCount >= 3 &&
+        texProg &&
+        texVao &&
+        texPosBuf &&
+        texUvBuf &&
+        texColBuf &&
+        texClipBuf
+      ) {
+        const keepMedia = new Set(mediaTex.draws.map((d) => d.nodeId));
+        pruneMediaNodeTextures(gl, keepMedia);
+        drawMediaTexBatch(gl, texProg, texVao, texPosBuf, texUvBuf, texColBuf, texClipBuf, mediaTex, {
+          panX: pan.x,
+          panY: pan.y,
+          zoom: z,
+          stageW: sw,
+          stageH: sh,
+        });
       }
 
       if (dof) {
@@ -1524,12 +1720,16 @@ export function createWebglSceneRenderer(
       disposed = true;
       dofPass?.dispose();
       dofPass = null;
+      disposeAllMediaNodeTextures(gl);
       gl.deleteProgram(prog);
       gl.deleteShader(vs);
       gl.deleteShader(fs);
       if (meshProg) gl.deleteProgram(meshProg);
       if (meshVs) gl.deleteShader(meshVs);
       if (meshFs) gl.deleteShader(meshFs);
+      if (texProg) gl.deleteProgram(texProg);
+      if (texVs) gl.deleteShader(texVs);
+      if (texFs) gl.deleteShader(texFs);
       gl.deleteBuffer(cornerBuf);
       gl.deleteBuffer(rectBuf);
       gl.deleteBuffer(colorBuf);
@@ -1541,9 +1741,16 @@ export function createWebglSceneRenderer(
       if (meshPosBuf) gl.deleteBuffer(meshPosBuf);
       if (meshColBuf) gl.deleteBuffer(meshColBuf);
       if (meshClipBuf) gl.deleteBuffer(meshClipBuf);
+      if (meshEdgeBuf) gl.deleteBuffer(meshEdgeBuf);
+      if (texPosBuf) gl.deleteBuffer(texPosBuf);
+      if (texUvBuf) gl.deleteBuffer(texUvBuf);
+      if (texColBuf) gl.deleteBuffer(texColBuf);
+      if (texClipBuf) gl.deleteBuffer(texClipBuf);
       gl.deleteTexture(atlasTex);
+      gl.deleteTexture(msdfTex);
       gl.deleteVertexArray(vao);
       if (meshVao) gl.deleteVertexArray(meshVao);
+      if (texVao) gl.deleteVertexArray(texVao);
       if (dofVao) gl.deleteVertexArray(dofVao);
     },
   };

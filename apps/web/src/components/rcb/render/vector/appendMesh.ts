@@ -10,6 +10,11 @@ export type AppendMeshLocalOpts = {
   pivotY?: number;
   pivotW?: number;
   pivotH?: number;
+  /**
+   * Per-vertex stroke rim attribute (±1). Length must match localXY verts.
+   * Fills omit this (edge 0 → full coverage in mesh FS).
+   */
+  edges?: Float32Array | null;
 };
 
 /**
@@ -25,7 +30,8 @@ export function appendMeshLocal(
   meshPos: number[],
   meshCol: number[],
   meshClip: number[],
-  opts?: AppendMeshLocalOpts
+  opts?: AppendMeshLocalOpts,
+  meshEdge?: number[]
 ): number {
   if (!localXY || localXY.length < 6) return 0;
   const c0 = clip?.[0] ?? -1e8;
@@ -41,6 +47,7 @@ export function appendMeshLocal(
   const rad = (angleDeg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
+  const srcEdges = opts?.edges;
   let n = 0;
   for (let i = 0; i + 1 < localXY.length; i += 2) {
     let lx = localXY[i]!;
@@ -54,6 +61,10 @@ export function appendMeshLocal(
     meshPos.push(lx + ox, ly + oy);
     meshCol.push(rgba[0], rgba[1], rgba[2], rgba[3]);
     meshClip.push(c0, c1, c2, c3);
+    if (meshEdge) {
+      const ei = n;
+      meshEdge.push(srcEdges && ei < srcEdges.length ? srcEdges[ei]! : 0);
+    }
     n += 1;
   }
   return n;

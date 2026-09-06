@@ -208,7 +208,7 @@ Backing 仍随 `zoom×dpr` 变；`ARTBOARD_INK_MAX_EDGE` 防 OOM，不再靠 8×
 | 矩形/椭圆/多边形/星/三角 | atlas 烤图 + stroke pad |
 | 线/箭头 | BASIC_GEOM → WebGL 开线段或 atlas 笔触 |
 | 铅笔 | 富路径 atlas（不是 BASIC 中心线） |
-| 文字 | SoA TEXT → **字形 outline fill mesh**（无 text atlas；编辑时 FO） |
+| 文字 | SoA TEXT → **MSDF 字形图集 + shader**（非 media bake；编辑时 FO） |
 | 图片 | idle：atlas；CORS/过程/特殊 → DomHost |
 | 视频 | idle 可 atlas；真正播常用 FO `<video>` |
 | 空生成器 | **强制 SVG host**（图标清晰 + 可压板） |

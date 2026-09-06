@@ -2012,7 +2012,7 @@ export function buildShapeOutlines(opts: {
         : liveShapeGeomBox(id) || deflateSelectionBox(chromeBox, node));
     const gw = Math.max(1, geomBox.width);
     const gh = Math.max(1, geomBox.height);
-    const pathD = resolveOutlinePathD(node, gw, gh);
+    const pathD = resolveOutlinePathD(node, gw, gh, id);
     if (!pathD) continue;
     rememberNodePath2D(id, pathD);
     const angle = id === opts.singleId ? opts.chromeAngle : readNodeAngle(opts.document, id);

@@ -56,7 +56,10 @@ void main() {
 const SCENE_FS = `#version 300 es
 precision mediump float;
 uniform sampler2D uAtlas;
+uniform sampler2D uMsdf;
 uniform float uZoom;
+uniform float uMsdfSize;
+uniform float uMsdfPxRange;
 in vec2 vUv;
 in vec2 vAtlasUv;
 in vec4 vColor;
@@ -66,9 +69,26 @@ in vec2 vWorld;
 in vec4 vClip;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outDepth;
+float median3(float r, float g, float b) {
+  return max(min(r, g), min(max(r, g), b));
+}
 void main() {
   if (vWorld.x < vClip.x || vWorld.y < vClip.y || vWorld.x > vClip.z || vWorld.y > vClip.w) {
     discard;
+  }
+  if (vKind > 3.5 && vKind < 4.5) {
+    vec3 msdf = texture(uMsdf, vAtlasUv).rgb;
+    float sd = median3(msdf.r, msdf.g, msdf.b);
+    vec2 unitRange = vec2(uMsdfPxRange) / max(uMsdfSize, 1.0);
+    vec2 screenTexSize = 1.0 / max(fwidth(vAtlasUv), vec2(1e-6));
+    float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    float screenPxDistance = screenPxRange * (sd - 0.5);
+    float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);
+    if (alpha < 0.004) discard;
+    float a = vColor.a * alpha;
+    outColor = vec4(vColor.rgb * a, a);
+    outDepth = vec4(vDepth, 0.0, 0.0, 1.0);
+    return;
   }
   if (vKind > 2.5 && vKind < 3.5) {
     vec4 tex = texture(uAtlas, vAtlasUv);

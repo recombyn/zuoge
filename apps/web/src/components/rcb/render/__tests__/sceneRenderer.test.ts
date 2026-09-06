@@ -18,6 +18,8 @@ import {
   setFillImageCacheEntry,
   bumpSceneCanvasIdlePaint,
   subscribeSceneCanvasIdlePaint,
+  requestIdleCanvasFullRepaint,
+  consumeIdleCanvasFullRepaintPending,
   paintBasicShapeFill,
   paintCanvasShapeInk,
   paintCanvasPathInk,
@@ -681,7 +683,7 @@ describe('scene grid (Canvas underlay)', () => {
 });
 
 describe('Canvas idle path / text / shape paint', () => {
-  it('idle text uses outline mesh path (bakeTextInkForAtlas removed)', () => {
+  it('idle text uses Canvas2D paintCanvasTextInk helper', () => {
     expect(typeof paintCanvasTextInk).toBe('function');
   });
 
@@ -1687,6 +1689,36 @@ describe('SceneCanvasIdlePaint registry', () => {
     expect(listSceneCanvasIdlePaintIds()).toEqual([]);
     expect(ticks).toBe(2);
     unsub();
+  });
+
+  it('toggling hiddenNodeId forces full idle repaint (no ghost under text editor)', () => {
+    clearSceneCanvasIdlePaint();
+    // Drain any prior pending.
+    consumeIdleCanvasFullRepaintPending();
+    const doc = rectDoc();
+    const box = () => ({ left: 0, top: 0, width: 10, height: 10 });
+    setSceneCanvasIdlePaint({
+      document: doc,
+      canvasIds: ['n1'],
+      hiddenNodeId: null,
+      getNodeBox: box,
+    });
+    consumeIdleCanvasFullRepaintPending();
+    setSceneCanvasIdlePaint({
+      document: doc,
+      canvasIds: ['n1'],
+      hiddenNodeId: 'n1',
+      getNodeBox: box,
+    });
+    expect(consumeIdleCanvasFullRepaintPending()).toBe(true);
+    setSceneCanvasIdlePaint({
+      document: doc,
+      canvasIds: ['n1'],
+      hiddenNodeId: null,
+      getNodeBox: box,
+    });
+    expect(consumeIdleCanvasFullRepaintPending()).toBe(true);
+    clearSceneCanvasIdlePaint();
   });
 
   it('attr-only document replace does not wake idle paint (needs bump after SoA sync)', async () => {

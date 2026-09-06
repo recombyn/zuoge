@@ -49,6 +49,7 @@ import {
 import {
   clearNodePathFingerprints,
   getLiveShapeParamsPreviewNodeId,
+  invalidateNodePath2D,
   subscribeLiveShapeParamsPreview,
 } from '@/components/rcb/scene/document/sceneShapes';
 import { effectivePaintBox } from '@/components/rcb/core/transformPreview';
@@ -61,11 +62,13 @@ import {
   isSoaCanvasShapesEnabled,
   markAllSoaDirty,
   markSoaDirtyById,
+  rebuildSoaPathSamples,
   resolveSoaPaintBox,
   SOA_FLAG_FREE,
   syncSceneRenderBufferFromDocument,
   type SceneRenderBuffer,
 } from '@/components/rcb/render/sceneRenderBuffer';
+import { invalidateShapeMesh } from '@/components/rcb/render/vector/meshCache';
 import {
   bindSoaBakeElementTiles,
   getSharedSoaBake,
@@ -795,17 +798,20 @@ function RcbShapesLayer({
 
   // Paint-raise / stack-above DOM hosts must leave SoA ink (not SoftGlow-only).
   // Otherwise Canvas keeps CANVAS_IDLE under the SVG host and drag leaves 幻影.
+  // Inline text/pen edit: also drop CANVAS_IDLE for hiddenNodeId (no SVG host).
   useLayoutEffect(() => {
     if (!isSoaCanvasShapesEnabled() || aiMutationLock > 0) return;
     const buf = getSharedSceneRenderBuffer();
     if (buf.count === 0) return;
-    const flipped = applySoaHostInkFlags(buf, fullHostSet);
+    const hostIds = new Set(fullHostSet);
+    if (hiddenNodeId) hostIds.add(String(hiddenNodeId));
+    const flipped = applySoaHostInkFlags(buf, hostIds);
     if (flipped > 0) {
       // Ink flag flips do not change geometry — do not upsert raw SoA AABBs
       // (that dropped rotation expansion and broke angled stroke click-pick).
       bumpSceneCanvasIdlePaint();
     }
-  }, [fullHostSet, aiMutationLock]);
+  }, [fullHostSet, hiddenNodeId, aiMutationLock]);
 
   useEffect(() => {
     return () => {
@@ -825,6 +831,8 @@ function RcbShapesLayer({
       if (buf.count === 0) return;
       const hostIds = new Set(fullHostsRef.current);
       for (const id of forceFullSetRef.current) hostIds.add(id);
+      const editingHidden = getSceneCanvasIdlePaint()?.hiddenNodeId;
+      if (editingHidden) hostIds.add(String(editingHidden));
       if (previewNodeId) {
         if (mode === 'host') hostIds.add(previewNodeId);
         else hostIds.delete(previewNodeId);
@@ -836,16 +844,33 @@ function RcbShapesLayer({
       // Live corner radii are applied on SoA/WebGL (getLiveCornerRadiusPreviewRadii).
       // Keep CANVAS_IDLE — selection no longer mounts an SVG ink host for R-drag.
       flipHostInk(getLiveCornerRadiusPreviewNodeId(), 'canvas');
+      const id = getLiveCornerRadiusPreviewNodeId();
+      if (id) {
+        markSoaDirtyById(getSharedSceneRenderBuffer(), id);
+        bumpSceneCanvasIdlePaint();
+      }
     });
     const unsubShapeParams = subscribeLiveShapeParamsPreview(() => {
-      // Poly/star sides need SoA live-geo rebuild — demote host for that node.
-      flipHostInk(getLiveShapeParamsPreviewNodeId(), 'canvas');
+      // Poly/star/ellipse IR: remesh + wake even when host flags did not flip.
+      const id = getLiveShapeParamsPreviewNodeId();
+      flipHostInk(id, 'canvas');
+      if (id) {
+        invalidateShapeMesh(id);
+        invalidateNodePath2D(id);
+        const buf = getSharedSceneRenderBuffer();
+        markSoaDirtyById(buf, id);
+        rebuildSoaPathSamples(buf, document, { onlyIds: [id] });
+        const node = document?.deltaSetLike?.[id];
+        const owner = nodeOwnerFrameId(node);
+        if (owner) scheduleArtboardInkPaint(owner);
+        bumpSceneCanvasIdlePaint();
+      }
     });
     return () => {
       unsubRadius();
       unsubShapeParams();
     };
-  }, [aiMutationLock]);
+  }, [aiMutationLock, document]);
 
   // AI transaction commit —one buffer sync + bake invalidate + idle paint bump.
   useEffect(() => {

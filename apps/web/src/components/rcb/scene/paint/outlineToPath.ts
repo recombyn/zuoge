@@ -51,6 +51,11 @@ export type OutlineResult = {
   fillColor?: string;
   /** SVG fill-rule — text glyphs need evenodd for counters/holes. */
   fillRule?: 'nonzero' | 'evenodd';
+  /**
+   * Per-glyph path `d` fragments (fontkit). Tessellate each alone so counters
+   * nest correctly — global nest across a whole string fills holes (o/d/4).
+   */
+  glyphPathDs?: string[];
   /** Tight local bounds of pathD (before any node translation). */
   bounds?: { minX: number; minY: number; width: number; height: number };
   /** Rotation was baked into pathD — outlineNodePatch must clear attrs.angle. */
@@ -1734,10 +1739,15 @@ function fitOutlineResult(result: OutlineResult): OutlineResult | null {
   const shifted = needShift
     ? translatePathD(result.pathD, bounds.minX, bounds.minY)
     : result.pathD;
+  const glyphPathDs =
+    needShift && result.glyphPathDs?.length
+      ? result.glyphPathDs.map((d) => translatePathD(d, bounds.minX, bounds.minY) || d)
+      : result.glyphPathDs;
   if (shifted != null) {
     return {
       ...result,
       pathD: shifted,
+      ...(glyphPathDs ? { glyphPathDs } : {}),
       bounds: {
         minX: bounds.minX,
         minY: bounds.minY,
@@ -1749,6 +1759,7 @@ function fitOutlineResult(result: OutlineResult): OutlineResult | null {
   if (explicit) {
     return {
       ...result,
+      ...(glyphPathDs ? { glyphPathDs } : {}),
       bounds: {
         minX: explicit.minX,
         minY: explicit.minY,
@@ -1759,6 +1770,7 @@ function fitOutlineResult(result: OutlineResult): OutlineResult | null {
   }
   return {
     ...result,
+    ...(glyphPathDs ? { glyphPathDs } : {}),
     bounds: {
       minX: 0,
       minY: 0,

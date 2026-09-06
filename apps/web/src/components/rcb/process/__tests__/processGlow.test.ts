@@ -6,7 +6,7 @@ import {
 } from '../processGlow';
 
 describe('processGlowForeignObjectBounds', () => {
-  it('expands foreignObject by bleed on all sides', () => {
+  it('expands foreignObject by bleed on all sides (SVG plate glow only)', () => {
     const box = processGlowForeignObjectBounds(100, 50);
     expect(box).toEqual({
       x: -PROCESS_GLOW_BLEED_PX,
@@ -16,15 +16,9 @@ describe('processGlowForeignObjectBounds', () => {
     });
   });
 
-  it('documents that pill pad is measured from the plate inset, not FO bleed', () => {
-    // FO bottom sits PROCESS_GLOW_BLEED_PX below the plate. At zoom Z the old
-    // `bottom: pad/Z` was relative to the FO, so the pill sat ~bleed*Z CSS px
-    // outside the node. ProcessGlowShell insets by bleed so pad is plate-local.
-    const zoom = 40;
-    const inv = 1 / zoom;
-    const foBottomPastPlate = PROCESS_GLOW_BLEED_PX;
-    const oldPillPastPlate = foBottomPastPlate - PROCESS_PILL_BOTTOM_PAD_PX * inv;
-    expect(oldPillPastPlate).toBeGreaterThan(2);
-    expect(oldPillPastPlate * zoom).toBeGreaterThan(80);
+  it('status pill docks inside plate bottom with 10px screen inset', () => {
+    // Pill uses WorldScreenChromeRoot at plate bottom, anchor=bottom,
+    // edgeGapPx = PROCESS_PILL_BOTTOM_PAD_PX (inside, not below the box).
+    expect(PROCESS_PILL_BOTTOM_PAD_PX).toBe(10);
   });
 });

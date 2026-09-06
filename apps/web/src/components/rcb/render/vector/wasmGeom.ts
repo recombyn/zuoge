@@ -15,6 +15,10 @@ import {
   type StrokeTessOpts,
 } from '@/components/rcb/render/vector/tessellateStroke';
 import {
+  closePolylineForDash,
+  splitPolylineByDash,
+} from '@/components/rcb/render/vector/strokeDash';
+import {
   geomNow,
   isGeomProfileEnabled,
   recordGeomProfile,
@@ -284,22 +288,8 @@ export function tessellateStrokeWasm(
   opts: StrokeTessOpts
 ): StrokeMesh | null {
   const t0 = geomNow();
-  const w = Math.max(0, Number(opts.width) || 0);
-  let mesh: StrokeMesh | null = null;
-  if (wasmLive() && points.length >= 2 && w > 0) {
-    mesh = meshFromFlat(
-      api!.tessellate_stroke(
-        pointsToFlat(points),
-        w,
-        Boolean(opts.closed),
-        String(opts.align || 'center'),
-        String(opts.linejoin || 'miter'),
-        Math.max(1, Number(opts.miterLimit) || 100)
-      )
-    );
-  } else {
-    mesh = tessellateStrokeJs(points, opts);
-  }
+  // JS tessellator emits per-vertex `edges` for mesh stroke AA.
+  const mesh = tessellateStrokeJs(points, opts);
   recordOp('stroke', t0, points.length, 0, mesh?.triangleCount ?? 0);
   return mesh;
 }
@@ -327,19 +317,31 @@ function fillMeshFor(
 
 function strokeMeshFor(points: Vec2[], opts: StrokeTessOpts): StrokeMesh | null {
   if (points.length < 2) return null;
-  if (wasmLive()) {
-    return meshFromFlat(
-      api!.tessellate_stroke(
-        pointsToFlat(points),
-        opts.width,
-        Boolean(opts.closed),
-        String(opts.align || 'center'),
-        String(opts.linejoin || 'miter'),
-        Math.max(1, Number(opts.miterLimit) || 100)
-      )
-    );
-  }
+  // Prefer JS so stroke meshes carry `edges` for fragment AA. WASM stroke
+  // returns positions only (no rim attribute) and would paint hard stairs.
   return tessellateStrokeJs(points, opts);
+}
+
+/** Tessellate a centerline, optionally splitting into SVG dash segments. */
+function strokeMeshForDashed(
+  points: Vec2[],
+  opts: StrokeTessOpts,
+  dasharray?: string
+): StrokeMesh | null {
+  const dash = dasharray?.trim();
+  if (!dash) return strokeMeshFor(points, opts);
+  const ring = opts.closed ? closePolylineForDash(points) : points;
+  const segs = splitPolylineByDash(ring, dash);
+  if (segs.length <= 1) {
+    return strokeMeshFor(segs[0] ?? points, { ...opts, closed: false });
+  }
+  const parts: StrokeMesh[] = [];
+  for (const seg of segs) {
+    if (seg.length < 2) continue;
+    const m = strokeMeshFor(seg as Vec2[], { ...opts, closed: false });
+    if (m) parts.push(m);
+  }
+  return mergeStrokeMeshes(parts);
 }
 
 function mergeStrokeMeshes(parts: StrokeMesh[]): StrokeMesh | null {
@@ -348,14 +350,22 @@ function mergeStrokeMeshes(parts: StrokeMesh[]): StrokeMesh | null {
   let total = 0;
   for (const p of parts) total += p.positions.length;
   const positions = new Float32Array(total);
+  const edges = new Float32Array(total / 2);
   let o = 0;
+  let eo = 0;
   let tris = 0;
   for (const p of parts) {
     positions.set(p.positions, o);
     o += p.positions.length;
+    const srcEdges = p.edges;
+    const vertCount = p.positions.length / 2;
+    if (srcEdges && srcEdges.length >= vertCount) {
+      edges.set(srcEdges.subarray(0, vertCount), eo);
+    }
+    eo += vertCount;
     tris += p.triangleCount;
   }
-  return { positions, triangleCount: tris };
+  return { positions, edges, triangleCount: tris };
 }
 
 function mergeFillMeshes(parts: FillMesh[]): FillMesh | null {
@@ -486,6 +496,25 @@ export function buildCompoundFillMeshes(
   return mergeFillMeshes(parts);
 }
 
+/**
+ * Tessellate each glyph path alone then merge. Avoids global nest across a
+ * whole string, which treats counters as filled islands (solid o/d/4).
+ */
+export function buildTextGlyphFillMeshes(
+  glyphPathDs: readonly string[],
+  fillRule: 'nonzero' | 'evenodd' = 'evenodd',
+  flatness = DENSIFY_DEFAULT_FLATNESS
+): FillMesh | null {
+  const parts: FillMesh[] = [];
+  for (const d of glyphPathDs) {
+    const src = String(d || '').trim();
+    if (!src) continue;
+    const m = buildCompoundFillMeshes(densifyPathDJs(src, flatness), fillRule);
+    if (m && m.triangleCount > 0) parts.push(m);
+  }
+  return mergeFillMeshes(parts);
+}
+
 /** Build fill+stroke for one contour (profiles once). */
 export function buildShapeMeshes(
   points: Vec2[],
@@ -499,6 +528,19 @@ export function buildShapeMeshes(
     holes?: Vec2[][];
     /** Boolean compound paths — nest subpaths when evenodd/nonzero multi-M. */
     fillRule?: 'nonzero' | 'evenodd';
+    /**
+     * Arrow: fill the V head as a solid triangle; stroke only the shaft.
+     * Avoids butt-gap between shaft and open chevron + open tip from miter AA.
+     */
+    arrowHeadFill?: boolean;
+    /** SVG stroke-dasharray; when set, stroke is split into open dash ribbons. */
+    dasharray?: string;
+    linecap?: 'butt' | 'round' | 'square' | string;
+    /**
+     * Partial rect sides: open polylines stroked instead of the closed contour.
+     * `[]` = no stroke; omit/undefined = stroke primary contour.
+     */
+    strokeRuns?: Vec2[][];
   }
 ): { fill: FillMesh | null; stroke: StrokeMesh | null } {
   const t0 = geomNow();
@@ -510,44 +552,81 @@ export function buildShapeMeshes(
   const runs = splitPolylineContours(points);
   const primary = runs[0] ?? points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
 
-  if (opts.wantFill && opts.closed && primary.length >= 3) {
+  if (opts.arrowHeadFill && runs.length >= 2 && opts.strokeWidth > 0) {
     const a = geomNow();
-    if (opts.holes?.length) {
-      // Explicit holes (ellipse donut attrs).
-      fill = fillMeshFor(primary, opts.holes);
-    } else if (runs.length > 1) {
-      // Boolean subtract / compound path: nest subpaths → outer+holes.
-      // (Previously only the first M-run was filled → solid plate, no hollow.)
-      fill = buildCompoundFillMeshes(
-        points,
-        opts.fillRule === 'nonzero' ? 'nonzero' : 'evenodd'
-      );
-    } else {
-      fill = fillMeshFor(primary, undefined);
+    const head = runs[1]!;
+    if (head.length >= 3) {
+      fill = fillMeshFor(head.slice(0, 3), undefined);
     }
     tFill = geomNow() - a;
-  }
-  if (opts.strokeWidth > 0) {
-    const a = geomNow();
-    const strokeOpts: StrokeTessOpts = {
-      width: opts.strokeWidth,
-      closed: opts.closed,
-      align: opts.strokeAlign,
-      linejoin: opts.linejoin,
-      miterLimit: opts.miterLimit,
-    };
-    if (runs.length <= 1) {
-      stroke = strokeMeshFor(primary, strokeOpts);
-    } else {
-      // Arrow etc.: stroke each subpath; never bridge across M breaks.
-      const parts: StrokeMesh[] = [];
-      for (const run of runs) {
-        const m = strokeMeshFor(run, { ...strokeOpts, closed: false });
-        if (m) parts.push(m);
+    const a2 = geomNow();
+    stroke = strokeMeshForDashed(
+      primary,
+      {
+        width: opts.strokeWidth,
+        closed: false,
+        align: opts.strokeAlign,
+        linejoin: opts.linejoin,
+        miterLimit: opts.miterLimit,
+        linecap: opts.linecap,
+      },
+      opts.dasharray
+    );
+    tStroke = geomNow() - a2;
+  } else {
+    if (opts.wantFill && opts.closed && primary.length >= 3) {
+      const a = geomNow();
+      if (opts.holes?.length) {
+        // Explicit holes (ellipse donut attrs).
+        fill = fillMeshFor(primary, opts.holes);
+      } else if (runs.length > 1) {
+        // Boolean subtract / compound path: nest subpaths → outer+holes.
+        // (Previously only the first M-run was filled → solid plate, no hollow.)
+        fill = buildCompoundFillMeshes(
+          points,
+          opts.fillRule === 'nonzero' ? 'nonzero' : 'evenodd'
+        );
+      } else {
+        fill = fillMeshFor(primary, undefined);
       }
-      stroke = mergeStrokeMeshes(parts);
+      tFill = geomNow() - a;
     }
-    tStroke = geomNow() - a;
+    if (opts.strokeWidth > 0) {
+      const a = geomNow();
+      const strokeOpts: StrokeTessOpts = {
+        width: opts.strokeWidth,
+        closed: opts.closed,
+        align: opts.strokeAlign,
+        linejoin: opts.linejoin,
+        miterLimit: opts.miterLimit,
+        linecap: opts.linecap,
+      };
+      if (opts.strokeRuns) {
+        // Partial sides / explicit open runs — SVG forces center align.
+        const parts: StrokeMesh[] = [];
+        for (const run of opts.strokeRuns) {
+          if (run.length < 2) continue;
+          const m = strokeMeshForDashed(
+            run,
+            { ...strokeOpts, closed: false, align: 'center' },
+            opts.dasharray
+          );
+          if (m) parts.push(m);
+        }
+        stroke = mergeStrokeMeshes(parts);
+      } else if (runs.length <= 1) {
+        stroke = strokeMeshForDashed(primary, strokeOpts, opts.dasharray);
+      } else {
+        // Multi-M open strokes: stroke each subpath; never bridge across M breaks.
+        const parts: StrokeMesh[] = [];
+        for (const run of runs) {
+          const m = strokeMeshForDashed(run, { ...strokeOpts, closed: false }, opts.dasharray);
+          if (m) parts.push(m);
+        }
+        stroke = mergeStrokeMeshes(parts);
+      }
+      tStroke = geomNow() - a;
+    }
   }
 
   if (isGeomProfileEnabled()) {

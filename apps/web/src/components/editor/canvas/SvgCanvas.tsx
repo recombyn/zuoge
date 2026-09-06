@@ -1201,6 +1201,7 @@ function SvgCanvas({
         pathPressure?: string;
         brushCategory?: string;
         frameId?: string | null;
+        pencilOutlinePath?: string;
       }
     ) => {
       const doc = documentRef.current;
@@ -1225,6 +1226,9 @@ function SvgCanvas({
       }
       if (meta?.brushCategory) {
         (node.attrs as Record<string, unknown>).brushCategory = meta.brushCategory;
+      }
+      if (meta?.pencilOutlinePath) {
+        (node.attrs as Record<string, unknown>).pencilOutlinePath = meta.pencilOutlinePath;
       }
       (node.attrs as Record<string, unknown>).pressureEnabled = pencilPressureEnabled;
       const inkBrush = findPencilBrush(pencilBrushId || DEFAULT_PENCIL_BRUSH_ID);
