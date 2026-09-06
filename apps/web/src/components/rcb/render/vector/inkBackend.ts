@@ -6,14 +6,6 @@
 /** Product idle ink backends after vector migration. */
 export type InkBackend = 'webgl-vector' | 'canvas2d-vector';
 
-/** Legacy SceneRendererBackend values that map onto InkBackend. */
-export type LegacySceneInkBackend = 'webgl' | 'canvas2d';
-
-/** Map createSceneRenderer / resolveIdleInkBackend → ink contract. */
-export function toInkBackend(backend: LegacySceneInkBackend | string): InkBackend {
-  return backend === 'webgl' || backend === 'webgl-vector' ? 'webgl-vector' : 'canvas2d-vector';
-}
-
 /**
  * Shape / text / path ink must never use atlas bake.
  * Media (image/video/audio) still uses GPU atlas textures.

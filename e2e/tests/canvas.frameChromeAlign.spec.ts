@@ -14,10 +14,10 @@ import {
   TOKEN,
 } from './canvasStressHelpers';
 
-test.describe('canvas frame chrome ↔ plate align', () => {
+test.describe('canvas frame chrome �?plate align', () => {
   test.skip(!TOKEN, E2E_TOKEN_SKIP_REASON);
   test.setTimeout(3 * 60_000);
-  // User repro: browser zoom → fractional DPR (MCP tab had data-rcb-dpr=0.75).
+  // User repro: browser zoom �?fractional DPR (MCP tab had data-rcb-dpr=0.75).
   test.use({ deviceScaleFactor: 0.75 });
 
   test.beforeEach(async ({ page }) => {
@@ -85,7 +85,7 @@ test.describe('canvas frame chrome ↔ plate align', () => {
         );
         await new Promise((res) => requestAnimationFrame(() => res(null)));
         const plate = document.querySelector('[data-rcb-frame-plate="1"]');
-        const chrome = document.querySelector('[data-sel-box], [data-rcb-sel-box]');
+        const chrome = document.querySelector('[data-sel-box]');
         if (!(plate instanceof SVGGraphicsElement) || !(chrome instanceof SVGGraphicsElement)) continue;
         if (plate.closest('[data-rcb-scene-camera="1"]') !== chrome.closest('[data-rcb-scene-camera="1"]')) {
           samples.push(Number.POSITIVE_INFINITY);
@@ -118,7 +118,7 @@ test.describe('canvas frame chrome ↔ plate align', () => {
         '[data-rcb-frame-plate="1"]'
       ) as SVGGraphicsElement | null;
       const chromeBox = document.querySelector(
-        '[data-sel-box], [data-rcb-sel-box]'
+        '[data-sel-box]'
       ) as SVGGraphicsElement | null;
       const cameraRoot = document.querySelector('[data-rcb-scene-camera="1"]') as SVGGElement | null;
       const stageEl = document.querySelector('[data-rcb-canvas="1"]') as HTMLElement | null;

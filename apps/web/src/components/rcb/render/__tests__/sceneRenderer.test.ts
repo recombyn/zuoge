@@ -28,7 +28,6 @@ import {
   nodeNeedsCanvasEffectBake,
   canvasCompositeFromBlendMode,
   paintCanvasMediaInk,
-  bakeShapeInkForAtlas,
   isSoaAtlasBakeEligible,
   bakeMediaInkForAtlas,
   paintGeneratorEmptyInk,
@@ -682,39 +681,8 @@ describe('scene grid (Canvas underlay)', () => {
 });
 
 describe('Canvas idle path / text / shape paint', () => {
-  it('bakeShapeInkForAtlas returns null for shape ink (vector dual-backend)', () => {
-    const mk = (shapeType: string, extra: Record<string, unknown> = {}) =>
-      ({
-        id: shapeType,
-        key: 'shape',
-        width: 80,
-        height: 80,
-        attrs: {
-          shapeType,
-          'fill-color': '#ffffff',
-          'border-color': '#000000',
-          'border-width': 2,
-          'stroke-enabled': true,
-          sides: 5,
-          points: 5,
-          ...extra,
-        },
-      }) as SceneNodeInput;
-    for (const node of [mk('rect'), mk('ellipse'), mk('polygon'), mk('star')]) {
-      expect(bakeShapeInkForAtlas(node, 80, 80, 1), String(node.attrs!.shapeType)).toBeNull();
-    }
-    const sharp = mk('rect', { 'stroke-enabled': false, cornerRadius: 12 });
-    expect(bakeShapeInkForAtlas(sharp, 80, 80, 1)).toBeNull();
-  });
-
   it('idle text uses outline mesh path (bakeTextInkForAtlas removed)', () => {
-    expect(typeof bakeShapeInkForAtlas).toBe('function');
-    expect(bakeShapeInkForAtlas(
-      { id: 't1', key: 'text', width: 120, height: 40, attrs: { text: 'Hello' } } as SceneNodeInput,
-      120,
-      40,
-      1
-    )).toBeNull();
+    expect(typeof paintCanvasTextInk).toBe('function');
   });
 
   it('paintSoaIdleSlot draws text glyphs', () => {

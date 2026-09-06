@@ -1,6 +1,6 @@
 /**
  * WebGL2 backend for SoA vector meshes + media atlas stamps (ADR 0027).
- * Shape fill/stroke are GPU triangles (never bakeShapeInkForAtlas).
+ * Shape fill/stroke are GPU triangles (never atlas bake).
  */
 import { rcbCameraCssZoom, rcbCameraScreenOffset, rcbViewportSceneBounds } from '@/components/rcb/core/math';
 import { getNodeTransformPreview } from '@/components/rcb/core/transformPreview';
@@ -577,11 +577,6 @@ export function emitPathStrokeSegments(opts: {
   }
   endContour();
   return emitted;
-}
-
-/** Legacy: closed paths preferred atlas; vector dual-backend always uses meshes. */
-export function soaPathPrefersAtlasStamp(closed: boolean, _segCount: number): boolean {
-  return closed;
 }
 
 function clearSoaDirtyFlag(buf: SceneRenderBuffer, index: number, flags: number, force: boolean) {

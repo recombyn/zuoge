@@ -42,9 +42,6 @@ export const LU_VIDEO_PATHS: readonly string[] = [
 export const LU_VIDEO_RECT_PATH =
   'M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z';
 
-/** @deprecated use LU_ICON_STROKE */
-export const LU_AUDIO_LINES_STROKE = LU_ICON_STROKE;
-
 export type IconWorldSeg = {
   x0: number;
   y0: number;
@@ -155,17 +152,6 @@ export function generatorEmptyIconWorldSegs(
   }));
 }
 
-/** @deprecated use generatorEmptyIconWorldSegs('audio', …) */
-export function luAudioLinesWorldSegs(
-  left: number,
-  top: number,
-  plateW: number,
-  plateH: number,
-  size: number
-): IconWorldSeg[] {
-  return generatorEmptyIconWorldSegs('audio', left, top, plateW, plateH, size);
-}
-
 function strokePathList(
   ctx: CanvasRenderingContext2D,
   paths: readonly string[],
@@ -244,15 +230,4 @@ export function paintGeneratorEmptyLucideIcon(
     strokePathList(ctx, [LU_VIDEO_RECT_PATH], color);
   }
   ctx.restore();
-}
-
-/** @deprecated use paintGeneratorEmptyLucideIcon(ctx, 'audio', …) */
-export function paintLuAudioLinesIcon(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  size: number,
-  color = GENERATOR_EMPTY_ICON_COLOR
-): void {
-  paintGeneratorEmptyLucideIcon(ctx, 'audio', cx, cy, size, color);
 }

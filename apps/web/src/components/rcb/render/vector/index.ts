@@ -3,7 +3,6 @@
  */
 export {
   type InkBackend,
-  toInkBackend,
   isShapeInkKey,
   shapeInkForbidsAtlas,
 } from '@/components/rcb/render/vector/inkBackend';

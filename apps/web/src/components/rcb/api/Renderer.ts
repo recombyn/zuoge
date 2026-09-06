@@ -15,7 +15,6 @@ export {
   type SceneRenderer,
   type SceneRendererBackend,
   type InkBackend,
-  toInkBackend,
   shapeInkForbidsAtlas,
 } from '@/components/rcb/render/sceneRenderer';
 
@@ -30,8 +29,6 @@ export {
   atlasZoomBucket,
   atlasCoverageBucket,
   idleMediaScreenEdgePx,
-  /** @deprecated Use backingInsufficientForAtlas — never DomHost-for-blur. */
-  idleMediaNeedsSharpHost,
 } from '@/components/rcb/render/webglInstanceAtlas';
 
 export {

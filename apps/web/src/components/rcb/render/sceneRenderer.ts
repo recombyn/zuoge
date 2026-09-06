@@ -60,12 +60,8 @@ import {
   getCachedPath2D,
   rememberNodePath2D,
 } from '@/components/rcb/scene/document/sceneShapes';
-import {
-  type InkBackend,
-  toInkBackend,
-} from '@/components/rcb/render/vector/inkBackend';
 export type { InkBackend } from '@/components/rcb/render/vector/inkBackend';
-export { toInkBackend, shapeInkForbidsAtlas } from '@/components/rcb/render/vector/inkBackend';
+export { shapeInkForbidsAtlas } from '@/components/rcb/render/vector/inkBackend';
 export { shapeGeomFingerprint } from '@/components/rcb/render/vector/geomFingerprint';
 import {
   resolveFillColor,
@@ -2800,18 +2796,6 @@ export function bakeAudioInkForAtlas(
     });
   }
   return canvas;
-}
-
-/**
- * @deprecated Shape atlas bake retired. Always null.
- */
-export function bakeShapeInkForAtlas(
-  _node: SceneNodeInput,
-  _width: number,
-  _height: number,
-  _zoom = 1
-): null {
-  return null;
 }
 
 export function clipCanvasIdleToOwningFrame(

@@ -1,4 +1,4 @@
-﻿import path from 'node:path';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { E2E_TOKEN_SKIP_REASON, resolveE2EToken } from './e2eAuth';
 const ROOT = path.resolve(__dirname, '../..');
@@ -60,5 +60,5 @@ test('stack at click', async ({ page }) => {
   console.log(JSON.stringify(info, null, 2));
   await page.mouse.click(info.cx, info.cy);
   await page.waitForTimeout(300);
-  console.log('chrome after', await page.locator('[data-rcb-sel-box]').count());
+  console.log('chrome after', await page.locator('[data-sel-box]').count());
 });

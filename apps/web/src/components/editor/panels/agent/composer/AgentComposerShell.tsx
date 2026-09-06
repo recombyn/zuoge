@@ -28,7 +28,7 @@ import {
   HiChevronUp,
   HiChevronDown,
 } from 'react-icons/hi2';
-import { LuFilm, LuInfinity, LuMessageSquare } from 'react-icons/lu';
+import { LuFilm, LuInfinity } from 'react-icons/lu';
 import { Dropdown, DropdownPanel, DropdownPanelItem } from '@/components/base';
 import { Icon } from '@/components/base/icon';
 import Tooltip from '@/components/base/tooltip';
@@ -53,7 +53,7 @@ import { cn } from '@/utils/classnames';
 /** Run mode — Auto toggle = agent; image/video models still use composerMode for gen UI. */
 export type ComposerRunMode = 'agent' | 'image' | 'video';
 
-/** Agent = edit canvas; Ask = propose / clarify first; Image / Video / Audio = direct gen in chat. */
+/** Agent = edit canvas; Image / Video / Audio / Lottie = direct gen. `ask` kept for session remap → agent. */
 export type ComposerInteractionMode = 'agent' | 'ask' | 'image' | 'video' | 'audio' | 'lottie';
 
 const DEFAULT_INTERACTION_MODES: ComposerInteractionMode[] = [
@@ -733,7 +733,7 @@ function interactionModeLabel(
   if (mode === 'audio') return t('agent.interactionAudio');
   if (mode === 'video') return t('agent.interactionVideo');
   if (mode === 'image') return t('agent.interactionImage');
-  if (mode === 'ask') return t('agent.interactionAsk');
+  // Legacy session mode `ask` remaps to agent in AgentDock.
   return t('agent.interactionAgent');
 }
 
@@ -750,9 +750,6 @@ function interactionModeIcon(mode: ComposerInteractionMode): ReactNode {
   if (mode === 'image') {
     return <HiOutlinePhoto className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />;
   }
-  if (mode === 'ask') {
-    return <LuMessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />;
-  }
   return <LuInfinity className="h-4 w-4 shrink-0" strokeWidth={2.25} />;
 }
 
@@ -765,11 +762,6 @@ function buildInteractionModeOptions(
       key: 'agent',
       label: t('agent.interactionAgent'),
       icon: <LuInfinity className="h-4 w-4 shrink-0" strokeWidth={2.25} />,
-    },
-    {
-      key: 'ask',
-      label: t('agent.interactionAsk'),
-      icon: <LuMessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />,
     },
     {
       key: 'image',
@@ -1104,7 +1096,7 @@ function AgentComposerShell({
   } else if (isAudioMode) {
     fileAccept =
       'audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac';
-  } else if (interactionMode === 'ask' || isImageMode) {
+  } else if (isImageMode) {
     fileAccept =
       'image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg';
   }

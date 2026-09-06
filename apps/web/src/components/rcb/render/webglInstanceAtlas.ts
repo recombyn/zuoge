@@ -79,41 +79,6 @@ export function atlasCoverageBucket(
   );
 }
 
-/**
- * Idle image/video/audio stamps into a fixed atlas cell. When the on-screen
- * edge exceeds that cell, backing is insufficient — callers must restamp /
- * raise texels (never DomHost-for-blur).
- *
- * @deprecated Prefer {@link backingInsufficientForAtlas} from paintIntent.
- * Kept as a thin alias for transitional call sites / tests.
- */
-export function idleMediaNeedsSharpHost(
-  node:
-    | {
-        key?: unknown;
-        width?: unknown;
-        height?: unknown;
-        attrs?: Record<string, unknown> | null;
-      }
-    | null
-    | undefined,
-  zoom: number,
-  dpr = 1
-): boolean {
-  if (!node) return false;
-  const key = String(node.key || '');
-  if (key !== 'image' && key !== 'video' && key !== 'audio') return false;
-  // Empty generators no longer force "sharp host" — restamp via zoomBucket.
-  return (
-    idleMediaScreenEdgePx(
-      Number(node.width) || 1,
-      Number(node.height) || 1,
-      zoom,
-      dpr
-    ) > SOA_ATLAS_INNER
-  );
-}
-
 export type SoaAtlasRegion = {
   key: string;
   cell: number;

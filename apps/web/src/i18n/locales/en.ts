@@ -125,7 +125,7 @@ const en = {
     footerIcp: '滇ICP备2026017289号',
     heroSuggest: {
       ui: 'UI design',
-      poster: 'Poster',
+      poster: 'Mid-Autumn poster',
       commerceDetail: 'E-commerce detail page',
     },
     heroComposerFoot: 'Connect your ideas to Zuoge',
@@ -138,6 +138,12 @@ const en = {
         'Create an e-commerce promo poster that highlights product benefits, pricing, and a clear call to action.',
       brandPoster:
         'Design a brand poster with a clean layout, unified colors, and a strong brand message.',
+      midAutumnPoster:
+        'Design a vertical Mid-Autumn Festival poster (1080×1920) themed “Reunion under the full moon · Mid-Autumn gift”. Center a golden full moon with soft clouds and osmanthus; place a large title at the top, a subtitle “Mooncake gift boxes — limited time”, and date + brand logo at the bottom. Warm gold, moon-white, and vermilion accents; modern Chinese-inspired look with clear hierarchy for social and in-store use.',
+      uiApp:
+        'Design a high-fidelity iPhone 15 Pro (393×852) task app UI in light mode, system font. Three screens:\n1) Today: 56pt nav under safe area (28 avatar left, “Today” 17 Medium center, bell icon right); 12 gap then “Done 4/12” progress bar (h8, full radius, track #EEF0F4, fill #3B5BDB); section “In progress” 13 Medium + list rows h64 (22 checkbox, title 15 / time 12 secondary, flag right); tab bar h49+Home with Today/Projects/Stats/Me, indigo selected.\n2) New task: full-screen sheet; nav Cancel | New | Done; form: single-line title, datetime row, priority segmented Low/Med/High, notes textarea h120; no extra bottom CTA.\n3) Me/Settings: grouped list (Account, Notifications switch, Dark mode switch, About), row h52, chevron or Switch.\nTokens: bg #F7F8FA, white cards r12 stroke 1 #E8EAED, primary #3B5BDB, text #111827 / #6B7280, icons 24 / 1.5 stroke. No marketing copy — shippable UI structure only.',
+      commerceDetailPage:
+        'Design a mobile e-commerce product detail page (750px wide) for a portable pour-over coffee kettle set: hero carousel + short-video entry; then price/promo bar, variant pickers (color/capacity), 3 selling-point sections, specs table, review summary, and a sticky bottom bar with Add to cart / Buy now. Minimal premium style, warm coffee-brown accents, clear conversion path — usable as a detail-page design draft.',
       productShot:
         'Generate a clean e-commerce product hero image with a centered subject and simple background.',
       illustSet:

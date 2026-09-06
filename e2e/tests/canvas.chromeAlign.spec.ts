@@ -1,6 +1,6 @@
 /**
  * Live editor: selection chrome vs shape ink + visual-outer vs grid at high zoom.
- * Stays on ADR 0027 (overlay CameraTransform) — measures product alignment bugs.
+ * Stays on ADR 0027 (overlay CameraTransform) �?measures product alignment bugs.
  */
 import path from 'node:path';
 import { test, expect, type Page, type Locator } from '@playwright/test';
@@ -98,7 +98,7 @@ async function focusStage(page: Page, stage: Locator) {
   return box;
 }
 
-test.describe('canvas chrome ↔ ink align (high zoom)', () => {
+test.describe('canvas chrome �?ink align (high zoom)', () => {
   test.skip(!TOKEN, E2E_TOKEN_SKIP_REASON);
 
   test.beforeEach(async ({ page }) => {
@@ -117,7 +117,7 @@ test.describe('canvas chrome ↔ ink align (high zoom)', () => {
     await sleep(500);
     await expectShapeInk(page, 1);
 
-    // Draw commit auto-selects — chrome should mount before we leave select.
+    // Draw commit auto-selects �?chrome should mount before we leave select.
     await expect
       .poll(async () => selectionChromeCount(page), {
         timeout: 12_000,
@@ -168,7 +168,7 @@ test.describe('canvas chrome ↔ ink align (high zoom)', () => {
         overlayKids: overlay?.childElementCount ?? -1,
         chromeLayer: Boolean(document.querySelector('[data-rcb-sel-chrome-layer]')),
         screenChrome: document.querySelectorAll('[data-rcb-screen-chrome]').length,
-        selBox: document.querySelectorAll('[data-rcb-sel-box]').length,
+        selBox: document.querySelectorAll('[data-sel-box]').length,
         selChromeAttr: document.querySelectorAll('[data-rcb-sel-chrome]').length,
         toolbar: Boolean(document.querySelector('[data-rcb-selection-toolbar], [data-selection-toolbar]')),
       };
@@ -188,7 +188,7 @@ test.describe('canvas chrome ↔ ink align (high zoom)', () => {
       const overlay = document.querySelector('[data-rcb-overlay="1"]') as HTMLElement | null;
       const chromeSvg = document.querySelector('[data-rcb-scene-root="1"]') as SVGSVGElement | null;
       const chromeBox = document.querySelector(
-        '[data-sel-box], [data-rcb-sel-box]'
+        '[data-sel-box]'
       ) as SVGGraphicsElement | null;
       const knob = document.querySelector('[data-rcb-sel-knob="se"]') as SVGGraphicsElement | null;
       const baseline = document.querySelector(
@@ -240,7 +240,7 @@ test.describe('canvas chrome ↔ ink align (high zoom)', () => {
       const panX = panM ? Number(panM[1]) : 0;
       const panY = panM ? Number(panM[2]) : 0;
       const z = cssZoom > 0 ? cssZoom : 1;
-      const outset = 0.5; // center stroke 1 — matches strokeChromeOutset
+      const outset = 0.5; // center stroke 1 �?matches strokeChromeOutset
       const chromeGeom = {
         left: geom.left - outset,
         top: geom.top - outset,
@@ -383,7 +383,7 @@ test.describe('canvas chrome ↔ ink align (high zoom)', () => {
         hostCount: document.querySelectorAll('[data-scene-node-id]').length,
         selChromeCount: document.querySelectorAll('[data-rcb-screen-chrome="1"]').length,
         selBoxCount:
-          document.querySelectorAll('[data-sel-box], [data-rcb-sel-box], [data-rcb-sel-knob]').length,
+          document.querySelectorAll('[data-sel-box], [data-rcb-sel-knob]').length,
       };
     });
 
@@ -452,7 +452,7 @@ test.describe('canvas chrome ↔ ink align (high zoom)', () => {
       zoomDrift.push(
         await page.evaluate(() => {
           const baseline = document.querySelector('[data-baseline="1"]');
-          const chrome = document.querySelector('[data-sel-box], [data-rcb-sel-box]');
+          const chrome = document.querySelector('[data-sel-box]');
           if (!(baseline instanceof SVGGraphicsElement) || !(chrome instanceof SVGGraphicsElement)) {
             return Number.POSITIVE_INFINITY;
           }

@@ -8,6 +8,7 @@ import {
 } from '@/components/base/AppBrandWordmark';
 import HomeAgentComposer, {
   type HomeAgentCategory,
+  type HomeAgentComposerHandle,
   type HomeAgentSubmitPayload,
 } from '@/components/home/HomeAgentComposer';
 
@@ -15,10 +16,26 @@ type Props = {
   onSubmit: (payload: HomeAgentSubmitPayload) => void;
 };
 
+/** Suggest chips under the home composer — label key → casePrompts key. */
+const HERO_EXAMPLE_CHIPS = [
+  {
+    suggestKey: 'poster',
+    chipKey: 'midAutumnPoster',
+    category: 'poster' as HomeAgentCategory,
+  },
+  { suggestKey: 'ui', chipKey: 'uiApp', category: 'mobile' as HomeAgentCategory },
+  {
+    suggestKey: 'commerceDetail',
+    chipKey: 'commerceDetailPage',
+    category: 'website' as HomeAgentCategory,
+  },
+] as const;
+
 /** Home hero — zh uses graphic 「左格」 + slogan; ja/en keep text slogan (Latin brand in chrome). */
 function HomeHero({ onSubmit }: Props): ReactNode {
   const { t } = useTranslation();
   const cjk = useCjkBrand();
+  const composerRef = useRef<HomeAgentComposerHandle | null>(null);
   const [category, setCategory] = useState<HomeAgentCategory>('poster');
   const lastDesignCategoryRef = useRef<HomeAgentCategory>('poster');
 
@@ -33,6 +50,14 @@ function HomeHero({ onSubmit }: Props): ReactNode {
       return;
     }
     setCategorySafe(lastDesignCategoryRef.current || 'poster');
+  };
+
+  const onExampleChip = (chipKey: string, nextCategory: HomeAgentCategory) => {
+    setCategorySafe(nextCategory);
+    // Wait a tick so category-driven mode reset doesn't clobber the filled prompt.
+    queueMicrotask(() => {
+      composerRef.current?.applyExampleChip(chipKey);
+    });
   };
 
   const title = t('home.heroStartTitle');
@@ -59,11 +84,29 @@ function HomeHero({ onSubmit }: Props): ReactNode {
 
       <div className="home-hero-chat__composer w-full">
         <HomeAgentComposer
+          ref={composerRef}
           category={category}
           onCategoryChange={onComposerCategoryChange}
           onSubmit={onSubmit}
           className="!ring-0 focus-within:!ring-0"
         />
+      </div>
+
+      <div
+        className="mt-4 flex w-full flex-wrap items-center justify-center gap-2.5"
+        role="group"
+        aria-label={t('home.examplesLabel')}
+      >
+        {HERO_EXAMPLE_CHIPS.map(({ suggestKey, chipKey, category: chipCategory }) => (
+          <button
+            key={suggestKey}
+            type="button"
+            className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-4 py-1.5 text-[13px] leading-5 text-[var(--ink)] transition-colors hover:border-[var(--ink)]/25 hover:bg-[var(--accent-soft)]"
+            onClick={() => onExampleChip(chipKey, chipCategory)}
+          >
+            {t(`home.heroSuggest.${suggestKey}`)}
+          </button>
+        ))}
       </div>
     </section>
   );

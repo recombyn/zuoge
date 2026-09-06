@@ -12,8 +12,7 @@ Owner docs: [self-hosting.md](../../../docs/self-hosting.md) · AgentProfile: [a
 | `agents/bindings.yaml`                                                   | product/surface → Profile id                      |
 | `agents/profiles/*.yaml`                                                 | AgentProfile YAML (`design.canvas`)               |
 | `design_prompt_packs/`                                                   | `_index.json` + `stages/*.md` + `snippets.md` (pack sections) |
-| `design_skills/<key>/`                                                   | Shipped skill packs. V3 core: `design_brief` `visual_direction` `design_system` `composition` `typography` `color` `imagery` `layout` `anti_ai_slop` `design_review` `polish` `responsive`. Surfaces: `poster_craft` `landing_page` `dashboard_ui` `image_gen` |
-| Private extensions                                                       | `<repo>/plugins/skills/<key>/` — [docs/skill-extensions.md](../../docs/skill-extensions.md) |
+| Private Skill packs                                                      | `<repo>/skills/foundation|domains/` + `<repo>/plugins/skills/<key>/` — [docs/skill-extensions.md](../../docs/skill-extensions.md) |
 | `canvas_actions_seed.json`                                               | Canvas tool registry                              |
 | `design_agent_stress_suite.json`                                         | Agent SSE / browser stress cases (not loaded at runtime) |
 | `fonts_seed.json` · `design_tokens_seed.json` · `design_dicts_seed.json` | Fonts / tokens / dicts                            |

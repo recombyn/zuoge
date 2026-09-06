@@ -113,9 +113,9 @@ HitTest / Selection（不变：stackOrder + paintZ；raise 不改 hit 遮挡）
 **A3. 锐利门闩语义翻转**
 
 - 文件：`render/webglInstanceAtlas.ts`、`shapes/RcbShapesLayer.tsx`
-- 现状：`idleMediaNeedsSharpHost` / `idleStrokedAtlasNeedsSharpHost` / `idleAtlasInkNeedsSharpHost` → 促 DomHost。
+- 现状（已落地）：`backingInsufficientForAtlas` 驱动 restamp；DomHost 仅义务条件。历史别名 `idleMediaNeedsSharpHost` 已删除。
 - 目标：
-  - 新增 `backingInsufficientForAtlas(node, zoom, dpr) → boolean`。
+  - ~~新增 `backingInsufficientForAtlas`~~（已完成）。
   - 新增 `markAtlasRestampNeeded(id | '*', zoomBucket)`；由 WebGL 收集实例时 **force restamp**（更大有效分辨率或分格）。
   - `pickFullAndCanvasIds`：**不再**因「放大糊」把节点塞进 `fullIds`。
   - DomHost 仅保留：`lottie` / `group` / 过程编辑 / CORS 不安全 / SoftGlow 等 **义务** 条件 + `worldNodeStacksAboveAnyFrame`（层级，非锐利）。
@@ -166,7 +166,7 @@ function resolvePaintIntent(doc, id, ctx: { zoom; dpr; gesture; raised }): Paint
 ```
 
 - `pickFullAndCanvasIds` / `collectSoaWebglInstances` / `artboardInk` **只读这一处**。
-- 删并三套 `*NeedsSharpHost` 的「升 host」语义（可留 deprecated 包装测完再删）。
+- ~~删并三套 `*NeedsSharpHost` 的「升 host」语义~~（已删；用 `backingInsufficientForAtlas`）。
 
 **C2. 板绑定节点**
 
