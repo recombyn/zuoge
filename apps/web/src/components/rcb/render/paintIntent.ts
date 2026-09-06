@@ -11,10 +11,10 @@ import { nodeOwnerFrameId } from '@/components/rcb/frames/frameNodeBinding';
 import { worldNodeStacksAboveAnyFrame } from '@/components/rcb/scene/document/sceneDocument';
 import { canIdlePaintOnCanvas } from '@/components/rcb/render/sceneRenderer';
 import {
-  atlasZoomBucket,
   idleMediaScreenEdgePx,
   SOA_ATLAS_INNER,
 } from '@/components/rcb/render/webglInstanceAtlas';
+import { isMsdfTextPaintReady } from '@/components/rcb/render/vector/textMsdfAtlas';
 
 export type PaintIntent =
   | { kind: 'gpu-mesh' }
@@ -110,7 +110,6 @@ export function resolvePaintIntent(
 ): PaintIntent {
   const zoom = Math.max(0.05, Number(ctx.zoom) || 1);
   const dpr = Math.max(0.5, Number(ctx.dpr) || 1);
-  const bucket = atlasZoomBucket(zoom);
 
   if (ctx.forceFull) {
     paintDebugStats.domObligatory += 1;
@@ -169,13 +168,29 @@ export function resolvePaintIntent(
   if (
     key === 'image' ||
     key === 'video' ||
-    key === 'audio' ||
-    key === 'text'
+    key === 'audio'
   ) {
     if (backingInsufficientForAtlas(node, zoom, dpr)) {
       paintDebugStats.insufficient += 1;
     }
-    return { kind: 'atlas-stamp', zoomBucket: bucket };
+    // Idle media: per-node textured mesh (no atlas zoomBucket restamp).
+    return { kind: 'gpu-mesh' };
+  }
+
+  if (key === 'text') {
+    // Font files exist (catalog + fonts.css). Idle WebGL still needs async
+    // WOFF2→SFNT→msdfgen pack (~MB). Until quads are ready, DomHost CSS/SVG
+    // so selection is never a blank box; flip to MSDF when pack completes.
+    if (
+      !isMsdfTextPaintReady(node, {
+        width: Number(node.width) || 1,
+        height: Number(node.height) || 1,
+      })
+    ) {
+      paintDebugStats.domObligatory += 1;
+      return { kind: 'dom-obligatory', reason: 'msdf-warmup' };
+    }
+    return { kind: 'gpu-mesh' };
   }
 
   // Rich path / atlas-bakeable fills share stamp restamp; basics are gpu mesh.

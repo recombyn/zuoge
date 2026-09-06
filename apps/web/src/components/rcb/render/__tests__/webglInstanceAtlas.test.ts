@@ -21,6 +21,7 @@ import {
   createSceneRenderBuffer,
   SOA_KIND_IMAGE,
   SOA_KIND_RECT,
+  SOA_KIND_TEXT,
 } from '../sceneRenderBuffer';
 
 function tinySource(): HTMLCanvasElement {
@@ -238,6 +239,30 @@ describe('webglInstanceAtlas', () => {
     expect(atlas.regions.has('round:keep')).toBe(false);
     expect(atlas.regions.has('img:photo')).toBe(true);
     expect(atlas.regions.has('bake:0,0')).toBe(true);
+  });
+
+  it('pruneSoaAtlasForBuffer always releases leftover txt stamps', () => {
+    const atlas = createSoaWebglAtlas(SOA_ATLAS_CELL * 2, SOA_ATLAS_CELL);
+    if (!atlas) return;
+    stampImageToAtlas(atlas, 'txt:t1:z1', tinySource(), {
+      left: 0,
+      top: 0,
+      width: 8,
+      height: 8,
+    });
+    stampImageToAtlas(atlas, 'txt:gone:z1', tinySource(), {
+      left: 0,
+      top: 0,
+      width: 8,
+      height: 8,
+    });
+    const buf = createSceneRenderBuffer(2);
+    buf.count = 1;
+    buf.ids[0] = 't1';
+    buf.kinds[0] = SOA_KIND_TEXT;
+    expect(pruneSoaAtlasForBuffer(atlas, buf)).toBe(2);
+    expect(atlas.regions.has('txt:t1:z1')).toBe(false);
+    expect(atlas.regions.has('txt:gone:z1')).toBe(false);
   });
 
   it('force restamps dirty media cell in place', () => {

@@ -134,7 +134,10 @@ export function ellipseInnerRatioFromAttrs(
   attrs: Record<string, unknown> | null | undefined
 ): number {
   return clampEllipseInnerRatio(
-    attrs?.ellipseInnerRatio ?? attrs?.circleInnerRatio ?? attrs?.['inner-radius'],
+    attrs?.ellipseInnerRatio ??
+      attrs?.circleInnerRatio ??
+      attrs?.['ellipse-inner-ratio'] ??
+      attrs?.['inner-radius'],
     DEFAULT_ELLIPSE_INNER_RATIO
   );
 }

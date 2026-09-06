@@ -13,6 +13,9 @@ import {
   parseNodeMarkdown,
   parseNodeTextStyle,
   resolveTextBoxWidth,
+  textVerticalOriginY,
+  wrapPlainTextLines,
+  measureTextEmBoxHeight,
 } from '@/components/rcb/scene/document/sceneText';
 import { isTextFrameNode } from '@/components/rcb/scene/document/nodeCapabilities';
 import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
@@ -132,15 +135,15 @@ function TextInlineEditor({
         Math.max(Math.ceil(fontSize), widthWorld)
       );
 
-  // Prefer content height (tight, even top/bottom). Grow past nodeH only if wrapping needs it.
+  // Prefer content height (tight, even top/bottom). Keep authored nodeH so
+  // textVerticalOriginY matches idle ink (taller boxes stay centered).
   // Text frames keep the authored plate height (image-like) — scroll inside.
   const heightWorld = textFrame
     ? Math.max(Math.ceil(fontSize), nodeH)
     : Math.max(
         Math.ceil(fontSize),
         Math.ceil(contentBox.height),
-        // While edge-dragging width, keep at least the prior node height to avoid flicker.
-        isEdgeDragging ? nodeH : 0
+        nodeH
       );
   // Same pad as selection chrome (flush with glyphs).
   const pad = TEXT_SELECTION_PAD;
@@ -211,8 +214,8 @@ function TextInlineEditor({
     };
   }, [nodeId]);
 
-  // Entering edit: sync node box to tight content metrics so chrome matches selection
-  // without the old bottom-heavy pad (top edge stays put). Skip for scrollable text frames.
+  // Entering edit: grow the node box to content if needed. Do not shrink height —
+  // idle ink vertically centers in a taller box; shrinking would jump the glyphs.
   useLayoutEffect(() => {
     if (!node || node.key !== 'text') return;
     if (textFrameRef.current) return;
@@ -233,7 +236,8 @@ function TextInlineEditor({
     }
     const nextH = Math.max(
       Math.ceil(s.fontSize || 14),
-      Math.round(box.height)
+      Math.round(box.height),
+      Math.round(Number(node.height) || 0)
     );
     const curW = Math.round(Number(node.width) || 0);
     const curH = Math.round(Number(node.height) || 0);
@@ -334,6 +338,20 @@ function TextInlineEditor({
   const trackTop = padScreen;
   const trackW = Math.max(8, contentScreenW);
   const trackH = Math.max(fontSize * z, contentScreenH);
+  // Match idle WebGL/Canvas textVerticalOriginY so glyphs do not jump on edit open.
+  const editLines = textFrame
+    ? []
+    : wrapPlainTextLines(value || ' ', style, Math.max(1, widthWorld));
+  const originYWorld = textFrame
+    ? 0
+    : textVerticalOriginY(
+        heightWorld,
+        fontSize,
+        lineH,
+        Math.max(1, editLines.length),
+        measureTextEmBoxHeight(style, (value || '永').slice(0, 1) || '永')
+      );
+  const padTopScreen = contentPadScreen + originYWorld * z;
   const plateFill = textFrame
     ? resolveTextFramePlateFill(node.attrs?.['fill-color'])
     : undefined;
@@ -466,7 +484,11 @@ function TextInlineEditor({
             width: trackW,
             height: trackH,
             // Frame: pad glyphs only — scrollbar stays on the plate edge.
-            padding: contentPadScreen || 0,
+            // Non-frame: top pad matches idle textVerticalOriginY (centered stack).
+            paddingTop: padTopScreen || 0,
+            paddingLeft: contentPadScreen || 0,
+            paddingRight: contentPadScreen || 0,
+            paddingBottom: contentPadScreen || 0,
             fontSize: fontSize * z,
             // Unitless line-height matches SVG.js `leading` (fontSize × lineH).
             lineHeight: lineH,

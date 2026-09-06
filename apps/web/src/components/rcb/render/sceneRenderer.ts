@@ -83,6 +83,12 @@ import {
   type InnerShadowSpec,
 } from '@/components/rcb/scene/document/sceneEffects';
 import { resolveTextFramePlateFill } from '@/components/rcb/scene/document/nodeFactories';
+import { strokeDashForStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
+import {
+  isRectLikeStrokeSidesShape,
+  rectStrokeSideRuns,
+  traceStrokeSideRun,
+} from '@/components/rcb/render/vector/strokeSides';
 import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
   frameClipRevealsOverflow,
@@ -123,6 +129,7 @@ import {
   parseNodeTextStyle,
   wrapPlainTextLines,
   textVerticalOriginY,
+  measureTextEmBoxHeight,
 } from '@/components/rcb/scene/document/sceneText';
 import { shouldShowPixelGrid } from '@/components/rcb/selection/alignGuides';
 import {
@@ -1697,20 +1704,34 @@ function paintCanvasFillAndAlignedStroke(
   const { node, width: w, height: h, stroke, strokeWidth, path, fillRule, trace } = opts;
   const align = resolveStrokeAlignForPaint(node);
   const doStroke = strokeWidth > 0 && !isTransparentCssColor(stroke);
+  const dasharray =
+    strokeDashForStyle(node.attrs?.strokeStyle) ||
+    String(node.attrs?.strokeDasharray || node.attrs?.dasharray || '').trim() ||
+    undefined;
+  const shapeType = String(node.attrs?.shapeType || '').toLowerCase();
+  const sideRuns =
+    doStroke && isRectLikeStrokeSidesShape(shapeType, node.key)
+      ? rectStrokeSideRuns(w, h, node.attrs, radiiFromAttrs(node.attrs))
+      : null;
+  const sideHandled = sideRuns != null;
+  const strokeOpts = {
+    align,
+    stroke,
+    strokeWidth,
+    dasharray,
+    path,
+    fillRule,
+  } as const;
   const traceFn =
     trace ||
     (() => {
       /* Path2D-only callers */
     });
 
-  if (doStroke && align === 'outside') {
+  if (doStroke && !sideHandled && align === 'outside') {
     strokeCanvasAligned(ctx, {
-      align,
-      stroke,
-      strokeWidth,
+      ...strokeOpts,
       trace: traceFn,
-      path,
-      fillRule,
     });
   }
 
@@ -1723,14 +1744,21 @@ function paintCanvasFillAndAlignedStroke(
     trace,
   });
 
-  if (doStroke && align !== 'outside') {
+  if (sideHandled) {
+    for (const run of sideRuns!) {
+      if (run.length < 2) continue;
+      strokeCanvasAligned(ctx, {
+        align: 'center',
+        stroke,
+        strokeWidth,
+        dasharray,
+        trace: () => traceStrokeSideRun(ctx, run),
+      });
+    }
+  } else if (doStroke && align !== 'outside') {
     strokeCanvasAligned(ctx, {
-      align,
-      stroke,
-      strokeWidth,
+      ...strokeOpts,
       trace: traceFn,
-      path,
-      fillRule,
     });
   }
 }
@@ -2185,7 +2213,13 @@ export function paintCanvasTextInk(
   const innerH = Math.max(1, h - framePad * 2);
   const originY = textFrame
     ? 0
-    : textVerticalOriginY(innerH, fontSize, lineHeight, Math.max(1, lines.length));
+    : textVerticalOriginY(
+        innerH,
+        fontSize,
+        lineHeight,
+        Math.max(1, lines.length),
+        measureTextEmBoxHeight(style, (plain || '永').slice(0, 1) || '永')
+      );
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] || ' ';
     const y = framePad + originY + i * lineH;
@@ -2680,7 +2714,7 @@ export function paintCanvasMediaInk(
 }
 
 /**
- * Bake static image / video poster for WebGL atlas stamp (crop + corners).
+ * Bake static image / video poster for WebGL textured media mesh (crop + corners).
  * Empty generators / missing src bake a plate glyph (same as 2d idle ink).
  * Returns null only while a real src is still decoding or is WebGL-unsafe.
  */
@@ -2742,7 +2776,7 @@ export function bakeMediaInkForAtlas(
 }
 
 /**
- * Bake idle audio plate for WebGL atlas stamp (wash + waveform bars).
+ * Bake idle audio plate for WebGL textured media mesh (wash + waveform bars).
  */
 export function bakeAudioInkForAtlas(
   node: SceneNodeInput,
@@ -3050,6 +3084,7 @@ export function setSceneCanvasIdlePaint(next: SceneCanvasIdlePaintSnapshot | nul
   // only wake listeners when membership / doc identity changes — otherwise
   // every parent re-render during frame drag bumps canvasIdlePaintEpoch and
   // stacks full SoA paints until the tab hangs.
+  const prevHidden = sceneCanvasIdlePaint?.hiddenNodeId ?? null;
   sceneCanvasIdlePaint = next;
   if (typeof window !== 'undefined' && import.meta.env.DEV) {
     (window as Window & { __RCB_E2E_SCENE_DOC__?: unknown }).__RCB_E2E_SCENE_DOC__ =
@@ -3065,7 +3100,15 @@ export function setSceneCanvasIdlePaint(next: SceneCanvasIdlePaintSnapshot | nul
   const prevLen = sceneCanvasIdlePaintLen;
   const nextLen = next?.canvasIds.length ?? 0;
   sceneCanvasIdlePaintLen = nextLen;
-  if (next == null || nextLen < prevLen || (prevLen === 0 && nextLen > 0)) {
+  const nextHidden = next?.hiddenNodeId ?? null;
+  // Inline text/pen edit toggles hidden without membership shrink — WebGL must
+  // still full-clear or the prior mesh/atlas frame ghosts under the editor.
+  if (
+    next == null ||
+    nextLen < prevLen ||
+    (prevLen === 0 && nextLen > 0) ||
+    nextHidden !== prevHidden
+  ) {
     idleCanvasFullRepaintPending = true;
   }
   for (const fn of sceneCanvasIdlePaintListeners) {

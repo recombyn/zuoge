@@ -274,7 +274,7 @@ function paintFrame(doc, camera, dirty): void  // 内部再分发三条后端
 |------|-----------|--------------|
 | rect / ellipse / line（基础） | SoaWorld / SoaArtboard | 板内选中/reveal、需盖住画板、描边 atlas 糊、SoftGlow |
 | path / poly / star / pencil | atlas / rich idle | 糊、抬升、盖板、过重 path、**板内选中/reveal** |
-| text | outline mesh | 编辑态 FO；无 text atlas |
+| text | MSDF glyphs | 编辑态 FO；专用距离场图集，非 media bake |
 | image / video / audio | atlas stamp | 屏边 > atlas、空生成器、CORS、过程中、解码编辑 |
 | 空生成器（图/视/音/Lottie） | **禁止 SoA** | **永远 DomHost**（图标清晰 + 可压板） |
 | lottie / group | 禁止 SoA | 永远 DomHost |

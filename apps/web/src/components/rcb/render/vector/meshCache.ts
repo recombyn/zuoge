@@ -12,16 +12,29 @@ import type { Vec2 } from '@/components/rcb/render/vector/contour';
 import { ellipseInnerRatioFromAttrs } from '@/components/rcb/scene/document/sceneShapes';
 import { sceneFlatness } from '@/components/rcb/render/vector/densifyPathDJs';
 import {
+  boolEffectAttr,
+  resolveStrokeAlignForPaint,
+  resolveStrokeLinecap,
   resolveStrokeLinejoin,
   resolveStrokeMiterlimit,
 } from '@/components/rcb/scene/document/sceneEffects';
-import { mergeLiveCornerRadiiIntoAttrs } from '@/components/rcb/scene/document/sceneRadii';
+import { mergeLiveCornerRadiiIntoAttrs, radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
 import { mergeLiveShapeParamsIntoAttrs } from '@/components/rcb/scene/document/sceneShapes';
+import { strokeDashForStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
+import {
+  isRectLikeStrokeSidesShape,
+  rectStrokeSideRuns,
+} from '@/components/rcb/render/vector/strokeSides';
 
 export type CachedShapeMesh = {
   geomFp: string;
   fill: FillMesh | null;
   stroke: StrokeMesh | null;
+  /**
+   * Legacy field; hairline gating is draw-time via strokeRibbonPaint.submit.
+   * Always 1 for newly built meshes.
+   */
+  strokeAlphaScale: number;
 };
 
 const cache = new Map<string, CachedShapeMesh>();
@@ -57,12 +70,13 @@ export function getShapeMeshCacheSize(): number {
 
 function strokeWidthOf(node: SceneNodeInput): number {
   const attrs = node.attrs || {};
-  if (attrs['stroke-enabled'] === false || String(attrs['stroke-enabled']) === 'false') return 0;
+  if (!boolEffectAttr(attrs['stroke-enabled'], true)) return 0;
+  if (!boolEffectAttr(attrs['stroke-visible'], true)) return 0;
   return Math.max(0, Number(attrs['border-width'] ?? attrs.strokeWidth) || 0);
 }
 
 function strokeAlignOf(node: SceneNodeInput): string {
-  return String(node.attrs?.strokeAlign || node.attrs?.['stroke-align'] || 'center');
+  return resolveStrokeAlignForPaint(node);
 }
 
 function nodeWantsSolidFill(node: SceneNodeInput): boolean {
@@ -87,8 +101,9 @@ function ellipseHoleRing(
   if (!(ratio > 1e-4)) return null;
   const cx = w / 2;
   const cy = h / 2;
-  const rx = Math.max(0.5, (w / 2) * (1 - ratio));
-  const ry = Math.max(0.5, (h / 2) * (1 - ratio));
+  // Match PathBuilder.ellipseVariant: hole radius = outer * innerRatio.
+  const rx = Math.max(0.5, (w / 2) * ratio);
+  const ry = Math.max(0.5, (h / 2) * ratio);
   if (rx < 0.5 || ry < 0.5) return null;
   const steps = Math.max(64, Math.min(1024, Math.ceil((Math.PI * (rx + ry)) / Math.max(0.05, flatness))));
   const pts: Vec2[] = [];
@@ -138,17 +153,40 @@ export function getOrBuildShapeMesh(
       ? 'evenodd'
       : 'nonzero';
   const pencilSil = Boolean(contour.pencilSilhouette);
+  // Arrow stays open chevron (shaft + V strokes) — match Canvas/SVG live preview.
+  // Do not fill the head triangle (that made idle look solid after commit).
+  const authoredStroke = pencilSil ? 0 : strokeWidthOf(paintNode);
+  const dasharray = pencilSil
+    ? undefined
+    : strokeDashForStyle(paintNode.attrs?.strokeStyle) ||
+      String(paintNode.attrs?.strokeDasharray || paintNode.attrs?.dasharray || '').trim() ||
+      undefined;
+  const shapeType = String(paintNode.attrs?.shapeType || '').toLowerCase();
+  const sideRuns =
+    !pencilSil && isRectLikeStrokeSidesShape(shapeType, paintNode.key)
+      ? rectStrokeSideRuns(w, h, paintNode.attrs, radiiFromAttrs(paintNode.attrs))
+      : null;
   const { fill, stroke } = buildShapeMeshes(contour.points, {
     closed: contour.closed,
     wantFill: pencilSil || (contour.closed && nodeWantsSolidFill(paintNode)),
-    strokeWidth: pencilSil ? 0 : strokeWidthOf(paintNode),
+    strokeWidth: authoredStroke,
     strokeAlign: strokeAlignOf(paintNode),
     linejoin: resolveStrokeLinejoin(paintNode.attrs),
+    linecap: resolveStrokeLinecap(paintNode.attrs),
     miterLimit: resolveStrokeMiterlimit(paintNode.attrs),
     holes: holes.length ? holes : undefined,
     fillRule,
+    arrowHeadFill: false,
+    dasharray,
+    strokeRuns: sideRuns ?? undefined,
   });
-  const entry: CachedShapeMesh = { geomFp: fp, fill, stroke };
+  const entry: CachedShapeMesh = {
+    geomFp: fp,
+    fill,
+    stroke,
+    // Draw gate lives in the renderer (screen width); keep scale at 1.
+    strokeAlphaScale: 1,
+  };
   cache.set(id, entry);
   touch(id);
   return entry;

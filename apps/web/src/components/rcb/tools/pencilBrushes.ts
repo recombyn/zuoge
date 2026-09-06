@@ -4,6 +4,7 @@
 
 import getStroke from 'perfect-freehand';
 import type { StrokeOptions } from 'perfect-freehand';
+import { splitPolylineByDash } from '@/components/rcb/render/vector/strokeDash';
 
 export type PencilBrushId = string;
 
@@ -496,61 +497,6 @@ export function outlinePathFromPoints(
     return `M ${outline.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`;
   }
   return getSvgPathFromStroke(outline);
-}
-
-/** Split a polyline into dash / gap segments (dasharray like SVG: "8 4"). */
-function splitPolylineByDash(points: Pt[], dasharray: string): Pt[][] {
-  const raw = dasharray
-    .trim()
-    .split(/[\s,]+/)
-    .map(Number)
-    .filter((n) => Number.isFinite(n) && n >= 0);
-  if (points.length < 2 || raw.length === 0) return [points];
-  const pattern = raw.map((n) => Math.max(0.5, n));
-  if (pattern.length % 2 === 1) pattern.push(pattern[pattern.length - 1]);
-
-  const dashes: Pt[][] = [];
-  let patternIdx = 0;
-  let remaining = pattern[0];
-  let drawing = true;
-  let current: Pt[] = drawing ? [{ ...points[0] }] : [];
-
-  const flush = () => {
-    if (current.length >= 2) dashes.push(current);
-    current = [];
-  };
-
-  for (let i = 1; i < points.length; i += 1) {
-    let ax = points[i - 1].x;
-    let ay = points[i - 1].y;
-    const bx = points[i].x;
-    const by = points[i].y;
-    let left = Math.hypot(bx - ax, by - ay);
-    if (left <= 1e-6) continue;
-    while (left > 1e-6) {
-      const take = Math.min(left, remaining);
-      const full = Math.hypot(bx - ax, by - ay) || 1;
-      const mx = ax + ((bx - ax) / full) * take;
-      const my = ay + ((by - ay) / full) * take;
-      if (drawing) {
-        if (!current.length) current.push({ x: ax, y: ay });
-        current.push({ x: mx, y: my });
-      }
-      ax = mx;
-      ay = my;
-      left -= take;
-      remaining -= take;
-      if (remaining <= 1e-6) {
-        if (drawing) flush();
-        patternIdx = (patternIdx + 1) % pattern.length;
-        remaining = pattern[patternIdx];
-        drawing = !drawing;
-        if (drawing) current = [{ x: ax, y: ay }];
-      }
-    }
-  }
-  if (drawing) flush();
-  return dashes.length ? dashes : [points];
 }
 
 /**

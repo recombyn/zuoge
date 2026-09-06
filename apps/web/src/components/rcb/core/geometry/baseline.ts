@@ -46,7 +46,7 @@ function resolveShapeType(node: SceneNodeInput): string {
   return String(node?.attrs?.shapeType || (key === 'shape' ? 'rect' : ''));
 }
 
-/** Open arrow: shaft stops at head base; V alone forms the tip (no tip double-stroke). */
+/** Open arrow: shaft + separate V head (no tip double-stroke on shaft). */
 export function arrowBaselinePath(width: number, height: number, head = ARROW_HEAD): string {
   const w = Math.max(1, width);
   const mid = Math.max(1, height) / 2;
@@ -54,10 +54,12 @@ export function arrowBaselinePath(width: number, height: number, head = ARROW_HE
   const wing = headLen * 0.55;
   // Shaft must not share the tip vertex — thick stroke caps + V miter stacked there
   // made the tip look crooked (one wing edge longer than the other).
+  // Slight tuck so shaft meets the open V without a visible butt gap.
   const shaftEnd = Math.max(0, w - headLen);
+  const tuck = Math.min(headLen * 0.2, Math.max(1, headLen * 0.12));
   return new PathBuilder()
     .moveTo(0, mid)
-    .lineTo(shaftEnd, mid)
+    .lineTo(Math.min(w - 1e-3, shaftEnd + tuck), mid)
     .moveTo(w - headLen, mid - wing)
     .lineTo(w, mid)
     .lineTo(w - headLen, mid + wing)

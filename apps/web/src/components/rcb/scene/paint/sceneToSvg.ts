@@ -74,6 +74,10 @@ import {
   roundedRectPath,
   type CornerRadii,
 } from '../document/sceneRadii';
+import {
+  rectStrokeSideRuns,
+  strokeSideRunPathD,
+} from '@/components/rcb/render/vector/strokeSides';
 import { isCustomPathShape, scalePathData } from '../document/pathScale';
 import { shapeVertexPoints, sidesFromAttrs, clampShapeSides, DEFAULT_SHAPE_SIDES, starInnerRatioFromAttrs, ellipseInnerRatioFromAttrs, ellipseArcPercentFromAttrs, ellipseStartDegFromAttrs, clampEllipseInnerRatio, clampEllipseArcPercent, clampEllipseStartDeg } from '../document/sceneShapes';
 import { getShapeBaseline, getShapeBaselineD } from '@/components/rcb/core/geometry';
@@ -1025,23 +1029,11 @@ function createRectLike(
   }
 
   if (!allSides && !noSides && !hasRadius) {
-    if (showT) {
-      const ln = appendChild(g, svgEl('line', { x1: 0, y1: 0, x2: width, y2: 0 }));
-      setFill(ln, 'none');
-      applyElementStroke(root, ln, strokeOpen);
-    }
-    if (showB) {
-      const ln = appendChild(g, svgEl('line', { x1: 0, y1: height, x2: width, y2: height }));
-      setFill(ln, 'none');
-      applyElementStroke(root, ln, strokeOpen);
-    }
-    if (showL) {
-      const ln = appendChild(g, svgEl('line', { x1: 0, y1: 0, x2: 0, y2: height }));
-      setFill(ln, 'none');
-      applyElementStroke(root, ln, strokeOpen);
-    }
-    if (showR) {
-      const ln = appendChild(g, svgEl('line', { x1: width, y1: 0, x2: width, y2: height }));
+    const runs = rectStrokeSideRuns(width, height, node.attrs, r) || [];
+    for (const run of runs) {
+      const d = strokeSideRunPathD(run);
+      if (!d) continue;
+      const ln = appendChild(g, svgEl('path', { d }));
       setFill(ln, 'none');
       applyElementStroke(root, ln, strokeOpen);
     }

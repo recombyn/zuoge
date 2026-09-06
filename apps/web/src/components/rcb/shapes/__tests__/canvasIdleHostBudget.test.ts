@@ -141,7 +141,7 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
     expect(canvasIds).toHaveLength(20);
   });
 
-  it('keeps media process hosts; static image/text and light pen on canvas ink', () => {
+  it('keeps media process hosts; light pen/image on canvas; text DomHost until MSDF ready', () => {
     const doc = makeDoc({
       t0: textNode('t0'),
       p0: lightPen('p0'),
@@ -153,8 +153,9 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
       zoom: 1,
       dpr: 1,
     });
-    expect(fullIds).toEqual([]);
-    expect(canvasIds.sort()).toEqual(['i0', 'p0', 't0']);
+    // Text stays DomHost while MSDF atlas is still packing (CSS/SVG visible).
+    expect(fullIds).toEqual(['t0']);
+    expect(canvasIds.sort()).toEqual(['i0', 'p0']);
   });
 
   it('keeps large/zoomed idle images on canvas ink (restamp — never SharpHost)', () => {
@@ -390,8 +391,8 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
       visibleIds: ['basic', 'stroke', 'grad', 'poly', 't0', 'i0'],
       zoom: 1,
     });
-    expect(canvasIds.sort()).toEqual(['basic', 'grad', 'i0', 'poly', 'stroke', 't0']);
-    expect(fullIds).toEqual([]);
+    expect(canvasIds.sort()).toEqual(['basic', 'grad', 'i0', 'poly', 'stroke']);
+    expect(fullIds).toEqual(['t0']);
   });
 
   it('forceFull selected video stays DOM host; idle video on canvas poster', () => {

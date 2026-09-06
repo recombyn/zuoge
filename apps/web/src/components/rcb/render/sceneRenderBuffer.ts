@@ -26,6 +26,7 @@ import {
   strokeCanvasAligned,
   boolEffectAttr,
 } from '@/components/rcb/scene/document/sceneEffects';
+import { strokeDashForStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
 import {
   effectiveEllipseInnerRatioFromAttrs,
   ellipseArcPercentFromAttrs,
@@ -43,6 +44,11 @@ import {
 import { invalidateShapeMesh } from '@/components/rcb/render/vector/meshCache';
 import { invalidateTextOutlineMesh } from '@/components/rcb/render/vector/textOutlineMesh';
 import { pencilSilhouettePathD } from '@/components/rcb/render/vector/contour';
+import {
+  isRectLikeStrokeSidesShape,
+  rectStrokeSideRuns,
+  traceStrokeSideRun,
+} from '@/components/rcb/render/vector/strokeSides';
 import { parseNodeTextStyle } from '@/components/rcb/scene/document/sceneText';
 import { getSoaTextInkPainter } from '@/components/rcb/render/soaTextInkPainter';
 import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
@@ -93,7 +99,7 @@ export const SOA_KIND_LINE = 2;
 export const SOA_KIND_PATH = 3;
 export const SOA_KIND_IMAGE = 4;
 export const SOA_KIND_POLY = 5;
-/** Static text — WebGL glyph outline mesh (never atlas stamp). */
+/** Static text — WebGL MSDF glyphs (never media atlas stamp). */
 export const SOA_KIND_TEXT = 6;
 export const SOA_KIND_OTHER = 15;
 /** Fallback line/path width when attrs omit border-width (matches prior Canvas/WebGL default). */
@@ -129,7 +135,7 @@ function shapeTypeToken(node: SceneNodeInput): string {
 export function isSoaCanvasEligible(node: SceneNodeInput | null | undefined): boolean {
   if (!node) return false;
   const key = String(node.key || '');
-  // Lottie/group stay DOM. Static image/video/audio may atlas-stamp; text is outline mesh.
+  // Lottie/group stay DOM. Static image/video/audio → textured mesh; text is MSDF.
   if (key === 'lottie' || key === 'group') return false;
   if (key === 'text' || key === 'image' || key === 'video' || key === 'audio') return true;
   const t = shapeTypeToken(node);
@@ -246,6 +252,9 @@ export function isSoaBasicGeomSufficient(node: SceneNodeInput | null | undefined
   if (t === 'line' || t === 'arrow' || t === 'pencil') return true;
 
   // Closed shapes: vector fill+stroke on both WebGL and Canvas2D.
+  // Donut / partial-arc ellipses use the same mesh path as solid disks
+  // (getOrBuildShapeMesh + holes). Keeping them off BASIC used to drop
+  // CANVAS_IDLE in applySoaHostInkFlags → empty selection box after IR commit.
   const closedFill =
     t === 'triangle' ||
     t === 'polygon' ||
@@ -257,11 +266,6 @@ export function isSoaBasicGeomSufficient(node: SceneNodeInput | null | undefined
     t === 'ellipse' ||
     t === 'oval';
   if (closedFill) {
-    if (t === 'circle' || t === 'ellipse' || t === 'oval') {
-      if (ellipseInnerRatioFromAttrs(attrs) > 1e-6) return false;
-      const arc = ellipseArcPercentFromAttrs(attrs);
-      if (arc > 0 && arc < 100 - 1e-6) return false;
-    }
     return true;
   }
 
@@ -357,6 +361,48 @@ export function soaStrokeWidth(buf: SceneRenderBuffer, index: number): number {
   const w = buf.strokeWidths[index];
   if (Number.isFinite(w) && w > 0) return w;
   return SOA_DEFAULT_STROKE_WIDTH;
+}
+
+function strokeDashFromAttrs(
+  attrs: Record<string, unknown> | null | undefined
+): string | undefined {
+  if (!attrs) return undefined;
+  return (
+    strokeDashForStyle(attrs.strokeStyle) ||
+    String(attrs.strokeDasharray || attrs.dasharray || '').trim() ||
+    undefined
+  );
+}
+
+/**
+ * Paint T/R/B/L partial rect edges (local space). Returns true when caller
+ * must skip the closed-path stroke (including "all sides off").
+ */
+function strokeCanvasPartialRectSides(
+  ctx: CanvasRenderingContext2D,
+  opts: {
+    width: number;
+    height: number;
+    attrs: Record<string, unknown> | null | undefined;
+    radii: { tl: number; tr: number; br: number; bl: number };
+    stroke: string;
+    strokeWidth: number;
+    dasharray?: string;
+  }
+): boolean {
+  const runs = rectStrokeSideRuns(opts.width, opts.height, opts.attrs, opts.radii);
+  if (runs == null) return false;
+  for (const run of runs) {
+    if (run.length < 2) continue;
+    strokeCanvasAligned(ctx, {
+      align: 'center',
+      stroke: opts.stroke,
+      strokeWidth: opts.strokeWidth,
+      dasharray: opts.dasharray,
+      trace: () => traceStrokeSideRun(ctx, run),
+    });
+  }
+  return true;
 }
 
 function slotStrokeWidth(node: SceneNodeInput, kind: number): number {
@@ -881,7 +927,10 @@ export function rebuildSoaPathSamples(
         key: 'shape',
         width: w,
         height: h,
-        attrs: { ...(node.attrs || {}), shapeType: t },
+        attrs: {
+          ...mergeLiveShapeParamsIntoAttrs(id, (node.attrs || {}) as Record<string, unknown>),
+          shapeType: t,
+        },
       } as SceneNodeInput,
       { width: w, height: h }
     );
@@ -1744,6 +1793,7 @@ function paintSoaIdleSlotLiveGeo(
   const doFill = fillArgb !== 0;
   const doOutline = Boolean(outlineArgb && outlineW > 0 && outlineStroke);
   const strokeAlign = resolveStrokeAlignForPaint(node);
+  const strokeDash = strokeDashFromAttrs(mergedAttrs);
   const useEvenodd =
     kind === SOA_KIND_ELLIPSE && effectiveEllipseInnerRatioFromAttrs(id, node.attrs) > 1e-4;
   const rot = livePreviewAngleDeg(id);
@@ -1762,7 +1812,8 @@ function paintSoaIdleSlotLiveGeo(
       strokeCanvasAligned(ctx, {
         align: strokeAlign,
         stroke: outlineStroke,
-        strokeWidth: outlineW,
+            strokeWidth: outlineW,
+        dasharray: strokeDash,
         trace: noopTrace,
         path,
         fillRule: useEvenodd ? 'evenodd' : undefined,
@@ -1777,7 +1828,8 @@ function paintSoaIdleSlotLiveGeo(
       strokeCanvasAligned(ctx, {
         align: strokeAlign,
         stroke: outlineStroke,
-        strokeWidth: outlineW,
+            strokeWidth: outlineW,
+        dasharray: strokeDash,
         trace: noopTrace,
         path,
         fillRule: useEvenodd ? 'evenodd' : undefined,
@@ -1813,7 +1865,8 @@ function paintSoaIdleSlotLiveGeo(
       strokeCanvasAligned(ctx, {
         align: strokeAlign,
         stroke: outlineStroke,
-        strokeWidth: outlineW,
+            strokeWidth: outlineW,
+        dasharray: strokeDash,
         trace,
       });
     }
@@ -1827,7 +1880,8 @@ function paintSoaIdleSlotLiveGeo(
       strokeCanvasAligned(ctx, {
         align: strokeAlign,
         stroke: outlineStroke,
-        strokeWidth: outlineW,
+            strokeWidth: outlineW,
+        dasharray: strokeDash,
         trace,
       });
     }
@@ -2100,45 +2154,56 @@ export function paintSoaIdleSlot(
       ctx.lineCap = resolveStrokeLinecap(lineAttrs);
       ctx.lineJoin = resolveStrokeLinejoin(lineAttrs);
       ctx.miterLimit = resolveStrokeMiterlimit(lineAttrs);
-      if (start >= 0 && len >= 2) {
-        // Baseline samples (line shaft / arrow shaft+V), including NaN breaks.
-        const base = start * 2;
-        let pending = false;
-        ctx.beginPath();
-        for (let p = 0; p < len; p += 1) {
-          const fo = base + p * 2;
-          const { x: px, y: py } = mapSoaPathSampleToLive(
-            buf.pathXY[fo],
-            buf.pathXY[fo + 1],
-            pathLive
-          );
-          if (!Number.isFinite(px) || !Number.isFinite(py)) {
-            pending = false;
-            continue;
+      const lineDash = strokeDashFromAttrs(lineAttrs);
+      const dashNums = String(lineDash || '')
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number)
+        .filter((n) => Number.isFinite(n) && n >= 0);
+      ctx.setLineDash(dashNums.length ? dashNums : []);
+      try {
+        if (start >= 0 && len >= 2) {
+          // Baseline samples (line shaft / arrow shaft+V), including NaN breaks.
+          const base = start * 2;
+          let pending = false;
+          ctx.beginPath();
+          for (let p = 0; p < len; p += 1) {
+            const fo = base + p * 2;
+            const { x: px, y: py } = mapSoaPathSampleToLive(
+              buf.pathXY[fo],
+              buf.pathXY[fo + 1],
+              pathLive
+            );
+            if (!Number.isFinite(px) || !Number.isFinite(py)) {
+              pending = false;
+              continue;
+            }
+            if (!pending) {
+              ctx.moveTo(px, py);
+              pending = true;
+            } else {
+              ctx.lineTo(px, py);
+            }
           }
-          if (!pending) {
-            ctx.moveTo(px, py);
-            pending = true;
-          } else {
-            ctx.lineTo(px, py);
-          }
+          ctx.stroke();
+        } else {
+          // Shaft is mid-box left→right at live/doc angle — not the AABB diagonal.
+          const angleDeg =
+            Number(getNodeTransformPreview(id)?.angle) ||
+            Number(doc?.deltaSetLike?.[id]?.attrs?.angle) ||
+            0;
+          const rad = ((Number(angleDeg) || 0) * Math.PI) / 180;
+          const cx = x + w / 2;
+          const cy = y + h / 2;
+          const hx = (w / 2) * Math.cos(rad);
+          const hy = (w / 2) * Math.sin(rad);
+          ctx.beginPath();
+          ctx.moveTo(cx - hx, cy - hy);
+          ctx.lineTo(cx + hx, cy + hy);
+          ctx.stroke();
         }
-        ctx.stroke();
-      } else {
-        // Shaft is mid-box left→right at live/doc angle — not the AABB diagonal.
-        const angleDeg =
-          Number(getNodeTransformPreview(id)?.angle) ||
-          Number(doc?.deltaSetLike?.[id]?.attrs?.angle) ||
-          0;
-        const rad = ((Number(angleDeg) || 0) * Math.PI) / 180;
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-        const hx = (w / 2) * Math.cos(rad);
-        const hy = (w / 2) * Math.sin(rad);
-        ctx.beginPath();
-        ctx.moveTo(cx - hx, cy - hy);
-        ctx.lineTo(cx + hx, cy + hy);
-        ctx.stroke();
+      } finally {
+        ctx.setLineDash([]);
       }
       buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
       return;
@@ -2229,6 +2294,7 @@ export function paintSoaIdleSlot(
             align: strokeAlign,
             stroke: polyOutline,
             strokeWidth: outlineW,
+            dasharray: strokeDashFromAttrs(polyJoinAttrs),
             trace: tracePoly,
           });
         }
@@ -2242,6 +2308,7 @@ export function paintSoaIdleSlot(
             align: strokeAlign,
             stroke: polyOutline,
             strokeWidth: outlineW,
+            dasharray: strokeDashFromAttrs(polyJoinAttrs),
             trace: tracePoly,
           });
         }
@@ -2363,11 +2430,21 @@ export function paintSoaIdleSlot(
           kind === SOA_KIND_ELLIPSE &&
           effectiveEllipseInnerRatioFromAttrs(id, nodeForRadii.attrs) > 1e-4;
         const paintPath = () => {
-          if (doOutline && strokeAlign === 'outside') {
+          const dasharray = strokeDashFromAttrs(rectStrokeAttrs);
+          const wantSides =
+            kind === SOA_KIND_RECT &&
+            doOutline &&
+            isRectLikeStrokeSidesShape(shapeType, nodeForRadii?.key);
+          const sideRuns = wantSides
+            ? rectStrokeSideRuns(w, h, rectStrokeAttrs, cornerR)
+            : null;
+          const sideHandled = sideRuns != null;
+          if (doOutline && !sideHandled && strokeAlign === 'outside') {
             strokeCanvasAligned(ctx, {
               align: strokeAlign,
               stroke: outlineStroke,
               strokeWidth: outlineW,
+              dasharray,
               trace: () => undefined,
               path,
               fillRule: useEvenodd ? 'evenodd' : undefined,
@@ -2378,11 +2455,22 @@ export function paintSoaIdleSlot(
             if (useEvenodd) ctx.fill(path, 'evenodd');
             else ctx.fill(path);
           }
-          if (doOutline && strokeAlign !== 'outside') {
+          if (sideHandled) {
+            strokeCanvasPartialRectSides(ctx, {
+              width: w,
+              height: h,
+              attrs: rectStrokeAttrs,
+              radii: cornerR,
+              stroke: outlineStroke,
+              strokeWidth: outlineW,
+              dasharray,
+            });
+          } else if (doOutline && strokeAlign !== 'outside') {
             strokeCanvasAligned(ctx, {
               align: strokeAlign,
               stroke: outlineStroke,
               strokeWidth: outlineW,
+              dasharray,
               trace: () => undefined,
               path,
               fillRule: useEvenodd ? 'evenodd' : undefined,
@@ -2434,20 +2522,41 @@ export function paintSoaIdleSlot(
     };
 
     const paintAlignedLocal = () => {
-      if (doOutline && strokeAlign === 'outside') {
+      const dasharray = strokeDashFromAttrs(rectStrokeAttrs);
+      const shapeType = String(rectStrokeAttrs?.shapeType || 'rect').toLowerCase();
+      const sideRuns =
+        kind === SOA_KIND_RECT &&
+        doOutline &&
+        isRectLikeStrokeSidesShape(shapeType, nodeForRadii?.key)
+          ? rectStrokeSideRuns(w, h, rectStrokeAttrs, cornerR)
+          : null;
+      const sideHandled = sideRuns != null;
+      if (doOutline && !sideHandled && strokeAlign === 'outside') {
         strokeCanvasAligned(ctx, {
           align: strokeAlign,
           stroke: outlineStroke,
           strokeWidth: outlineW,
+          dasharray,
           trace: traceLocal,
         });
       }
       fillLocal();
-      if (doOutline && strokeAlign !== 'outside') {
+      if (sideHandled) {
+        strokeCanvasPartialRectSides(ctx, {
+          width: w,
+          height: h,
+          attrs: rectStrokeAttrs,
+          radii: cornerR,
+          stroke: outlineStroke,
+          strokeWidth: outlineW,
+          dasharray,
+        });
+      } else if (doOutline && strokeAlign !== 'outside') {
         strokeCanvasAligned(ctx, {
           align: strokeAlign,
           stroke: outlineStroke,
           strokeWidth: outlineW,
+          dasharray,
           trace: traceLocal,
         });
       }
@@ -2461,6 +2570,7 @@ export function paintSoaIdleSlot(
       paintAlignedLocal();
       ctx.restore();
     } else if (kind === SOA_KIND_ELLIPSE) {
+      const dasharray = strokeDashFromAttrs(rectStrokeAttrs);
       const traceWorld = () => {
         ctx.beginPath();
         ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
@@ -2470,6 +2580,7 @@ export function paintSoaIdleSlot(
           align: strokeAlign,
           stroke: outlineStroke,
           strokeWidth: outlineW,
+          dasharray,
           trace: traceWorld,
         });
       }
@@ -2480,10 +2591,17 @@ export function paintSoaIdleSlot(
           align: strokeAlign,
           stroke: outlineStroke,
           strokeWidth: outlineW,
+          dasharray,
           trace: traceWorld,
         });
       }
     } else {
+      const dasharray = strokeDashFromAttrs(rectStrokeAttrs);
+      const shapeType = String(rectStrokeAttrs?.shapeType || 'rect').toLowerCase();
+      const sideRuns =
+        doOutline && isRectLikeStrokeSidesShape(shapeType, nodeForRadii?.key)
+          ? rectStrokeSideRuns(w, h, rectStrokeAttrs, cornerR)
+          : null;
       const { tl, tr, br, bl } = cornerR;
       const traceWorld = () => {
         if (tl > 0 || tr > 0 || br > 0 || bl > 0) {
@@ -2493,11 +2611,12 @@ export function paintSoaIdleSlot(
           ctx.rect(x, y, w, h);
         }
       };
-      if (doOutline && strokeAlign === 'outside') {
+      if (doOutline && sideRuns == null && strokeAlign === 'outside') {
         strokeCanvasAligned(ctx, {
           align: strokeAlign,
           stroke: outlineStroke,
           strokeWidth: outlineW,
+          dasharray,
           trace: traceWorld,
         });
       }
@@ -2506,11 +2625,25 @@ export function paintSoaIdleSlot(
       } else {
         ctx.fillRect(x, y, w, h);
       }
-      if (doOutline && strokeAlign !== 'outside') {
+      if (sideRuns != null) {
+        ctx.save();
+        ctx.translate(x, y);
+        strokeCanvasPartialRectSides(ctx, {
+          width: w,
+          height: h,
+          attrs: rectStrokeAttrs,
+          radii: cornerR,
+          stroke: outlineStroke,
+          strokeWidth: outlineW,
+          dasharray,
+        });
+        ctx.restore();
+      } else if (doOutline && strokeAlign !== 'outside') {
         strokeCanvasAligned(ctx, {
           align: strokeAlign,
           stroke: outlineStroke,
           strokeWidth: outlineW,
+          dasharray,
           trace: traceWorld,
         });
       }
@@ -2780,7 +2913,14 @@ export function applySoaHostInkFlags(
       ((flags & SOA_FLAG_BASIC_GEOM) !== 0 ||
         (flags & SOA_FLAG_ATLAS_STAMP) !== 0 ||
         kind === SOA_KIND_IMAGE ||
-        kind === SOA_KIND_TEXT);
+        kind === SOA_KIND_TEXT ||
+        // Donut/arc ellipses and other vector slots may lack BASIC briefly;
+        // never strip CANVAS_IDLE just because they are not BASIC_GEOM.
+        kind === SOA_KIND_RECT ||
+        kind === SOA_KIND_ELLIPSE ||
+        kind === SOA_KIND_PATH ||
+        kind === SOA_KIND_POLY ||
+        kind === SOA_KIND_LINE);
     const isInk = (flags & SOA_FLAG_CANVAS_IDLE) !== 0;
     if (wantInk === isInk) return false;
     if (wantInk) flags = (flags | SOA_FLAG_CANVAS_IDLE) >>> 0;

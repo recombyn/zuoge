@@ -15,6 +15,7 @@ import {
   SOA_WEBGL_NO_CLIP,
 } from '../webglSceneRenderer';
 import { createSoaWebglAtlas } from '../webglInstanceAtlas';
+import { getOrBuildShapeMesh } from '../vector/meshCache';
 
 describe('collectSoaWebglInstances', () => {
   it('packs rect and ellipse as vector meshes in view', () => {
@@ -339,7 +340,7 @@ describe('collectSoaWebglInstances', () => {
         path: 'M 0 0 L 40 0 L 40 40',
         stroke: '#112233',
         'border-color': '#112233',
-        'border-width': 1,
+        'border-width': 2,
         'fill-color': 'transparent',
         closed: 'false',
       },
@@ -364,6 +365,55 @@ describe('collectSoaWebglInstances', () => {
     expect(kinds.length).toBe(0);
     expect(meshPos.length).toBeGreaterThanOrEqual(6);
     expect(meshCol[3]).toBeGreaterThan(0.9);
+  });
+
+  it('does not submit stroke ribbon when screen width is ≤1px (mesh still built)', () => {
+    let doc = createEmptyDocument({ width: 800, height: 600, emptyWorld: true });
+    doc = addNodeToDocument(doc, 'p', {
+      id: 'p',
+      key: 'shape',
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      attrs: {
+        shapeType: 'pen',
+        path: 'M 0 0 L 40 0 L 40 40',
+        stroke: '#112233',
+        'border-color': '#112233',
+        'border-width': 1,
+        'fill-color': 'transparent',
+        closed: 'false',
+      },
+      children: [],
+    });
+    const buf = createSceneRenderBuffer();
+    syncSceneRenderBufferFromDocument(buf, doc);
+    rebuildSoaPathSamples(buf, doc);
+    buf.flags[0] = (buf.flags[0] | SOA_FLAG_CANVAS_IDLE) >>> 0;
+    const kinds: number[] = [];
+    const meshPos: number[] = [];
+    const meshCol: number[] = [];
+    const meshClip: number[] = [];
+    collectSoaWebglInstances(buf, { x: 0, y: 0, width: 200, height: 200 }, [], [], kinds, [], [], {
+      document: doc,
+      meshPos,
+      meshCol,
+      meshClip,
+      zoom: 1,
+      dpr: 1,
+    });
+    // No GPU submit for ≤1px screen stroke; no rect-instance ghost either.
+    expect(kinds.length).toBe(0);
+    expect(meshPos.length).toBe(0);
+    const cached = getOrBuildShapeMesh('p', doc.deltaSetLike!.p!, {
+      width: 100,
+      height: 100,
+      zoom: 1,
+      dpr: 1,
+    });
+    expect(cached?.stroke).not.toBeNull();
+    expect(cached!.stroke!.triangleCount).toBeGreaterThan(0);
   });
 
   it('closed stroked path uses vector mesh (no atlas kind 3 / no segment notches)', () => {

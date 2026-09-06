@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, addNodeToDocument } from '@/components/rcb/scene/document/sceneDocument';
 import {
+  applySoaHostInkFlags,
   createSceneRenderBuffer,
   isSoaBasicGeomSufficient,
   isSoaCanvasEligible,
@@ -390,7 +391,7 @@ describe('SoA basic geom vs rounded / poly', () => {
     expect(canIdlePaintOnCanvas(doc.deltaSetLike.img)).toBe(true);
   });
 
-  it('donut ellipse is not BASIC_GEOM / not SoA idle stamp', () => {
+  it('donut ellipse stays BASIC_GEOM + SoA idle (mesh hole path)', () => {
     let doc = createEmptyDocument({ width: 800, height: 600, emptyWorld: true });
     doc = addNodeToDocument(doc, 'donut', {
       id: 'donut',
@@ -409,9 +410,12 @@ describe('SoA basic geom vs rounded / poly', () => {
     });
     const buf = createSceneRenderBuffer();
     syncSceneRenderBufferFromDocument(buf, doc);
-    expect(isSoaBasicGeomSufficient(doc.deltaSetLike.donut)).toBe(false);
+    expect(isSoaBasicGeomSufficient(doc.deltaSetLike.donut)).toBe(true);
     const i = buf.indexById.get('donut')!;
-    expect(buf.flags[i] & SOA_FLAG_BASIC_GEOM).toBeFalsy();
+    expect(buf.flags[i] & SOA_FLAG_BASIC_GEOM).toBeTruthy();
+    expect(buf.flags[i] & SOA_FLAG_CANVAS_IDLE).toBeTruthy();
+    // Host-flag sync must not strip idle ink (previously left empty selection box).
+    applySoaHostInkFlags(buf, new Set());
     expect(buf.flags[i] & SOA_FLAG_CANVAS_IDLE).toBeTruthy();
   });
 

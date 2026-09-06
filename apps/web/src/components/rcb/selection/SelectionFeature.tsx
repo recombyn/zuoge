@@ -56,7 +56,7 @@ import {
   pointInOrientedBox,
   type ResizeHandle,
 } from './resizeGeometry';
-import { rememberNodePath2D, strokeEndpointsFromBox } from '@/components/rcb/scene/document/sceneShapes';
+import { rememberNodePath2D, strokeEndpointsFromBox, subscribeLiveShapeParamsPreview } from '@/components/rcb/scene/document/sceneShapes';
 import { clearNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
 import { nodePaintZIndex } from '@/components/rcb/scene/document/sceneDocument';
 import { expandSelectionWithGroups } from '@/components/rcb/scene/document/sceneGroups';
@@ -697,6 +697,13 @@ function SelectionFeature({
   /** Host mount / sticky re-align after draw — force live boxes to match paint. */
   const [hostEpoch, setHostEpoch] = useState(0);
   useEffect(() => subscribeShapeHosts(() => setHostEpoch((n) => n + 1)), []);
+  useEffect(
+    () =>
+      subscribeLiveShapeParamsPreview(() => {
+        setHostEpoch((n) => n + 1);
+      }),
+    []
+  );
   const [marquee, setMarquee] = useState<SceneBox | null>(null);
   /** Live object-align guides while move / resize. */
   const [smartGuides, setSmartGuides] = useState<SmartGuideLine[]>([]);

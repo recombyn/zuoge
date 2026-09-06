@@ -8,8 +8,10 @@ import {
   interpolateStrokeGaps,
   outlinePathFromPoints,
   pencilSampleMinStep,
+  pencilSimplifyEpsilon,
   polylinePathD,
   serializePathPressures,
+  simplifyPencilCenterline,
   STROKE_GAP_INTERP,
   type PencilBrushId,
 } from './pencilBrushes';
@@ -140,6 +142,8 @@ type PencilDrawFeatureProps = {
       pathPressure?: string;
       brushCategory?: string;
       frameId?: string | null;
+      /** Baked perfect-freehand silhouette — idle ink must not re-run getStroke. */
+      pencilOutlinePath?: string;
     }
   ) => string | null | void;
   hitTestFrame?: (x: number, y: number) => string | null;
@@ -601,9 +605,26 @@ function PencilDrawFeature({
         y: pt.y - originY,
         ...(pt.pressure != null ? { pressure: pt.pressure } : {}),
       }));
-      // Same centerline as live preview.
-      const d = polylinePathD(local);
-      const pathPressure = pressureRef.current ? serializePathPressures(local) : undefined;
+      const sw = Math.max(0.5, widthRef.current);
+      const pressures = pressureRef.current
+        ? local.map((p) => (p.pressure != null && Number.isFinite(p.pressure) ? p.pressure : 0.5))
+        : undefined;
+      // Bake silhouette once at commit — idle WebGL/Canvas must not re-run getStroke.
+      // Linear M/L/Z (not Q midpoints) so densify/tessellate stay cheap.
+      const pencilOutlinePath = outlinePathFromPoints(local, sw, brushRef.current, {
+        linecap: 'round',
+        pressures,
+        pressureEnabled: pressureRef.current,
+        simplify: false,
+        pathStyle: 'linear',
+      });
+      // Store a light RDP centerline for edits; silhouette is already baked.
+      const size = brushSize(brush, sw);
+      const stored = simplifyPencilCenterline(local, pencilSimplifyEpsilon(size));
+      const d = polylinePathD(stored.length >= 2 ? stored : local);
+      const pathPressure = pressureRef.current
+        ? serializePathPressures(stored.length >= 2 ? stored : local)
+        : undefined;
       const committedId = onCommit(
         d,
         {
@@ -614,6 +635,7 @@ function PencilDrawFeature({
         },
         {
           ...(pathPressure ? { pathPressure } : {}),
+          ...(pencilOutlinePath ? { pencilOutlinePath } : {}),
           brushCategory: brush.category || 'basic',
           frameId: drawingFrameId.current,
         }

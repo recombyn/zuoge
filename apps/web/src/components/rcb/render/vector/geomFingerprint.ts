@@ -20,16 +20,27 @@ export function shapeGeomFingerprint(
     opts?.lodBucket != null
       ? Number(opts.lodBucket)
       : densifyLodBucket(opts?.zoom ?? 1, opts?.dpr ?? 1);
+  const authoredSw = Math.max(0, Number(attrs['border-width'] ?? attrs.strokeWidth) || 0);
+  // Baked freehand silhouette: skip zoom LOD remesh (outline already dense).
+  const pencilBaked = t === 'pencil' && String(attrs.pencilOutlinePath || '').trim();
+  const flatKey = pencilBaked ? 'flat:pencilBake' : `flat:${lod}`;
   const parts = [
-    'strokeTess:v4',
+    'strokeTess:v11-submitGt1px',
     'densify:v4',
-    `flat:${lod}`,
-    'pencilSil:v1',
+    'arrowOpenChevron:v1',
+    'pencilSil:v2-bake',
+    flatKey,
+    // Geometric authored width only — hairline submit is draw-time, not remesh.
+    `sw:${authoredSw.toFixed(3)}`,
     key,
     t,
     w.toFixed(2),
     h.toFixed(2),
     String(attrs.sides ?? ''),
+    String(attrs.T ?? ''),
+    String(attrs.R ?? ''),
+    String(attrs.B ?? ''),
+    String(attrs.L ?? ''),
     String(attrs.points ?? ''),
     String(attrs.cornerRadius ?? ''),
     String(attrs.radiusTL ?? attrs.tl ?? ''),
@@ -42,16 +53,41 @@ export function shapeGeomFingerprint(
     String(attrs.bl ?? ''),
     String(attrs.path ?? '').slice(0, 512),
     String(attrs.closed ?? ''),
-    String(attrs['ellipse-inner-ratio'] ?? attrs.innerRatio ?? ''),
-    String(attrs['ellipse-arc-percent'] ?? attrs.arcPercent ?? ''),
-    String(attrs['ellipse-start-deg'] ?? attrs.startDeg ?? ''),
+    // Prefer camelCase product attrs (ellipseInnerRatio / ellipseArcPercent).
+    String(
+      attrs.ellipseInnerRatio ??
+        attrs.circleInnerRatio ??
+        attrs['ellipse-inner-ratio'] ??
+        attrs.innerRatio ??
+        attrs['inner-radius'] ??
+        ''
+    ),
+    String(
+      attrs.ellipseArcPercent ??
+        attrs.circleArcPercent ??
+        attrs['ellipse-arc-percent'] ??
+        attrs.arcPercent ??
+        attrs['arc-percent'] ??
+        ''
+    ),
+    String(
+      attrs.ellipseStartDeg ??
+        attrs.circleStartDeg ??
+        attrs['ellipse-start-deg'] ??
+        attrs.startDeg ??
+        attrs['start-deg'] ??
+        ''
+    ),
+    String(attrs.starInnerRatio ?? attrs['inner-ratio'] ?? ''),
     String(attrs['arrow-head-size'] ?? ''),
     String(attrs['border-width'] ?? attrs.strokeWidth ?? ''),
     String(attrs.strokeAlign ?? attrs['stroke-align'] ?? ''),
+    String(attrs.strokeStyle ?? attrs.strokeDasharray ?? attrs.dasharray ?? ''),
     String(attrs.strokeLinejoin ?? ''),
     String(attrs.strokeLinecap ?? ''),
     String(attrs.strokeMiterlimit ?? ''),
     String(attrs['stroke-enabled'] ?? ''),
+    String(attrs['stroke-visible'] ?? ''),
     String(attrs['fill-color'] ?? attrs.fill ?? ''),
     String(attrs['fill-enabled'] ?? ''),
     String(attrs['fill-visible'] ?? ''),
@@ -59,7 +95,12 @@ export function shapeGeomFingerprint(
     String(attrs.brushStyle ?? ''),
     String(attrs.pathPressure ?? '').slice(0, 256),
     String(attrs.pressureEnabled ?? ''),
-    String(attrs.pencilOutlinePath ?? '').slice(0, 256),
+    (() => {
+      const o = String(attrs.pencilOutlinePath ?? '');
+      if (!o) return '';
+      // Full outline can be multi-KB — length + head/tail avoid false mesh hits.
+      return `${o.length}:${o.slice(0, 64)}:${o.slice(-64)}`;
+    })(),
     t === 'pencil' ? String(getPencilBrushPaintRev()) : '',
     String(attrs.angle ?? ''),
     String(attrs.flipX ?? ''),

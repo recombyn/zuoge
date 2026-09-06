@@ -8,8 +8,8 @@ describe('text outline precision (small scene fontSize)', () => {
     expect(outlinePathDecimals(0.001)).toBeGreaterThanOrEqual(3);
     // fontSize 14 / 1000
     expect(outlinePathDecimals(0.014)).toBe(2);
-    // fontSize 50 / 1000
-    expect(outlinePathDecimals(0.05)).toBe(1);
+    // fontSize 50 / 1000 — still ≥2dp so counters in o/d do not collapse
+    expect(outlinePathDecimals(0.05)).toBe(2);
   });
 
   it('pathDBounds does not collapse multi-glyph absolute paths to ~1px height', () => {

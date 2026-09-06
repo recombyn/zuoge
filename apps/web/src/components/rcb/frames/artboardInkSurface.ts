@@ -38,6 +38,7 @@ import {
   setSoaPaintDocument,
   type SceneRenderBuffer,
 } from '@/components/rcb/render/sceneRenderBuffer';
+import { getSceneCanvasIdlePaint } from '@/components/rcb/render/sceneRenderer';
 
 /**
  * Soft cap on zoom×dpr for a single full-plate ink bitmap.
@@ -154,6 +155,7 @@ function collectBoundIdleIndices(
   doc: SceneDocument,
   frameId: string
 ): number[] {
+  const hiddenNodeId = String(getSceneCanvasIdlePaint()?.hiddenNodeId || '').trim();
   const indices: number[] = [];
   for (let i = 0; i < buf.count; i += 1) {
     const flags = buf.flags[i];
@@ -161,6 +163,7 @@ function collectBoundIdleIndices(
     if (!(flags & SOA_FLAG_VISIBLE) || !(flags & SOA_FLAG_CANVAS_IDLE)) continue;
     const id = buf.ids[i];
     if (!id) continue;
+    if (hiddenNodeId && id === hiddenNodeId) continue;
     if (frameClipRevealsOverflow(id)) continue;
     const node = doc.deltaSetLike?.[id] as SceneNodeInput | undefined;
     if (!node || nodeOwnerFrameId(node) !== frameId) continue;
