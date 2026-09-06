@@ -61,11 +61,11 @@ import {
 } from '@/components/rcb/core/transformPreview';
 import { hasLiveArtboardFrameGeometry } from '@/components/rcb/frames/HtmlArtboardFrame';
 import { SoaQuadtree, type SoaQuadItem } from '@/components/rcb/core/soaQuadtree';
+import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
-  findClippingFrameForNode,
   frameClipRevealsOverflow,
   selectionPaintRaises,
-} from '@/components/rcb/frames/frameContentClip';
+} from '@/components/rcb/selection/selectionPaintRaise';
 import { buildNodeStackZMap, maxDocumentStackZ } from '@/components/rcb/scene/document/sceneDocument';
 import {
   isNodeAabbFullyOccludedByHigherArtboard,
@@ -454,8 +454,7 @@ export function bulkUpsertSoaQuadtree(
   buf: SceneRenderBuffer,
   ids?: readonly string[]
 ): number {
-  // Single-id demote: cheap in-place upsert. Multi-id (paste batch): always one
-  // rebuild — sequential upsert rebuilds on every out-of-root offset (O(n²)).
+  // Single-id demote: cheap in-place upsert. Multi-id: restamp + dirty; compact only past threshold.
   if (ids && ids.length === 1) {
     const i = buf.indexById.get(String(ids[0] || ''));
     if (i == null) return 0;

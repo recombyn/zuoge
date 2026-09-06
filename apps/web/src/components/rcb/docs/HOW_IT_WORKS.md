@@ -130,7 +130,8 @@ if 义务必须 Dom（lottie / group / SoftGlow / 空生成器 / …）
    或 世界节点 stack 高于某块画板（盖不住板除非升 SVG）
    或 选中的生成器（raise 要靠 data-z）
    或 板内绑定 +（选中 paintRaise | overflow reveal）（同上：世界墨水在板下）
-   或 放大后 atlas 会糊（*NeedsSharpHost → 升 SVG）   ← 现状有；改造方案要改成 restamp
+   或 放大后 atlas 糊 → **restamp（zoomBucket）**，禁止升 SVG 当锐利手段
+   （历史：*NeedsSharpHost → 升 SVG；已废除）
 → fullIds → SVG DomHost
 
 else

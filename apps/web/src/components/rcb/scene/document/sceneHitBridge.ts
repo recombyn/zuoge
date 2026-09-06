@@ -33,7 +33,7 @@ import {
 import {
   selectionPaintRaises,
   selectionPaintRaisesFrame,
-} from '@/components/rcb/frames/frameContentClip';
+} from '@/components/rcb/selection/selectionPaintRaise';
 import {
   HEAVY_PATH_D_CHARS,
   distPointToPathD,

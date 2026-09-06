@@ -163,6 +163,14 @@ export {
   idleMediaScreenEdgePx,
 } from './render/webglInstanceAtlas';
 export {
+  resolvePaintIntent,
+  paintIntentNeedsDomHost,
+  backingInsufficientForAtlas,
+  getPaintIntentDebugStats,
+  resetPaintIntentDebugStats,
+  type PaintIntent,
+} from './render/paintIntent';
+export {
   subscribeSoaBakeTileReady,
   collectReadySoaBakeTilesForView,
   SOA_BAKE_COUNT_THRESHOLD,

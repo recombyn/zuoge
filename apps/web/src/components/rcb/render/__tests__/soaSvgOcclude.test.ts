@@ -14,7 +14,7 @@ import {
 import { clearShapeHosts, registerShapeHost } from '@/components/rcb/shapes/shapeHostRegistry';
 import { clearNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
 import { pickFullAndCanvasIds, nodeNeedsDomShapeHost } from '@/components/rcb/shapes/RcbShapesLayer';
-import { setSelectionPaintRaiseIds } from '@/components/rcb/frames/frameContentClip';
+import { setSelectionPaintRaiseIds } from '@/components/rcb/selection/selectionPaintRaise';
 
 function whiteRect(id: string, x: number, y: number) {
   return {

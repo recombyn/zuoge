@@ -88,7 +88,8 @@ rcb/
 │   ├── HtmlArtboardFrame.tsx
 │   ├── artboardInkSurface.ts  # 板内 FO 墨水（共享 WebGL→blit；2D 回退）
 │   ├── artboardWebglInk.ts    # 共享 WebGL2 + onlyFrameId
-│   ├── frameContentClip.ts    # clipContent + selection raise 注册表
+│   ├── frameContentClip.ts    # clipContent 几何 only
+│   └── selection/selectionPaintRaise.ts  # raise / reveal 注册表
 │   └── frameNodeBinding.ts / FrameDraw|MoveFeature …
 │
 ├── scene/

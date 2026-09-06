@@ -7,6 +7,21 @@ export type DensifyVec2 = { x: number; y: number };
 /** Default chord budget in scene units (~circle peri / 0.4 → dense ring). */
 export const DENSIFY_DEFAULT_FLATNESS = 0.4;
 
+/**
+ * Scene-space flatness for current display scale.
+ * Higher zoom×dpr → smaller flatness → denser chords (no soft mush on curves).
+ */
+export function sceneFlatness(zoom = 1, dpr = 1): number {
+  const s = Math.max(0.05, Number(zoom) || 1) * Math.max(1, Number(dpr) || 1);
+  return Math.max(0.05, Math.min(DENSIFY_DEFAULT_FLATNESS, DENSIFY_DEFAULT_FLATNESS / s));
+}
+
+/** LOD bucket for mesh fingerprints (bucket change → rebuild). */
+export function densifyLodBucket(zoom = 1, dpr = 1): number {
+  const s = Math.max(0.05, Number(zoom) || 1) * Math.max(1, Number(dpr) || 1);
+  return Math.round(Math.log2(s) * 16);
+}
+
 function curveSteps(approxLen: number, flatness: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.ceil(approxLen / Math.max(0.25, flatness))));
 }

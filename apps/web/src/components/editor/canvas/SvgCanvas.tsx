@@ -82,7 +82,7 @@ import {
   clearLiveArtboardFrameGeometry,
   previewArtboardFrameGeometry,
 } from '@/components/rcb/frames/HtmlArtboardFrame';
-import { listSelectionRevealOverflowIds } from '@/components/rcb/frames/frameContentClip';
+import { listSelectionRevealOverflowIds } from '@/components/rcb/selection/selectionPaintRaise';
 import { previewSvgNodeTransform } from '@/components/rcb/scene/paint/sceneToSvg';
 import {
   abortNodeUpload,

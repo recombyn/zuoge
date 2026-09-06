@@ -7,7 +7,7 @@ import {
   addNodeToDocument,
   createBareDocument,
 } from '../sceneDocument';
-import { setSelectionPaintRaiseFrameIds } from '@/components/rcb/frames/frameContentClip';
+import { setSelectionPaintRaiseFrameIds } from '@/components/rcb/selection/selectionPaintRaise';
 
 describe('higher artboard paint occlusion', () => {
   it('lists plates above an unbound world node', () => {

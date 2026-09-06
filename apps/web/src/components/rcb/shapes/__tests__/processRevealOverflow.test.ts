@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { shouldRevealShapeOverflow } from '../RcbShapesLayer';
+import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
-  findClippingFrameForNode,
   frameClipRevealsOverflow,
   hasFrameClipRevealOverflow,
   hasSelectionPaintRaise,
   listSelectionRevealOverflowIds,
   setFrameClipRevealOverflowIds,
   setSelectionPaintRaiseIds,
-} from '@/components/rcb/frames/frameContentClip';
+} from '@/components/rcb/selection/selectionPaintRaise';
 
 describe('shouldRevealShapeOverflow', () => {
   it('reveals overflow for selected / SoftGlow hosts, keeps clip when idle', () => {

@@ -14,13 +14,19 @@ import {
   ARTBOARD_INK_MAX_EDGE,
   ARTBOARD_INK_MAX_SCALE,
   artboardInkBackingInsufficient,
+  artboardInkNeedsTileMode,
   artboardInkScale,
   paintArtboardInkSurface,
   registerArtboardInkSurface,
   soaSlotIsFrameBound,
 } from '@/components/rcb/frames/artboardInkSurface';
+import {
+  ARTBOARD_TILE_MAX_EDGE,
+  artboardTileSceneSize,
+  artboardWantScale,
+} from '@/components/rcb/frames/artboardInkTiles';
 import * as artboardWebglInk from '@/components/rcb/frames/artboardWebglInk';
-import { setFrameClipRevealOverflowIds } from '@/components/rcb/frames/frameContentClip';
+import { setFrameClipRevealOverflowIds } from '@/components/rcb/selection/selectionPaintRaise';
 
 describe('artboardInkScale', () => {
   it('tracks zoom×dpr up to MAX_SCALE (edge OOM guard is separate)', () => {
@@ -30,6 +36,16 @@ describe('artboardInkScale', () => {
     expect(artboardInkScale(ARTBOARD_INK_MAX_SCALE + 10, 1)).toBe(ARTBOARD_INK_MAX_SCALE);
     expect(artboardInkBackingInsufficient(2, 1)).toBe(false);
     expect(artboardInkBackingInsufficient(ARTBOARD_INK_MAX_SCALE + 1, 1)).toBe(true);
+  });
+
+  it('enters tile mode when plate×wantScale exceeds MAX_EDGE', () => {
+    expect(artboardInkNeedsTileMode(800, 600, 1, 1)).toBe(false);
+    expect(artboardInkNeedsTileMode(800, 600, 8, 1)).toBe(true);
+    const want = artboardWantScale(8, 1);
+    expect(want).toBeGreaterThan(1);
+    const tileScene = artboardTileSceneSize(want);
+    expect(tileScene * want).toBeLessThanOrEqual(ARTBOARD_TILE_MAX_EDGE + 1e-6);
+    expect(ARTBOARD_INK_MAX_EDGE).toBeGreaterThan(0);
   });
 
   it('restamps FO canvas at zoom×dpr so camera scale does not mush ink', () => {

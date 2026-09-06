@@ -25,7 +25,8 @@ import {
   type SceneRenderBuffer,
 } from '@/components/rcb/render/sceneRenderBuffer';
 import { nodeOwnerFrameId } from '@/components/rcb/frames/frameNodeBinding';
-import { selectionPaintRaises } from '@/components/rcb/frames/frameContentClip';
+import { selectionPaintRaises, frameClipRevealsOverflow } from '@/components/rcb/selection/selectionPaintRaise';
+import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
   buildNodeStackZMap,
   maxDocumentStackZ,
@@ -58,10 +59,6 @@ import {
   ensureTextOutlineMesh,
   getTextOutlineMesh,
 } from '@/components/rcb/render/vector/textOutlineMesh';
-import {
-  findClippingFrameForNode,
-  frameClipRevealsOverflow,
-} from '@/components/rcb/frames/frameContentClip';
 import {
   buildNormalizedDepthLookup,
   shouldRunGpuDepthOfField,
@@ -727,11 +724,13 @@ export function collectSoaWebglInstances(
       // Empty vs filled must not share atlas keys — otherwise a prior photo
       // stamp is cache-hit and the empty plate shows the old image colors.
       const mediaSrc = isAudio ? '' : mediaPaintSrc(node, id);
+      const zBucket = atlasZoomBucket(zoom);
+      // Always include zoomBucket so bucket changes force a new stamp (restamp).
       const atlasKey = isAudio
-        ? `aud:${id}:z${atlasZoomBucket(zoom)}`
+        ? `aud:${id}:z${zBucket}`
         : mediaSrc
-          ? `img:${id}`
-          : `img:${id}:empty:z${atlasZoomBucket(zoom)}`;
+          ? `img:${id}:z${zBucket}`
+          : `img:${id}:empty:z${zBucket}`;
       const baked = isAudio
         ? bakeAudioInkForAtlas(node, w, h, zoom)
         : bakeMediaInkForAtlas(node, w, h, id, zoom);
@@ -781,8 +780,18 @@ export function collectSoaWebglInstances(
         Math.abs(liveAngle - (Number(node.attrs?.angle) || 0)) > 1e-4
           ? { ...node, attrs: { ...(node.attrs || {}), angle: liveAngle } }
           : node;
-      ensureTextOutlineMesh(id, paintNode, { width: w, height: h });
-      const textMesh = getTextOutlineMesh(id, paintNode, { width: w, height: h });
+      ensureTextOutlineMesh(id, paintNode, {
+        width: w,
+        height: h,
+        zoom,
+        dpr: Math.max(1, Number(opts?.dpr) || 1),
+      });
+      const textMesh = getTextOutlineMesh(id, paintNode, {
+        width: w,
+        height: h,
+        zoom,
+        dpr: Math.max(1, Number(opts?.dpr) || 1),
+      });
       if (textMesh?.fill && meshPos && meshCol && meshClip) {
         const opacity = Math.min(1, Math.max(0, Number(paintNode.attrs?.opacity) || 1));
         const fillRgba: [number, number, number, number] = [
@@ -839,7 +848,12 @@ export function collectSoaWebglInstances(
           Math.abs(liveAngle - (Number(node.attrs?.angle) || 0)) > 1e-4
             ? { ...node, attrs: { ...(node.attrs || {}), angle: liveAngle } }
             : node;
-        const mesh = getOrBuildShapeMesh(id, paintNode, { width: w, height: h });
+        const mesh = getOrBuildShapeMesh(id, paintNode, {
+          width: w,
+          height: h,
+          zoom,
+          dpr: Math.max(1, Number(opts?.dpr) || 1),
+        });
         if (mesh) {
           const opacity = Math.min(1, Math.max(0, Number(paintNode.attrs?.opacity) || 1));
           const isPencil =

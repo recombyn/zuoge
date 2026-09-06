@@ -54,7 +54,7 @@ describe('webglInstanceAtlas', () => {
     expect(region!.w).toBeGreaterThan(20);
   });
 
-  it('idleMediaNeedsSharpHost when screen edge exceeds atlas inner cell', () => {
+  it('idleMediaNeedsSharpHost is backing-insufficient only (never DomHost gate)', () => {
     expect(SOA_ATLAS_INNER).toBe(SOA_ATLAS_CELL - 4);
     expect(idleMediaScreenEdgePx(80, 60, 1, 1)).toBe(80);
     expect(idleMediaNeedsSharpHost({ key: 'image', width: 80, height: 60 }, 1, 1)).toBe(false);
@@ -66,20 +66,21 @@ describe('webglInstanceAtlas', () => {
       )
     ).toBe(true);
     expect(idleMediaNeedsSharpHost({ key: 'image', width: 80, height: 60 }, 8, 1)).toBe(true);
+    // Empty generators: no longer force "sharp host" — restamp via zoomBucket.
     expect(
       idleMediaNeedsSharpHost(
         { key: 'image', width: 40, height: 40, attrs: { imageGenerator: true } },
         1,
         1
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       idleMediaNeedsSharpHost(
         { key: 'audio', width: 200, height: 80, attrs: { audioGenerator: true } },
         1,
         1
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       idleMediaNeedsSharpHost(
         {

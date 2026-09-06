@@ -157,7 +157,7 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
     expect(canvasIds.sort()).toEqual(['i0', 'p0', 't0']);
   });
 
-  it('promotes large/zoomed idle images to DOM hosts (atlas cell would soft-downsample)', () => {
+  it('keeps large/zoomed idle images on canvas ink (restamp — never SharpHost)', () => {
     const large = {
       ...imageNode('big'),
       width: 600,
@@ -170,8 +170,8 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
       zoom: 1,
       dpr: 1,
     });
-    expect(at1x.fullIds).toEqual(['big']);
-    expect(at1x.canvasIds).toEqual(['small']);
+    expect(at1x.fullIds).toEqual([]);
+    expect(at1x.canvasIds.sort()).toEqual(['big', 'small']);
 
     const zoomedSmall = pickFullAndCanvasIds({
       document: doc,
@@ -179,8 +179,8 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
       zoom: 8,
       dpr: 1,
     });
-    expect(zoomedSmall.fullIds).toEqual(['small']);
-    expect(zoomedSmall.canvasIds).toEqual([]);
+    expect(zoomedSmall.fullIds).toEqual([]);
+    expect(zoomedSmall.canvasIds).toEqual(['small']);
 
     const retinaSmall = pickFullAndCanvasIds({
       document: doc,
@@ -188,7 +188,8 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
       zoom: 1,
       dpr: 8,
     });
-    expect(retinaSmall.fullIds).toEqual(['small']);
+    expect(retinaSmall.fullIds).toEqual([]);
+    expect(retinaSmall.canvasIds).toEqual(['small']);
   });
 
   it('keeps idle image/video/audio generators on canvas ink (empty plate atlas bake)', () => {
@@ -228,10 +229,10 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
       zoom: 1,
       dpr: 1,
     });
-    expect(fullIds.sort()).toEqual(['ag', 'ig', 'vg']);
-    expect(canvasIds).toEqual(['i0']);
-    expect(canIdlePaintOnCanvas(imgGen as any)).toBe(false);
-    expect(canIdlePaintOnCanvas(vidGen as any)).toBe(false);
+    expect(fullIds).toEqual(['ag']);
+    expect(canvasIds.sort()).toEqual(['i0', 'ig', 'vg']);
+    expect(canIdlePaintOnCanvas(imgGen as any)).toBe(true);
+    expect(canIdlePaintOnCanvas(vidGen as any)).toBe(true);
     expect(canIdlePaintOnCanvas(audGen as any)).toBe(false);
   });
 
