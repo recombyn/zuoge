@@ -16,7 +16,6 @@ import { ContextChipPill } from '@/components/editor/panels/AgentComposerInput';
 import {
   SoftGlowSurface,
   VirtualList,
-  LoadingDots,
   type VirtualListHandle,
 } from '@/components/base';
 import { message } from '@/components/base';
@@ -1714,10 +1713,14 @@ function AssistantTurn({
       className="flex w-full min-w-0 flex-col items-stretch gap-2.5 px-0.5"
     >
       {streaming && (!assistant.content?.trim() || processRunning) ? (
-        <LoadingDots
-          className="h-3.5 justify-start px-0.5"
-          label={t('agent.working')}
-        />
+        <span
+          className="rcb-thinking-shimmer px-0.5"
+          role="status"
+          aria-busy
+          aria-label={t('agent.thinking')}
+        >
+          {t('agent.thinking')}
+        </span>
       ) : null}
 
       {/* Process first, then reply — matching product timeline order. */}

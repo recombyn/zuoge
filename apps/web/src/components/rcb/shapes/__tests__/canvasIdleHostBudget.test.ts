@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setAnimationWorkbenchTimelineFocus } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { canIdlePaintOnCanvas, canvasIdleIsStrokeOnly, nodeNeedsDomShapeHost, pickFullAndCanvasIds } from '../RcbShapesLayer';
 import { HEAVY_PATH_D_CHARS } from '@/components/rcb/scene/document/sceneShapes';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
@@ -311,6 +312,35 @@ describe('pickFullAndCanvasIds (single ink path)', () => {
     });
     expect(fullIds).toEqual(['n0']);
     expect(canvasIds).toEqual([]);
+  });
+
+  it('workbench surround stays SoA mesh even when stacked above the open plate', () => {
+    // Surround must not DomHost via stack-above — same world mesh as closed timeline.
+    setAnimationWorkbenchTimelineFocus('anim');
+    try {
+      const doc = makeDoc({
+        n0: {
+          ...rect('n0'),
+          attrs: {
+            ...rect('n0').attrs,
+            animationWorkbenchSurround: 'anim',
+          },
+        },
+      });
+      doc.frames = [
+        { id: 'anim', name: 'Animation', backgroundColor: '#fff', x: 0, y: 0, width: 100, height: 100 },
+      ];
+      doc.stackOrder = ['frame:anim', 'node:n0'];
+      const { fullIds, canvasIds } = pickFullAndCanvasIds({
+        document: doc,
+        visibleIds: ['n0'],
+        zoom: 1,
+      });
+      expect(fullIds).toEqual([]);
+      expect(canvasIds).toEqual(['n0']);
+    } finally {
+      setAnimationWorkbenchTimelineFocus(null);
+    }
   });
 
   it('holdHostIds keeps demote-candidate as DOM host', () => {

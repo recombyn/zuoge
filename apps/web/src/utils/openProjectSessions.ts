@@ -33,38 +33,69 @@ function isEditingReply(msg: unknown, projectId: string, requestId: string): boo
   );
 }
 
+/** Correlation id — works on plain HTTP (non-secure) deploys where randomUUID is missing. */
+export function probeRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 /** EditorPage: answer delete probes from home / projects list. */
 export function listenForProjectOpenProbes(projectId: string | null | undefined): () => void {
   const id = String(projectId || '').trim();
-  const ch = channelOrNull();
+  let ch: BroadcastChannel | null = null;
+  try {
+    ch = channelOrNull();
+  } catch {
+    return () => {};
+  }
   if (!id || !ch) return () => {};
 
   const onMessage = (event: MessageEvent<CheckMsg>) => {
     const msg = event.data;
     if (!isCheckFor(msg, id)) return;
-    ch.postMessage({ type: 'editing', projectId: id, requestId: msg.requestId });
+    try {
+      ch!.postMessage({ type: 'editing', projectId: id, requestId: msg.requestId });
+    } catch {
+      /* ignore — peer probe will time out / fail closed */
+    }
   };
 
   ch.addEventListener('message', onMessage);
-  return () => ch.removeEventListener('message', onMessage);
+  return () => ch!.removeEventListener('message', onMessage);
 }
 
-/** True when another tab has this project open in the editor. */
+/**
+ * True when another tab has this project open in the editor.
+ * Runs on all deploys (incl. HTTP servers) — only the request id is polyfilled.
+ */
 export function probeProjectOpenElsewhere(projectId: string): Promise<boolean> {
   const id = String(projectId || '').trim();
-  const ch = channelOrNull();
-  if (!id || !ch) return Promise.resolve(false);
+  if (!id) return Promise.resolve(false);
 
-  const requestId = crypto.randomUUID();
+  let ch: BroadcastChannel | null = null;
+  try {
+    ch = channelOrNull();
+  } catch (err) {
+    return Promise.reject(err instanceof Error ? err : new Error('broadcast_channel_unavailable'));
+  }
+  if (!ch) {
+    // SSR / no window — nothing to probe.
+    return Promise.resolve(false);
+  }
 
-  return new Promise((resolve) => {
+  const requestId = probeRequestId();
+
+  return new Promise((resolve, reject) => {
     let settled = false;
+    let timer = 0;
 
     const finish = (open: boolean) => {
       if (settled) return;
       settled = true;
-      ch.removeEventListener('message', onReply);
-      clearTimeout(timer);
+      ch!.removeEventListener('message', onReply);
+      window.clearTimeout(timer);
       resolve(open);
     };
 
@@ -72,8 +103,15 @@ export function probeProjectOpenElsewhere(projectId: string): Promise<boolean> {
       if (isEditingReply(event.data, id, requestId)) finish(true);
     };
 
-    ch.addEventListener('message', onReply);
-    ch.postMessage({ type: 'check', projectId: id, requestId });
-    const timer = window.setTimeout(() => finish(false), PROBE_TIMEOUT_MS);
+    try {
+      ch.addEventListener('message', onReply);
+      ch.postMessage({ type: 'check', projectId: id, requestId });
+    } catch (err) {
+      settled = true;
+      ch.removeEventListener('message', onReply);
+      reject(err instanceof Error ? err : new Error('project_open_probe_failed'));
+      return;
+    }
+    timer = window.setTimeout(() => finish(false), PROBE_TIMEOUT_MS);
   });
 }

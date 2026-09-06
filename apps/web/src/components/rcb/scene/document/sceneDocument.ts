@@ -403,6 +403,10 @@ export function nodePaintZIndex(
  * World (unbound) node whose stack z is above at least one artboard plate.
  * Those must paint as SVG hosts on the shared stack mount — SoA ink sits under
  * that SVG, so only hosts can cover 画板 / 动画工作台 plates via data-z.
+ *
+ * Workbench surround (`animationWorkbenchSurround`) is visibility-only: always
+ * false here so pasteboard ink stays SoA mesh (same as closed-timeline world).
+ * Do not reintroduce DomHost promotion for surround.
  */
 export function worldNodeStacksAboveAnyFrame(
   doc: SceneDocument | null | undefined,
@@ -412,6 +416,8 @@ export function worldNodeStacksAboveAnyFrame(
   const node = doc.deltaSetLike?.[nodeId];
   if (!node) return false;
   if (String(node.attrs?.frameId || '').trim()) return false;
+  // Attr string only — avoid importing animationWorkbenchFocus (TDZ cycles).
+  if (String(node.attrs?.animationWorkbenchSurround || '').trim()) return false;
   const nodeZ = stackZIndex(doc, 'node', nodeId);
   if (nodeZ <= 0) return false;
   const order = Array.isArray(doc.stackOrder) ? doc.stackOrder : [];

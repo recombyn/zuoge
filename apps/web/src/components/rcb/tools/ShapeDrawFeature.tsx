@@ -357,7 +357,17 @@ function ShapeDrawFeature({
         const y1 = s.y1;
         if (Math.hypot(x1 - x0, y1 - y0) < 3) return;
         const box = normalizeBox(x0, y0, x1, y1);
-        onCreateRef.current(kind, { ...box, x0, y0, x1, y1, frameId: s.frameId });
+        // Prefer plate under the finished stroke mid — drag-into-workbench binds.
+        const midFrame =
+          hitTestFrameRef.current?.((x0 + x1) / 2, (y0 + y1) / 2) || null;
+        onCreateRef.current(kind, {
+          ...box,
+          x0,
+          y0,
+          x1,
+          y1,
+          frameId: midFrame || s.frameId,
+        });
         return;
       }
 
@@ -370,7 +380,13 @@ function ShapeDrawFeature({
         gridSizeRef.current,
         kind
       );
-      onCreateRef.current(kind, { ...geom, frameId: s.frameId });
+      // Final box center — drawing from pasteboard into 动画工作台 still binds.
+      const centerFrame =
+        hitTestFrameRef.current?.(
+          geom.left + geom.width / 2,
+          geom.top + geom.height / 2
+        ) || null;
+      onCreateRef.current(kind, { ...geom, frameId: centerFrame || s.frameId });
     };
 
     hitEl.addEventListener('pointerdown', onDown);

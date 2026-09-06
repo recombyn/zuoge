@@ -1836,6 +1836,7 @@ const zhTW = {
     clickToEdit: '點擊編輯並再次傳送',
     running: '執行中…',
     working: '處理中…',
+    thinking: '正在思考',
     workedFor: '{{duration}}',
     workLog: '工作記錄',
     expandProcess: '展開過程',

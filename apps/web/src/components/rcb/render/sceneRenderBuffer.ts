@@ -2810,7 +2810,11 @@ export function markAllSoaDirty(buf: SceneRenderBuffer) {
 /** Mark one slot dirty by index (no-op if out of range). */
 export function markSoaDirty(buf: SceneRenderBuffer, index: number) {
   if (index < 0 || index >= buf.count) return;
-  buf.flags[index] = (buf.flags[index] | SOA_FLAG_DIRTY) >>> 0;
+  const prev = buf.flags[index];
+  buf.flags[index] = (prev | SOA_FLAG_DIRTY) >>> 0;
+  // Artboard FO tiles key off `buf.revision`. Without a bump, live corner-radius
+  // / attr dirty keeps blitting stale tiles (sharp AABB ghost under rounded ink).
+  if ((prev & SOA_FLAG_DIRTY) === 0) buf.revision += 1;
 }
 
 /** Mark one slot dirty by node id. */

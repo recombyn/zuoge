@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   createEmptyDocument,
   addNodeToDocument,
@@ -26,7 +26,34 @@ import {
   artboardWantScale,
 } from '@/components/rcb/frames/artboardInkTiles';
 import * as artboardWebglInk from '@/components/rcb/frames/artboardWebglInk';
+import { shouldBlitArtboardGlContent } from '@/components/rcb/frames/artboardWebglInk';
 import { setFrameClipRevealOverflowIds } from '@/components/rcb/selection/selectionPaintRaise';
+import { clearLiveArtboardFrameGeometry } from '@/components/rcb/frames/HtmlArtboardFrame';
+import { clearSceneCanvasIdlePaint } from '@/components/rcb/render/sceneRenderer';
+
+afterEach(() => {
+  setFrameClipRevealOverflowIds(null);
+  clearLiveArtboardFrameGeometry();
+  clearSceneCanvasIdlePaint();
+  vi.restoreAllMocks();
+});
+
+describe('shouldBlitArtboardGlContent', () => {
+  it('blits media-only plates (framed images with no vector instances)', () => {
+    expect(
+      shouldBlitArtboardGlContent({ count: 0, meshVertCount: 0, mediaVertCount: 6 })
+    ).toBe(true);
+    expect(
+      shouldBlitArtboardGlContent({ count: 0, meshVertCount: 0, mediaVertCount: 0 })
+    ).toBe(false);
+    expect(
+      shouldBlitArtboardGlContent({ count: 1, meshVertCount: 0, mediaVertCount: 0 })
+    ).toBe(true);
+    expect(
+      shouldBlitArtboardGlContent({ count: 0, meshVertCount: 6, mediaVertCount: 0 })
+    ).toBe(true);
+  });
+});
 
 describe('artboardInkScale', () => {
   it('tracks zoom×dpr up to MAX_SCALE (edge OOM guard is separate)', () => {
@@ -260,12 +287,9 @@ describe('artboard small-canvas SoA partition', () => {
       buf.flags[i] = (buf.flags[i] | SOA_FLAG_CANVAS_IDLE) >>> 0;
     }
 
-    const atlas = createSoaWebglAtlas(512, 128);
-    if (!atlas) return;
     const kinds: number[] = [];
-    const meshPos: number[] = [];
-    const meshCol: number[] = [];
-    const meshClip: number[] = [];
+    // Partition check without mesh buffers — atlas mesh path can swallow a
+    // fully-clipped fill (wrote===0) and leave kinds empty under test isolation.
     collectSoaWebglInstances(
       buf,
       { left: 0, top: 0, width: 200, height: 200 },
@@ -277,17 +301,13 @@ describe('artboard small-canvas SoA partition', () => {
       {
         document: doc,
         onlyFrameId: 'board-a',
-        atlas,
-        meshPos,
-        meshCol,
-        meshClip,
       }
     );
-    // Only board-a content; world + board-b omitted. Mesh and/or kind instance OK.
-    expect(kinds.length + meshPos.length).toBeGreaterThan(0);
+    // Only board-a content; world + board-b omitted.
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(kinds.every((k) => k === 0)).toBe(true);
 
     const kindsWorld: number[] = [];
-    const meshWorld: number[] = [];
     collectSoaWebglInstances(
       buf,
       { x: 0, y: 0, width: 800, height: 600 },
@@ -296,21 +316,14 @@ describe('artboard small-canvas SoA partition', () => {
       kindsWorld,
       [],
       [],
-      {
-        document: doc,
-        skipFrameBound: true,
-        atlas,
-        meshPos: meshWorld,
-        meshCol: [],
-        meshClip: [],
-      }
+      { document: doc, skipFrameBound: true }
     );
     // World still skips plate-bound (on-a / on-b).
-    const worldOnly = kindsWorld.length + meshWorld.length;
-    expect(worldOnly).toBeGreaterThan(0);
+    expect(kindsWorld.length).toBeGreaterThan(0);
+    expect(kindsWorld.every((k) => k === 0)).toBe(true);
   });
 
-  it('selection reveal skips FO collect; world paints only while SoA idle remains', () => {
+  it('selection reveal keeps FO collect; world never paints plate-bound idle', () => {
     let doc = createEmptyDocument({ width: 800, height: 600, emptyWorld: true });
     doc.frames = [
       {
@@ -347,13 +360,7 @@ describe('artboard small-canvas SoA partition', () => {
 
     setFrameClipRevealOverflowIds(['bound']);
     try {
-      const atlas = createSoaWebglAtlas(512, 128);
-      if (!atlas) return;
       const kinds: number[] = [];
-      const meshPos: number[] = [];
-      const meshCol: number[] = [];
-      const meshClip: number[] = [];
-      const clips: number[] = [];
       collectSoaWebglInstances(
         buf,
         { x: 0, y: 0, width: 800, height: 600 },
@@ -362,17 +369,13 @@ describe('artboard small-canvas SoA partition', () => {
         kinds,
         [],
         [],
-        { document: doc, skipFrameBound: true, atlas, meshPos, meshCol, meshClip, clips }
+        { document: doc, skipFrameBound: true }
       );
-      // Revealed bound slot must appear on world collect (not FO-only).
-      expect(kinds.length + meshPos.length).toBeGreaterThan(0);
-      // Open clip (no plate LTRB) for revealed overflow.
-      if (clips.length >= 4) {
-        expect(clips[0]).toBeLessThan(-1e7);
-      }
+      // Selection no longer mounts SVG ink hosts — revealed plate ink must not
+      // spill onto world (would paint past the artboard FO clip).
+      expect(kinds.length).toBe(0);
 
       const plateKinds: number[] = [];
-      const plateMesh: number[] = [];
       collectSoaWebglInstances(
         buf,
         { left: 0, top: 0, width: 200, height: 200 },
@@ -384,14 +387,10 @@ describe('artboard small-canvas SoA partition', () => {
         {
           document: doc,
           onlyFrameId: 'board',
-          atlas,
-          meshPos: plateMesh,
-          meshCol: [],
-          meshClip: [],
         }
       );
-      // Revealed overflow must not paint on the FO collect (raised host / world).
-      expect(plateKinds.length + plateMesh.length).toBe(0);
+      // Still paints on the plate FO (FO overflow:hidden keeps ink in-bounds).
+      expect(plateKinds.length).toBeGreaterThan(0);
     } finally {
       setFrameClipRevealOverflowIds(null);
     }

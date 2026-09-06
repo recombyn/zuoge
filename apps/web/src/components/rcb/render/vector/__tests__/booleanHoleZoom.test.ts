@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
 import { sceneFlatness } from '@/components/rcb/render/vector/densifyPathDJs';
 import { getOrBuildShapeMesh, clearShapeMeshCache } from '@/components/rcb/render/vector/meshCache';

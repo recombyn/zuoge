@@ -846,7 +846,13 @@ function RcbShapesLayer({
       flipHostInk(getLiveCornerRadiusPreviewNodeId(), 'canvas');
       const id = getLiveCornerRadiusPreviewNodeId();
       if (id) {
-        markSoaDirtyById(getSharedSceneRenderBuffer(), id);
+        invalidateShapeMesh(id);
+        const buf = getSharedSceneRenderBuffer();
+        markSoaDirtyById(buf, id);
+        const node = document?.deltaSetLike?.[id];
+        const owner = nodeOwnerFrameId(node);
+        // Same as shape-params: FO tiles must restamp or rounded stays under a sharp ghost.
+        if (owner) scheduleArtboardInkPaint(owner);
         bumpSceneCanvasIdlePaint();
       }
     });

@@ -154,7 +154,18 @@ async function removeProjectsFromCloudInternal(rawIds: string[]): Promise<void> 
   const list = normalizeProjectIds(rawIds);
   if (!list.length) return;
 
-  const probes = await Promise.all(list.map((id) => probeProjectOpenElsewhere(id)));
+  // Always probe — including HTTP deploys (request id falls back when randomUUID
+  // is missing). Fail closed: if a probe errors, treat as open-for-editing so we
+  // never delete a project that may still be in an editor tab.
+  const probes = await Promise.all(
+    list.map(async (id) => {
+      try {
+        return await probeProjectOpenElsewhere(id);
+      } catch {
+        return true;
+      }
+    })
+  );
   const blocked = list.find((_, i) => probes[i]);
   if (blocked) throw new ProjectDeleteBlockedError(blocked);
 

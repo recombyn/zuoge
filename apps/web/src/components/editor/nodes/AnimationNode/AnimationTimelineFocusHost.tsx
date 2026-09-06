@@ -161,7 +161,9 @@ function AnimationTimelineFocusHost({
     }
     requestIdleCanvasFullRepaint();
     return () => {
-      if (!focusFrameId) setAnimationWorkbenchTimelineFocus(null);
+      // Always clear module focus when leaving an open focus (not only when
+      // the next focusFrameId is already null — that skipped cleanup before).
+      setAnimationWorkbenchTimelineFocus(null);
     };
   }, [focusFrameId]);
 
@@ -179,7 +181,6 @@ function AnimationTimelineFocusHost({
     };
 
     const fit = () => {
-      cancelled = false;
       tries = 0;
       const apply = () => {
         if (cancelled) return;
@@ -215,7 +216,15 @@ function AnimationTimelineFocusHost({
       raf = window.requestAnimationFrame(apply);
     };
 
-    const onFit = () => fit();
+    const onFit = () => {
+      // Ignore late afterPaint FIT that lands after the panel was closed.
+      const nodeId = String(
+        (store.getState() as { editor?: any }).editor?.lottieTimelinePanel?.nodeId || ''
+      ).trim();
+      if (!nodeId) return;
+      cancelled = false;
+      fit();
+    };
     const onRelease = () => {
       cancelled = true;
       if (raf) window.cancelAnimationFrame(raf);

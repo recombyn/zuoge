@@ -269,10 +269,18 @@ function FontFamilyPicker({ value, onChange, className }: Props): ReactNode {
         type="button"
         ref={refs.setReference}
         {...getReferenceProps({ onClick: () => setOpen((v) => !v) })}
-        className={cn(SEL_TOOL_BTN, 'max-w-[9rem]', open && 'bg-[var(--accent-soft)]', className)}
+        className={cn(
+          SEL_TOOL_BTN,
+          'max-w-[9rem] justify-between gap-1',
+          open && 'bg-[var(--accent-soft)]',
+          className
+        )}
         aria-label={triggerLabel || t('editor.fontFamily')}
       >
-        <span className="truncate" style={{ fontFamily: getPreviewFontFamily(triggerFont) }}>
+        <span
+          className="min-w-0 flex-1 truncate text-left"
+          style={{ fontFamily: getPreviewFontFamily(triggerFont) }}
+        >
           {triggerLabel || t('editor.fontFamily')}
         </span>
         <HiOutlineChevronDown

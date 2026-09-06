@@ -161,6 +161,25 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(worldNodeStacksAboveAnyFrame(doc, 'c1')).toBe(false);
   });
 
+  it('workbench surround above a plate is not stack-above (stays SoA mesh)', () => {
+    let doc = createBareDocument();
+    doc.frames = [
+      { id: 'anim', name: 'Animation', backgroundColor: '#fff', x: 0, y: 0, width: 100, height: 100 },
+    ];
+    doc.stackOrder = ['frame:anim'];
+    doc = addNodeToDocument(doc, 's1', {
+      id: 's1',
+      key: 'rect',
+      x: 200,
+      y: 0,
+      width: 20,
+      height: 20,
+      attrs: { animationWorkbenchSurround: 'anim' },
+      children: [],
+    });
+    expect(worldNodeStacksAboveAnyFrame(doc, 's1')).toBe(false);
+  });
+
   it('world node below all frames can stay on SoA', () => {
     let doc = createBareDocument();
     doc = addNodeToDocument(doc, 'under', {

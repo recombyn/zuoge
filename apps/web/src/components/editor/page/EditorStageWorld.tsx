@@ -834,7 +834,9 @@ function EditorStageWorld({
         />
 
         {frames.map((frame) =>
-          !showWorkbenchFrame(frame) ? null : (
+          !showWorkbenchFrame(frame) ||
+          selectionTransforming ||
+          movingFrameIdSet.has(frame.id) ? null : (
             <HtmlArtboardFrame
               key={`process-${frame.id}`}
               frame={frame}
@@ -849,7 +851,7 @@ function EditorStageWorld({
           )
         )}
 
-        {aiNodeBox ? (
+        {aiNodeBox && !selectionTransforming && movingFrameIds.length === 0 ? (
           <AiOperationNodeChrome
             box={aiNodeBox}
             caption={aiNodeCaption}

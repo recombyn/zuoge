@@ -1,7 +1,7 @@
 import type { ComposerContext } from '@/components/editor/panels/AgentComposerInput';
 
 /** Plain-text length at or above this → paste becomes a text chip. */
-export const LONG_PASTE_MIN_CHARS = 80;
+export const LONG_PASTE_MIN_CHARS = 1000;
 
 export function isTextSnippetChip(ctx: Pick<ComposerContext, 'kind' | 'key'>): boolean {
   return ctx.kind === 'text' || String(ctx.key || '').startsWith('text-snippet:');
@@ -34,8 +34,5 @@ export function buildTextSnippetContext(
 
 export function shouldConvertPasteToTextChip(text: string): boolean {
   const t = String(text || '').trim();
-  if (!t) return false;
-  if (t.length >= LONG_PASTE_MIN_CHARS) return true;
-  const lines = t.split(/\r?\n/).filter((line) => line.trim());
-  return lines.length >= 3 && t.length >= 40;
+  return t.length >= LONG_PASTE_MIN_CHARS;
 }

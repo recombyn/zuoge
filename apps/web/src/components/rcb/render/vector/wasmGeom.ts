@@ -307,7 +307,8 @@ function fillMeshFor(
     try {
       const mesh = meshFromFlat(api!.tessellate_fill(pointsToFlat(points)));
       if (mesh && mesh.triangleCount > 0) return mesh;
-      return mesh;
+      // Empty WASM result — try JS before giving up.
+      return tessellateFillJs(points);
     } catch {
       /* fall through to JS */
     }

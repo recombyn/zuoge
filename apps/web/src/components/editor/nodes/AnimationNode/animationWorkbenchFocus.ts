@@ -2,7 +2,9 @@
  * Timeline focus for 动画工作台:
  * - Surround pasteboard nodes (`animationWorkbenchSurround`) belong to a workbench
  *   but live outside its plate; saved with the project, shown only while that
- *   workbench's timeline is open.
+ *   workbench's timeline is open. Attr is visibility/isolation only — ink uses
+ *   the same SoA mesh path as closed-timeline unbound world (never DomHost via
+ *   stack-above; see worldNodeStacksAboveAnyFrame).
  * - While the timeline is open, unrelated frames/nodes are paint/hit hidden.
  * - Bound children outside the playhead in/out range are visually hidden and
  *   not pickable (same inRange rule as AnimationPlayheadSceneSync).
@@ -418,11 +420,12 @@ export function isInactiveAtAnimationPlayhead(
 }
 
 /**
- * After create/bind: outside the focused plate → mark as workbench surround;
- * inside the plate → clear surround.
+ * After create/bind: intersecting the focused plate → bind as workbench layer
+ * (same membership as a world artboard); fully outside → surround pasteboard.
  */
 export function tagCreatedNodeForWorkbenchSurround<T extends {
   deltaSetLike?: Record<string, any> | null;
+  frames?: any[];
 }>(doc: T, nodeId: string): T {
   const focus = timelineFocusFrameId;
   const id = String(nodeId || '').trim();
@@ -436,18 +439,99 @@ export function tagCreatedNodeForWorkbenchSurround<T extends {
   if (fid === focus) {
     if (!(WORKBENCH_SURROUND_ATTR in attrs)) return doc;
     delete attrs[WORKBENCH_SURROUND_ATTR];
-  } else if (!fid) {
-    if (attrs[WORKBENCH_SURROUND_ATTR] === focus) return doc;
-    attrs[WORKBENCH_SURROUND_ATTR] = focus;
-  } else {
-    return doc;
+    return {
+      ...doc,
+      deltaSetLike: {
+        ...doc.deltaSetLike,
+        [id]: { ...node, attrs },
+      },
+    };
+  }
+
+  if (fid) return doc;
+
+  // Unbound but overlapping the open workbench → bind like a world artboard.
+  // Do not leave as surround: world mesh sits under plate SVG (looks “behind”).
+  const key = String(node.key || '');
+  if (
+    key !== 'video' &&
+    key !== 'audio' &&
+    !isGeneratorPlateAttrs(node.attrs) &&
+    nodeIntersectsFocusedWorkbenchPlate(doc, node, focus)
+  ) {
+    return bindUnboundNodeToFocusedWorkbench(doc, id, focus);
+  }
+
+  if (attrs[WORKBENCH_SURROUND_ATTR] === focus) return doc;
+  attrs[WORKBENCH_SURROUND_ATTR] = focus;
+  return {
+    ...doc,
+    deltaSetLike: {
+      ...doc.deltaSetLike,
+      [id]: { ...node, attrs },
+    },
+  };
+}
+
+/** Document AABB of an unbound node vs focused workbench plate. */
+function nodeIntersectsFocusedWorkbenchPlate(
+  doc: { frames?: any[] | null },
+  node: {
+    x?: unknown;
+    y?: unknown;
+    width?: unknown;
+    height?: unknown;
+  },
+  focus: string
+): boolean {
+  const frames = Array.isArray(doc.frames) ? doc.frames : [];
+  const plate = frames.find((f: any) => String(f?.id) === focus);
+  if (!plate) return false;
+  const left = Number(node.x) || 0;
+  const top = Number(node.y) || 0;
+  const width = Math.max(1, Number(node.width) || 1);
+  const height = Math.max(1, Number(node.height) || 1);
+  const fx = Number(plate.x) || 0;
+  const fy = Number(plate.y) || 0;
+  const fw = Math.max(1, Number(plate.width) || 1);
+  const fh = Math.max(1, Number(plate.height) || 1);
+  return left < fx + fw && left + width > fx && top < fy + fh && top + height > fy;
+}
+
+function bindUnboundNodeToFocusedWorkbench<T extends {
+  deltaSetLike?: Record<string, any> | null;
+  frames?: any[];
+  coordSpace?: unknown;
+}>(doc: T, nodeId: string, focus: string): T {
+  const node = doc.deltaSetLike?.[nodeId];
+  if (!node) return doc;
+  const attrs = { ...(node.attrs || {}) } as Record<string, unknown>;
+  const orders = Object.values(doc.deltaSetLike || {})
+    .filter((item: any) => String(item?.attrs?.frameId || '').trim() === focus)
+    .map((item: any) => Number(item?.attrs?.frameOrder))
+    .filter(Number.isFinite);
+  attrs.frameId = focus;
+  attrs.frameOrder = orders.length ? Math.max(...orders) + 1 : 0;
+  delete attrs[WORKBENCH_SURROUND_ATTR];
+
+  let nextX = Number(node.x) || 0;
+  let nextY = Number(node.y) || 0;
+  // Avoid importing sceneToSvg (cycle via playhead). Mirror frameLocal store.
+  if (String((doc as { coordSpace?: unknown }).coordSpace || '') === 'frameLocal') {
+    const plate = (Array.isArray(doc.frames) ? doc.frames : []).find(
+      (f: any) => String(f?.id) === focus
+    );
+    if (plate) {
+      nextX -= Number(plate.x) || 0;
+      nextY -= Number(plate.y) || 0;
+    }
   }
 
   return {
     ...doc,
     deltaSetLike: {
       ...doc.deltaSetLike,
-      [id]: { ...node, attrs },
+      [nodeId]: { ...node, attrs, x: nextX, y: nextY },
     },
   };
 }
@@ -509,47 +593,6 @@ export function finalizeNodeForAnimationWorkbenchFocus<T extends {
     return tagCreatedNodeForWorkbenchSurround(doc, id);
   }
 
-  const frames = Array.isArray(doc.frames) ? doc.frames : [];
-  const plate = frames.find((f: any) => String(f?.id) === focus);
-  if (!plate) return tagCreatedNodeForWorkbenchSurround(doc, id);
-
-  const left = Number(node.x) || 0;
-  const top = Number(node.y) || 0;
-  const width = Math.max(1, Number(node.width) || 1);
-  const height = Math.max(1, Number(node.height) || 1);
-  const fx = Number(plate.x) || 0;
-  const fy = Number(plate.y) || 0;
-  const fw = Math.max(1, Number(plate.width) || 1);
-  const fh = Math.max(1, Number(plate.height) || 1);
-  const intersects =
-    left < fx + fw && left + width > fx && top < fy + fh && top + height > fy;
-
-  if (!intersects) {
-    return tagCreatedNodeForWorkbenchSurround(doc, id);
-  }
-
-  const attrs = { ...(node.attrs || {}) } as Record<string, unknown>;
-  if (String(attrs.frameId || '').trim() === focus) {
-    delete attrs[WORKBENCH_SURROUND_ATTR];
-    if (!(WORKBENCH_SURROUND_ATTR in (node.attrs || {}))) return doc;
-    return {
-      ...doc,
-      deltaSetLike: { ...doc.deltaSetLike, [id]: { ...node, attrs } },
-    };
-  }
-
-  const orders = Object.values(doc.deltaSetLike || {})
-    .filter((item: any) => String(item?.attrs?.frameId || '').trim() === focus)
-    .map((item: any) => Number(item?.attrs?.frameOrder))
-    .filter(Number.isFinite);
-  attrs.frameId = focus;
-  attrs.frameOrder = orders.length ? Math.max(...orders) + 1 : 0;
-  delete attrs[WORKBENCH_SURROUND_ATTR];
-  return {
-    ...doc,
-    deltaSetLike: {
-      ...doc.deltaSetLike,
-      [id]: { ...node, attrs },
-    },
-  };
+  // Intersect → bind; outside → surround. Shared with tagCreatedNodeForWorkbenchSurround.
+  return tagCreatedNodeForWorkbenchSurround(doc, id);
 }

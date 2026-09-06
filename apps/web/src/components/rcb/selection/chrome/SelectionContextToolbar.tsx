@@ -704,12 +704,7 @@ function SelectionContextToolbar(props: Props): ReactNode {
   const showOutline = canOutlineNode(node);
   const imageAspectLocked = resolveImageAspectLocked(node, kind);
   const opacityControl = showLayerChrome ? (
-    <OpacityControl
-      opacity={node?.attrs?.opacity}
-      onOpacityChange={(opacity) =>
-        patchDocumentNode({ nodeId, patch: { attrs: { opacity } } })
-      }
-    />
+    <OpacityControl nodeId={nodeId} />
   ) : null;
   const elementMoreItems: ToolbarMoreItem[] = [];
   if (showOutline) {
@@ -1124,6 +1119,8 @@ function SelectionContextToolbar(props: Props): ReactNode {
                     patchTextStyle({ fontFamily: parsed.family, fontWeight: parsed.weight });
                   }}
                   displayLabel={weightDisplayLabel}
+                  className="max-w-[6.5rem] shrink-0 justify-between"
+                  popupClassName="max-w-[9rem]"
                 />
               ) : null}
               <label className="inline-flex h-8 items-center gap-1 rounded-lg px-1.5 text-[12px] text-[var(--ink)]">

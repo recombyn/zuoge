@@ -117,8 +117,8 @@ const ja = {
     heroCategoryAria: '生成タイプを選択、現在：{{category}}',
     heroBrandSubtitle: 'AIデザインスタジオ',
     /** Home hero slogan. */
-    heroStartTitle: '作ろう、デザインがこんなに簡単だったことはない',
-    heroStartTitleAria: '作ろう、デザインがこんなに簡単だったことはない',
+    heroStartTitle: 'デザインがこんなに簡単だったことはない',
+    heroStartTitleAria: 'デザインがこんなに簡単だったことはない',
     footerCopy: '© {{year}} zuoge',
     footerIcp: '滇ICP备2026017289号',
     heroSuggest: {
@@ -1844,6 +1844,7 @@ const ja = {
     clickToEdit: 'クリックして編集・再送信',
     running: '実行中…',
     working: '処理中…',
+    thinking: '考え中',
     workedFor: '{{duration}}',
     workLog: '作業ログ',
     expandProcess: 'プロセスを展開',

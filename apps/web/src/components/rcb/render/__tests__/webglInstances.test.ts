@@ -367,7 +367,7 @@ describe('collectSoaWebglInstances', () => {
     expect(meshCol[3]).toBeGreaterThan(0.9);
   });
 
-  it('does not submit stroke ribbon when screen width is ≤1px (mesh still built)', () => {
+  it('submits default 1px stroke ribbon at 100% zoom (mesh still geometric)', () => {
     let doc = createEmptyDocument({ width: 800, height: 600, emptyWorld: true });
     doc = addNodeToDocument(doc, 'p', {
       id: 'p',
@@ -403,9 +403,9 @@ describe('collectSoaWebglInstances', () => {
       zoom: 1,
       dpr: 1,
     });
-    // No GPU submit for ≤1px screen stroke; no rect-instance ghost either.
-    expect(kinds.length).toBe(0);
-    expect(meshPos.length).toBe(0);
+    // Default 1p @ 100% must remain visible in the main world.
+    expect(meshPos.length).toBeGreaterThanOrEqual(6);
+    expect(meshCol[3]).toBeGreaterThan(0.9);
     const cached = getOrBuildShapeMesh('p', doc.deltaSetLike!.p!, {
       width: 100,
       height: 100,
@@ -414,6 +414,47 @@ describe('collectSoaWebglInstances', () => {
     });
     expect(cached?.stroke).not.toBeNull();
     expect(cached!.stroke!.triangleCount).toBeGreaterThan(0);
+  });
+
+  it('floors zoomed-out 1px strokes so artboard content stays visible', () => {
+    let doc = createEmptyDocument({ width: 800, height: 600, emptyWorld: true });
+    doc = addNodeToDocument(doc, 'p2', {
+      id: 'p2',
+      key: 'shape',
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      attrs: {
+        shapeType: 'pen',
+        path: 'M 0 0 L 40 0 L 40 40',
+        stroke: '#112233',
+        'border-color': '#112233',
+        'border-width': 1,
+        'fill-color': 'transparent',
+        closed: 'false',
+      },
+      children: [],
+    });
+    const buf = createSceneRenderBuffer();
+    syncSceneRenderBufferFromDocument(buf, doc);
+    rebuildSoaPathSamples(buf, doc);
+    buf.flags[0] = (buf.flags[0] | SOA_FLAG_CANVAS_IDLE) >>> 0;
+    const kinds: number[] = [];
+    const meshPos: number[] = [];
+    const meshCol: number[] = [];
+    const meshClip: number[] = [];
+    collectSoaWebglInstances(buf, { x: 0, y: 0, width: 200, height: 200 }, [], [], kinds, [], [], {
+      document: doc,
+      meshPos,
+      meshCol,
+      meshClip,
+      zoom: 0.25,
+      dpr: 1,
+    });
+    // Fit-zoom / large-frame view: hairline still submits at geometric width.
+    expect(meshPos.length).toBeGreaterThanOrEqual(6);
+    expect(meshCol[3]).toBeGreaterThan(0.9);
   });
 
   it('closed stroked path uses vector mesh (no atlas kind 3 / no segment notches)', () => {

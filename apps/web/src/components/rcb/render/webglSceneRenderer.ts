@@ -28,10 +28,13 @@ import {
 } from '@/components/rcb/render/sceneRenderBuffer';
 import { nodeOwnerFrameId } from '@/components/rcb/frames/frameNodeBinding';
 import { selectionPaintRaises, frameClipRevealsOverflow } from '@/components/rcb/selection/selectionPaintRaise';
+import { getShapeHost } from '@/components/rcb/shapes/shapeHostRegistry';
+import { getLiveShapeParamsPreviewNodeId } from '@/components/rcb/scene/document/sceneShapes';
 import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import {
   buildNodeStackZMap,
   maxDocumentStackZ,
+  worldNodeStacksAboveAnyFrame,
 } from '@/components/rcb/scene/document/sceneDocument';
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 import {
@@ -407,11 +410,12 @@ function pushInstanceClip(
 export function resolveSoaWebglSlotClip(
   buf: SceneRenderBuffer,
   index: number,
-  doc: SceneDocument | null | undefined
+  doc: SceneDocument | null | undefined,
+  opts?: { /** Artboard FO paint — keep plate clip even while selection reveals. */ ignoreReveal?: boolean }
 ): [number, number, number, number] {
   if (!doc) return SOA_WEBGL_NO_CLIP;
   const id = buf.ids[index];
-  if (!id || frameClipRevealsOverflow(id)) return SOA_WEBGL_NO_CLIP;
+  if (!id || (!opts?.ignoreReveal && frameClipRevealsOverflow(id))) return SOA_WEBGL_NO_CLIP;
   const node = doc.deltaSetLike?.[id] as Record<string, unknown> | undefined;
   if (!node) return SOA_WEBGL_NO_CLIP;
   const frame = findClippingFrameForNode(doc, { ...node, id });
@@ -651,7 +655,7 @@ export type CollectSoaWebglOpts = {
   document?: SceneDocument | null;
   /** Camera zoom. */
   zoom?: number;
-  /** Device pixel ratio (media stamps). */
+  /** Device pixel ratio (media stamps / mesh densify). */
   dpr?: number;
   /**
    * World idle ink: skip nodes with attrs.frameId (ArtboardLayer paints them).
@@ -722,15 +726,34 @@ export function collectSoaWebglInstances(
     const idEarly = buf.ids[i];
     if (idEarly && hiddenNodeId && idEarly === hiddenNodeId) continue;
     if (idEarly && getNodeTransformPreview(idEarly)?.hidden) continue;
+    // Stack-above unbound world → SVG host owns ink (surround excluded in helper).
+    if (
+      idEarly &&
+      paintDoc &&
+      worldNodeStacksAboveAnyFrame(paintDoc, idEarly) &&
+      getLiveShapeParamsPreviewNodeId() !== idEarly
+    ) {
+      continue;
+    }
+    // Match Canvas2D: once a host is mounted, never also draw WebGL for it.
+    if (
+      idEarly &&
+      getShapeHost(idEarly)?.el &&
+      getLiveShapeParamsPreviewNodeId() !== idEarly
+    ) {
+      continue;
+    }
     if (onlyFrameId && paintDoc && idEarly) {
       const node = paintDoc.deltaSetLike?.[idEarly];
-      // Plate FO stays clipped; selection reveal → raised SVG host (max+1).
-      // World ink is only a lag fallback while CANVAS_IDLE has not cleared yet.
-      if (nodeOwnerFrameId(node) !== onlyFrameId || frameClipRevealsOverflow(idEarly)) continue;
+      // Stay on plate FO even while selection reveals overflow. Selection no
+      // longer mounts an SVG ink host (CANVAS_IDLE stays), so moving reveal to
+      // world permanently spilled framed pencil/pen past the artboard.
+      // Unclipped blue path chrome still shows outside the plate.
+      if (nodeOwnerFrameId(node) !== onlyFrameId) continue;
     } else if (skipFrameBound && paintDoc && idEarly) {
       const node = paintDoc.deltaSetLike?.[idEarly];
-      // Selection reveal: overflow may still be on SoA until host flags flip.
-      if (nodeOwnerFrameId(node) && !frameClipRevealsOverflow(idEarly)) continue;
+      // Frame-bound idle always belongs on ArtboardLayer — never world.
+      if (nodeOwnerFrameId(node)) continue;
     }
     const kind = buf.kinds[i];
     if (
@@ -769,8 +792,9 @@ export function collectSoaWebglInstances(
     const { x, y, w, h, dx: odx, dy: ody } = resolveSoaPaintBox(buf, i);
     const rgba = argbToRgba(buf.colors[i]);
     const strokeBaseRgba = soaWebglStrokeRgba(buf, i);
-    const strokePaint = strokeRibbonPaint(soaStrokeWidth(buf, i), zoom, dpr);
-    // Geometric scene width for fallback segments; mesh tessellation is also geometric.
+    const authoredStrokeW = soaStrokeWidth(buf, i);
+    const strokePaint = strokeRibbonPaint(authoredStrokeW, zoom, dpr);
+    // Geometric authored width only — same as timeline-open pasteboard draw.
     const lineW = strokePaint.width;
     const submitStroke = strokePaint.submit;
     const strokeRgba: [number, number, number, number] = [
@@ -784,7 +808,9 @@ export function collectSoaWebglInstances(
     const nodeId = buf.ids[i] || '';
     const id = nodeId;
     const slotDepth = depthForId ? depthForId(nodeId) : 0.5;
-    const slotClip = resolveSoaWebglSlotClip(buf, i, paintDoc);
+    const slotClip = resolveSoaWebglSlotClip(buf, i, paintDoc, {
+      ignoreReveal: Boolean(onlyFrameId),
+    });
     const paintClips: Array<[number, number, number, number]> = [
       [slotClip[0], slotClip[1], slotClip[2], slotClip[3]],
     ];
@@ -968,7 +994,6 @@ export function collectSoaWebglInstances(
               );
             }
             // Pencil uses silhouette fill only — skip uniform centerline ribbon.
-            // Screen ≤1px: keep mesh cached, do not submit ribbon (rule 4).
             if (
               mesh.stroke &&
               submitStroke &&
@@ -991,6 +1016,12 @@ export function collectSoaWebglInstances(
             }
           }
           if (wrote > 0) {
+            if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+            continue;
+          }
+          // Pencil must never fall through to centerline segment quads — that
+          // reads as faceted beads when silhouette fill fails or is clipped.
+          if (isPencil) {
             if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
             continue;
           }

@@ -96,9 +96,9 @@ export function pencilSilhouettePathD(
   return outline || null;
 }
 
-/** Flatness for freehand fill meshes — coarser than shape curves (silhouette already dense). */
+/** Flatness for freehand fill meshes — track zoom so high-z silhouette stays smooth. */
 export function pencilSilhouetteFlatness(zoom = 1, dpr = 1): number {
-  return Math.max(0.55, sceneFlatness(zoom, dpr) * 2.5);
+  return Math.max(0.08, sceneFlatness(zoom, dpr) * 1.15);
 }
 
 export function contourFromNode(
@@ -124,7 +124,23 @@ export function contourFromNode(
     const outlineD = pencilSilhouettePathD(node, sw);
     if (outlineD) {
       const pencilFlat = pencilSilhouetteFlatness(opts?.zoom ?? 1, opts?.dpr ?? 1);
-      const points = densifyPathD(outlineD, pencilFlat);
+      let points = densifyPathD(outlineD, pencilFlat);
+      // Cap densified silhouette — ear-clip / remesh must stay interactive.
+      const PENCIL_MESH_MAX_RING = 320;
+      if (points.length > PENCIL_MESH_MAX_RING) {
+        const capped: typeof points = [];
+        const last = points.length - 1;
+        const step = last / (PENCIL_MESH_MAX_RING - 1);
+        let prev = -1;
+        for (let i = 0; i < PENCIL_MESH_MAX_RING - 1; i += 1) {
+          const idx = Math.round(i * step);
+          if (idx === prev) continue;
+          capped.push(points[idx]!);
+          prev = idx;
+        }
+        if (prev !== last) capped.push(points[last]!);
+        points = capped;
+      }
       if (points.length >= 3) {
         return { d: outlineD, closed: true, points, geomFp, pencilSilhouette: true };
       }

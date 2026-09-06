@@ -7,6 +7,9 @@ import {
   findPencilBrush,
   interpolateStrokeGaps,
   outlinePathFromPoints,
+  downsampleStrokePointsForLive,
+  PENCIL_COMMIT_MAX_PTS,
+  PENCIL_LIVE_MAX_PTS,
   pencilSampleMinStep,
   pencilSimplifyEpsilon,
   polylinePathD,
@@ -36,6 +39,11 @@ import {
   getSceneWorldEpoch,
   subscribeShapeHosts,
 } from '../shapes/shapeHostRegistry';
+import {
+  getSharedSceneRenderBuffer,
+  SOA_FLAG_CANVAS_IDLE,
+  SOA_FLAG_FREE,
+} from '../render/sceneRenderBuffer';
 
 type SceneBox = { left: number; top: number; width: number; height: number };
 
@@ -340,11 +348,16 @@ function PencilDrawFeature({
     }
     const brush = findPencilBrush(brushRef.current);
 
-    const pressures = points.map((p) => p.pressure);
+    // Live: downsample + last:false like perfect-freehand demos. Full pts stay
+    // for commit bake (smoothness / pressure fidelity).
+    const livePts = downsampleStrokePointsForLive(points, PENCIL_LIVE_MAX_PTS);
+    const pressures = livePts.map((p) => p.pressure);
     const hasPressure = pressures.some((p) => typeof p === 'number' && Number.isFinite(p));
-    const d = outlinePathFromPoints(points, widthRef.current, brush.id, {
+    const d = outlinePathFromPoints(livePts, widthRef.current, brush.id, {
       pressureEnabled: true,
       simplify: false,
+      last: false,
+      pathStyle: 'linear',
       pressures: hasPressure
         ? pressures.map((p) => (typeof p === 'number' && Number.isFinite(p) ? p : 0.5))
         : undefined,
@@ -373,19 +386,32 @@ function PencilDrawFeature({
     if (handoffRafRef.current) window.cancelAnimationFrame(handoffRafRef.current);
     let attempts = 0;
     let readyFrames = 0;
+    const soaIdleReady = () => {
+      const buf = getSharedSceneRenderBuffer();
+      for (let i = 0; i < buf.count; i += 1) {
+        if (buf.ids[i] !== nodeId) continue;
+        const flags = buf.flags[i];
+        if (flags & SOA_FLAG_FREE) return false;
+        return (flags & SOA_FLAG_CANVAS_IDLE) !== 0;
+      }
+      return false;
+    };
     const check = () => {
       if (previewEpochRef.current !== epoch) return;
+      // Framed / canvas-idle pencil paints on ArtboardLayer SoA — no SVG host paths.
       const committedEl = getShapeHost(nodeId)?.el;
-      const committedPaintReady = Boolean(
+      const hostPaintReady = Boolean(
         committedEl &&
           (committedEl.querySelector?.('image') ||
             committedEl.querySelector?.(
               'path:not([data-baseline="1"]), rect, circle, ellipse'
             ))
       );
-      if (committedPaintReady) readyFrames += 1;
+      if (hostPaintReady || soaIdleReady()) readyFrames += 1;
       else readyFrames = 0;
-      if (readyFrames >= 2 || attempts >= 120) {
+      // Clear sooner than before — unclipped world SVG preview must not linger
+      // past the plate once SoA ink is up (looks like offset + overflow).
+      if (readyFrames >= 1 || attempts >= 24) {
         handoffRafRef.current = 0;
         clearPreview();
         return;
@@ -573,11 +599,7 @@ function PencilDrawFeature({
           }
         }
       }
-      // Pin the final raw sample into the preview before it hands off to the
-      // committed host. Clearing first caused a visible blank frame on pointerup.
-      if (commit && pts.current.length >= 2) {
-        redrawOverlayRef.current();
-      }
+      // Keep the last live preview — do not re-getStroke on pointerup (sync freeze).
       const points = pts.current;
       pts.current = [];
       lastDrawPointerRef.current = null;
@@ -586,66 +608,82 @@ function PencilDrawFeature({
         clearPreview();
         return;
       }
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      points.forEach((pt) => {
-        minX = Math.min(minX, pt.x);
-        minY = Math.min(minY, pt.y);
-        maxX = Math.max(maxX, pt.x);
-        maxY = Math.max(maxY, pt.y);
-      });
-      const brush = findPencilBrush(brushRef.current);
-      const pad = brushPad(brush, widthRef.current);
-      const originX = minX - pad;
-      const originY = minY - pad;
-      const local = points.map((pt) => ({
-        x: pt.x - originX,
-        y: pt.y - originY,
-        ...(pt.pressure != null ? { pressure: pt.pressure } : {}),
-      }));
-      const sw = Math.max(0.5, widthRef.current);
-      const pressures = pressureRef.current
-        ? local.map((p) => (p.pressure != null && Number.isFinite(p.pressure) ? p.pressure : 0.5))
-        : undefined;
-      // Bake silhouette once at commit — idle WebGL/Canvas must not re-run getStroke.
-      // Linear M/L/Z (not Q midpoints) so densify/tessellate stay cheap.
-      const pencilOutlinePath = outlinePathFromPoints(local, sw, brushRef.current, {
-        linecap: 'round',
-        pressures,
-        pressureEnabled: pressureRef.current,
-        simplify: false,
-        pathStyle: 'linear',
-      });
-      // Store a light RDP centerline for edits; silhouette is already baked.
-      const size = brushSize(brush, sw);
-      const stored = simplifyPencilCenterline(local, pencilSimplifyEpsilon(size));
-      const d = polylinePathD(stored.length >= 2 ? stored : local);
-      const pathPressure = pressureRef.current
-        ? serializePathPressures(stored.length >= 2 ? stored : local)
-        : undefined;
-      const committedId = onCommit(
-        d,
-        {
-          left: originX,
-          top: originY,
-          width: Math.max(1, maxX - minX + pad * 2),
-          height: Math.max(1, maxY - minY + pad * 2),
-        },
-        {
-          ...(pathPressure ? { pathPressure } : {}),
-          ...(pencilOutlinePath ? { pencilOutlinePath } : {}),
-          brushCategory: brush.category || 'basic',
-          frameId: drawingFrameId.current,
-        }
-      );
+      const epoch = previewEpochRef.current;
+      const frameIdAtCommit = drawingFrameId.current;
       drawingFrameId.current = null;
-      if (committedId) {
-        holdPreviewUntilCommittedPaintRef.current(committedId, previewEpochRef.current);
-      } else {
-        clearPreview();
-      }
+      // Macrotask after pointerup paint — never RDP/getStroke/mesh in the gesture turn.
+      // Dense scribble ear-clip used to freeze for seconds on commit remesh.
+      window.setTimeout(() => {
+        if (previewEpochRef.current !== epoch) {
+          clearPreview();
+          return;
+        }
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (let i = 0; i < points.length; i += 1) {
+          const pt = points[i];
+          minX = Math.min(minX, pt.x);
+          minY = Math.min(minY, pt.y);
+          maxX = Math.max(maxX, pt.x);
+          maxY = Math.max(maxY, pt.y);
+        }
+        const brush = findPencilBrush(brushRef.current);
+        const pad = brushPad(brush, widthRef.current);
+        const originX = minX - pad;
+        const originY = minY - pad;
+        const local = points.map((pt) => ({
+          x: pt.x - originX,
+          y: pt.y - originY,
+          ...(pt.pressure != null ? { pressure: pt.pressure } : {}),
+        }));
+        const sw = Math.max(0.5, widthRef.current);
+        const size = brushSize(brush, sw);
+        // Cap first, then light RDP — never simplify thousands of raw points.
+        const capped = downsampleStrokePointsForLive(local, PENCIL_COMMIT_MAX_PTS);
+        const stored = simplifyPencilCenterline(capped, pencilSimplifyEpsilon(size));
+        const bakePts = stored.length >= 2 ? stored : capped;
+        const pressures = pressureRef.current
+          ? bakePts.map((p) =>
+              p.pressure != null && Number.isFinite(p.pressure) ? p.pressure : 0.5
+            )
+          : undefined;
+        // Linear silhouette densifies cheaply; Q midpoints explode remesh cost.
+        const pencilOutlinePath = outlinePathFromPoints(bakePts, sw, brushRef.current, {
+          linecap: 'round',
+          pressures,
+          pressureEnabled: pressureRef.current,
+          simplify: false,
+          last: true,
+          pathStyle: 'linear',
+        });
+        const d = polylinePathD(bakePts);
+        const pathPressure = pressureRef.current
+          ? serializePathPressures(bakePts)
+          : undefined;
+        const committedId = onCommit(
+          d,
+          {
+            left: originX,
+            top: originY,
+            width: Math.max(1, maxX - minX + pad * 2),
+            height: Math.max(1, maxY - minY + pad * 2),
+          },
+          {
+            ...(pathPressure ? { pathPressure } : {}),
+            ...(pencilOutlinePath ? { pencilOutlinePath } : {}),
+            brushCategory: brush.category || 'basic',
+            frameId: frameIdAtCommit,
+          }
+        );
+        if (previewEpochRef.current !== epoch) return;
+        if (committedId) {
+          holdPreviewUntilCommittedPaintRef.current(committedId, epoch);
+        } else {
+          clearPreview();
+        }
+      }, 0);
     };
 
     const onUp = (e: PointerEvent) => finishStroke(e, true);

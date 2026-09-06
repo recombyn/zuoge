@@ -78,7 +78,8 @@ function fanTris(ring: Vec2[]): number[] {
 function earclipTris(ring: Vec2[], ccw: boolean): number[] {
   const tris: number[] = [];
   const idx = ring.map((_, i) => i);
-  let guard = ring.length * ring.length + 8;
+  // Cap work — n² guard on n≈1k freehand rings stalls the tab for seconds.
+  let guard = Math.min(ring.length * ring.length + 8, 48_000);
   while (idx.length > 3 && guard-- > 0) {
     let clipped = false;
     for (let i = 0; i < idx.length; i += 1) {
@@ -125,7 +126,8 @@ export function tessellateFill(points: Vec2[]): FillMesh | null {
   const a = area(ring);
   if (Math.abs(a) < 1e-10) return null;
   const ccw = a > 0;
-  const tris = ringIsConvex(ring, ccw) ? fanTris(ring) : earclipTris(ring, ccw);
+  if (ringIsConvex(ring, ccw)) return meshFromTris(fanTris(ring));
+  const tris = earclipTris(ring, ccw);
   return meshFromTris(tris);
 }
 

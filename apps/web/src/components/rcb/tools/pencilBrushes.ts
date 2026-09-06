@@ -429,6 +429,11 @@ export type PencilStrokeDrawOpts = {
    */
   simplify?: boolean;
   /**
+   * perfect-freehand `last` — false while the pointer is down (cheaper live
+   * outline); true on commit so end caps complete. Defaults to true.
+   */
+  last?: boolean;
+  /**
    * `quad` (default): midpoint Q silhouette for paint.
    * `linear`: M/L/Z polygon — for 轮廓化 path-edit (Q midpoints resist sparsify).
    */
@@ -436,6 +441,36 @@ export type PencilStrokeDrawOpts = {
   /** Override brush streamline (tests / special commit paths). */
   streamline?: number;
 };
+
+/**
+ * Keep live getStroke input bounded — official demos stay fast because pointer
+ * density is natural; our sample step can pack thousands of scene points.
+ * Also used on commit **before** RDP (RDP on raw live samples freezes the tab).
+ */
+export const PENCIL_LIVE_MAX_PTS = 160;
+/** Commit bake input cap after downsample (before getStroke). */
+export const PENCIL_COMMIT_MAX_PTS = 160;
+
+export function downsampleStrokePointsForLive<T extends Pt>(
+  points: T[],
+  maxPoints = PENCIL_LIVE_MAX_PTS
+): T[] {
+  const n = points.length;
+  const cap = Math.max(8, Math.floor(Number(maxPoints) || 160));
+  if (n <= cap) return points;
+  const out: T[] = [];
+  const last = n - 1;
+  const step = last / (cap - 1);
+  let prev = -1;
+  for (let i = 0; i < cap - 1; i += 1) {
+    const idx = Math.round(i * step);
+    if (idx === prev) continue;
+    out.push(points[idx]);
+    prev = idx;
+  }
+  if (prev !== last) out.push(points[last]);
+  return out;
+}
 
 function outlineStrokePoints(pts: Pt[], hasRealPressure: boolean): Pt[] {
   if (hasRealPressure) return pts;
@@ -483,14 +518,23 @@ export function outlinePathFromPoints(
   const outline = getStroke(strokePts, {
     ...options,
     size,
-    thinning: Number(options.thinning ?? 0.5),
+    // Tiny tips + high thinning self-intersect → ear-clip fill fails → was falling
+    // through to centerline segment quads (faceted beads). Cap thinning on thin ink.
+    thinning: (() => {
+      const raw = Number(options.thinning ?? 0.5);
+      if (!(size > 0)) return raw;
+      if (size < 2.5) return Math.min(raw, 0.12);
+      if (size < 4) return Math.min(raw, 0.22);
+      return raw;
+    })(),
     streamline: Number(
       strokeOpts?.streamline != null ? strokeOpts.streamline : (options.streamline ?? 0)
     ),
     simulatePressure: false,
     start,
     end,
-    last: true,
+    // Live preview: last=false (official demo). Commit: last=true for finished caps.
+    last: strokeOpts?.last !== false,
   });
   if (strokeOpts?.pathStyle === 'linear') {
     if (outline.length < 3) return '';
@@ -569,6 +613,7 @@ export function parsePathPressures(raw: unknown, pointCount: number): number[] |
 /**
  * Ramer–Douglas–Peucker on pencil centerlines (MIT-safe in-repo impl).
  * Keeps endpoints and per-point pressure on retained vertices.
+ * Index-based recursion — avoid `slice` copies (pathological on long strokes).
  */
 export function simplifyPencilCenterline(points: Pt[], epsilon: number): Pt[] {
   if (points.length <= 2) return points.map((p) => ({ ...p }));
@@ -585,26 +630,35 @@ export function simplifyPencilCenterline(points: Pt[], epsilon: number): Pt[] {
     return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
   }
 
-  function rdp(pts: Pt[]): Pt[] {
-    if (pts.length <= 2) return pts;
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  function rdp(i0: number, i1: number) {
+    if (i1 - i0 <= 1) return;
     let maxDist = 0;
-    let maxIdx = 0;
-    const first = pts[0];
-    const last = pts[pts.length - 1];
-    for (let i = 1; i < pts.length - 1; i += 1) {
-      const d = distToSeg(pts[i], first, last);
+    let maxIdx = i0;
+    const first = points[i0];
+    const last = points[i1];
+    for (let i = i0 + 1; i < i1; i += 1) {
+      const d = distToSeg(points[i], first, last);
       if (d > maxDist) {
         maxDist = d;
         maxIdx = i;
       }
     }
-    if (maxDist <= eps) return [first, last];
-    const left = rdp(pts.slice(0, maxIdx + 1));
-    const right = rdp(pts.slice(maxIdx));
-    return left.slice(0, -1).concat(right);
+    if (maxDist <= eps) return;
+    keep[maxIdx] = 1;
+    rdp(i0, maxIdx);
+    rdp(maxIdx, i1);
   }
 
-  return rdp(points.map((p) => ({ ...p })));
+  rdp(0, points.length - 1);
+  const out: Pt[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    if (keep[i]) out.push({ ...points[i] });
+  }
+  return out;
 }
 
 /** Scene-space epsilon for freehand bake / commit (~4.5% of tip size, min 0.25). */
@@ -614,8 +668,8 @@ export function pencilSimplifyEpsilon(strokeSize: number): number {
   return Math.max(0.25, s * 0.045);
 }
 
-/** Min scene step between stored samples — scales with ink size, stays dense at high zoom. */
+/** Min scene step between stored samples — denser = smoother freehand at any zoom. */
 export function pencilSampleMinStep(strokeWidth: number, brush?: PencilBrushDef | null): number {
   const size = brush ? brushSize(brush, strokeWidth) : Math.max(1, strokeWidth);
-  return Math.max(0.12, Math.min(0.4, size * 0.1));
+  return Math.max(0.06, Math.min(0.28, size * 0.06));
 }

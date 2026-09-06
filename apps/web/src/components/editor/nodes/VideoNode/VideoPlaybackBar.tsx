@@ -277,7 +277,7 @@ function VideoPlaybackBar({
   const [current, setCurrent] = useState(0);
   // Only used when attrs.duration is missing.
   const [fallbackDuration, setFallbackDuration] = useState(0);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [volOpen, setVolOpen] = useState(false);
 

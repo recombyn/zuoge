@@ -1,23 +1,15 @@
 import { useMemo, useState, type CSSProperties, type ReactNode, memo } from 'react';
-import {
-  autoUpdate,
-  flip,
-  FloatingPortal,
-  offset,
-  shift,
-  useClick,
-  useDismiss,
-  useFloating,
-  useInteractions,
-} from '@floating-ui/react';
 import { useTranslation } from 'react-i18next';
-import { HiOutlineArrowPath, HiOutlineCheck, HiOutlineChevronDown } from 'react-icons/hi2';
+import { HiOutlineCheck, HiOutlineChevronDown } from 'react-icons/hi2';
 import { MdOutlineOpacity } from 'react-icons/md';
 import { Dropdown } from '@/components/base';
 import type { MenuItemType } from '@/components/base/dropdown';
-import { DropdownPanel } from '@/components/base/dropdown/DropdownPanel';
-import Slider from '@/components/base/slider';
-import Tooltip from '@/components/base/tooltip';
+import { useSelector } from '@/store';
+import {
+  closeImageToolPanel,
+  openImageToolPanel,
+  type ImageToolPanelState,
+} from '@/store/modules/editor';
 import { cn } from '@/utils/classnames';
 import { SEL_ICON_BTN_ACTIVE, SEL_TOOL_BTN } from './ToolbarValueSlider';
 
@@ -96,10 +88,6 @@ export function layerOpacityToPct(opacity01: number): number {
   return Math.round(Math.min(1, Math.max(0, opacity01)) * 100);
 }
 
-function clampOpacityPct(n: number): number {
-  return Math.min(100, Math.max(0, Math.round(n)));
-}
-
 /** Mini two-circle preview — monochrome so it matches the rest of the toolbar. */
 export function BlendModeIcon({ mode, className }: { mode: BlendModeId; className?: string }) {
   const cssMode: CSSProperties['mixBlendMode'] =
@@ -125,103 +113,52 @@ export function BlendModeIcon({ mode, className }: { mode: BlendModeId; classNam
   );
 }
 
+/**
+ * Opens the same right-of-node OpacityToolPanel as images (via ImageToolPanelHost).
+ * Multi-select without a single nodeId is not supported here — pass nodeId for side dock.
+ */
 export function OpacityControl({
-  opacity,
-  onOpacityChange,
+  nodeId,
   className,
 }: {
-  opacity?: unknown;
-  onOpacityChange: (opacity01: number) => void;
+  /** Docks OpacityToolPanel to this node's top-right (same as image). */
+  nodeId: string;
   className?: string;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const pct = layerOpacityToPct(parseLayerOpacity(opacity, 1));
+  const imageToolPanel = useSelector(
+    (s: any) => s.editor.imageToolPanel as ImageToolPanelState | null
+  );
+  const open =
+    imageToolPanel?.kind === 'opacity' && imageToolPanel?.nodeId === nodeId;
   const opacityLabel = t('editor.imageToolbar.opacity');
-  const applyPct = (nextPct: number) => {
-    onOpacityChange(clampOpacityPct(nextPct) / 100);
-  };
-  const { refs, floatingStyles, context } = useFloating({
-    open,
-    onOpenChange: setOpen,
-    placement: 'bottom-start',
-    strategy: 'fixed',
-    whileElementsMounted: autoUpdate,
-    middleware: [
-      offset(6),
-      flip({
-        padding: 12,
-        fallbackPlacements: ['top-start', 'top-end', 'right-start', 'left-start'],
-      }),
-      shift({ padding: 12 }),
-    ],
-  });
-  const click = useClick(context);
-  const dismiss = useDismiss(context, { outsidePressEvent: 'pointerdown' });
-  const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss]);
 
   return (
     <div className={cn('inline-flex', className)}>
       <button
         type="button"
         aria-label={opacityLabel}
-        aria-expanded={open}
-        ref={refs.setReference}
+        aria-pressed={open}
         className={cn(SEL_TOOL_BTN, open && SEL_ICON_BTN_ACTIVE)}
-        {...getReferenceProps()}
+        onClick={() => {
+          if (open) closeImageToolPanel();
+          else openImageToolPanel({ nodeId, kind: 'opacity' });
+        }}
       >
         <MdOutlineOpacity className="h-4 w-4" />
         <span>{opacityLabel}</span>
       </button>
-      <FloatingPortal>
-        {open ? (
-          <DropdownPanel
-            className="z-[80] w-[240px]"
-            style={floatingStyles}
-            ref={refs.setFloating}
-            {...getFloatingProps()}
-          >
-            <div className="flex h-9 items-center justify-between gap-1 px-3">
-              <span className="min-w-0 truncate text-[13px] font-medium text-[var(--ink)]">
-                {opacityLabel}
-              </span>
-              <Tooltip tip={t('editor.imageToolbar.reset')} placement="top">
-                <button
-                  type="button"
-                  aria-label={t('editor.imageToolbar.reset')}
-                  onClick={() => applyPct(100)}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-[var(--muted)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
-                >
-                  <HiOutlineArrowPath className="h-4 w-4" />
-                </button>
-              </Tooltip>
-            </div>
-            <div className="px-3 pb-3">
-              <Slider
-                min={0}
-                max={100}
-                step={1}
-                value={pct}
-                onChange={applyPct}
-                trackHeight={6}
-                thumbWidth={16}
-                thumbHeight={16}
-              />
-            </div>
-          </DropdownPanel>
-        ) : null}
-      </FloatingPortal>
     </div>
   );
 }
 
 type Props = {
   blendMode?: unknown;
-  opacity?: unknown;
   /** Pass-through is only meaningful for groups/frames. */
   allowPassThrough?: boolean;
   onBlendModeChange: (mode: BlendModeId) => void;
-  onOpacityChange: (opacity01: number) => void;
+  /** Single-node dock for opacity (same as image). */
+  opacityNodeId?: string;
   /** Inserted between blend-mode dropdown and opacity (e.g. corner radius). */
   afterBlendSlot?: ReactNode;
   className?: string;
@@ -229,10 +166,9 @@ type Props = {
 
 function BlendModeControl({
   blendMode,
-  opacity,
   allowPassThrough = false,
   onBlendModeChange,
-  onOpacityChange,
+  opacityNodeId,
   afterBlendSlot,
   className,
 }: Props) {
@@ -302,7 +238,9 @@ function BlendModeControl({
         </button>
       </Dropdown>
       {afterBlendSlot}
-      <OpacityControl opacity={opacity} onOpacityChange={onOpacityChange} />
+      {opacityNodeId ? (
+        <OpacityControl nodeId={opacityNodeId} />
+      ) : null}
     </div>
   );
 }

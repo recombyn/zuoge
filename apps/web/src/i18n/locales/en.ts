@@ -119,8 +119,8 @@ const en = {
     heroCategoryAria: 'Choose what to generate, current: {{category}}',
     heroBrandSubtitle: 'AI design studio',
     /** Home hero slogan. */
-    heroStartTitle: 'Make it, design has never been this simple',
-    heroStartTitleAria: 'Make it, design has never been this simple',
+    heroStartTitle: 'design has never been this simple',
+    heroStartTitleAria: 'design has never been this simple',
     footerCopy: '© {{year}} zuoge',
     footerIcp: '滇ICP备2026017289号',
     heroSuggest: {
@@ -2003,6 +2003,7 @@ const en = {
     clickToEdit: 'Click to edit and resend',
     running: 'Running…',
     working: 'Working…',
+    thinking: 'Thinking',
     workedFor: '{{duration}}',
     workLog: 'Work log',
     expandProcess: 'Expand process',

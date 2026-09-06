@@ -25,6 +25,8 @@ import {
   isRectLikeStrokeSidesShape,
   rectStrokeSideRuns,
 } from '@/components/rcb/render/vector/strokeSides';
+import { parseSimplePathPoints } from '@/components/rcb/tools/pencilBrushes';
+import { tessellateStroke } from '@/components/rcb/render/vector/tessellateStroke';
 
 export type CachedShapeMesh = {
   geomFp: string;
@@ -166,24 +168,49 @@ export function getOrBuildShapeMesh(
     !pencilSil && isRectLikeStrokeSidesShape(shapeType, paintNode.key)
       ? rectStrokeSideRuns(w, h, paintNode.attrs, radiiFromAttrs(paintNode.attrs))
       : null;
-  const { fill, stroke } = buildShapeMeshes(contour.points, {
-    closed: contour.closed,
-    wantFill: pencilSil || (contour.closed && nodeWantsSolidFill(paintNode)),
-    strokeWidth: authoredStroke,
-    strokeAlign: strokeAlignOf(paintNode),
-    linejoin: resolveStrokeLinejoin(paintNode.attrs),
-    linecap: resolveStrokeLinecap(paintNode.attrs),
-    miterLimit: resolveStrokeMiterlimit(paintNode.attrs),
-    holes: holes.length ? holes : undefined,
-    fillRule,
-    arrowHeadFill: false,
-    dasharray,
-    strokeRuns: sideRuns ?? undefined,
-  });
+  // Dense freehand silhouettes self-intersect; skip fill tessellation when the
+  // densified ring is large (ear-clip stalls). Short strokes still get fill.
+  const pencilPreferRibbon = pencilSil && contour.points.length >= 280;
+  const { fill, stroke } = pencilPreferRibbon
+    ? { fill: null, stroke: null }
+    : buildShapeMeshes(contour.points, {
+        closed: contour.closed,
+        wantFill: pencilSil || (contour.closed && nodeWantsSolidFill(paintNode)),
+        strokeWidth: authoredStroke,
+        strokeAlign: strokeAlignOf(paintNode),
+        linejoin: resolveStrokeLinejoin(paintNode.attrs),
+        linecap: resolveStrokeLinecap(paintNode.attrs),
+        miterLimit: resolveStrokeMiterlimit(paintNode.attrs),
+        holes: holes.length ? holes : undefined,
+        fillRule,
+        arrowHeadFill: false,
+        dasharray,
+        strokeRuns: sideRuns ?? undefined,
+      });
+  let fillOut = fill;
+  let strokeOut = stroke;
+  // Self-intersecting freehand rings can fail ear-clip. Prefer a round centerline
+  // ribbon over empty ink (WebGL no longer falls through to butt segment quads).
+  if (pencilSil && !fillOut) {
+    const sw = Math.max(
+      0.5,
+      Number(paintNode.attrs?.['border-width'] ?? paintNode.attrs?.strokeWidth) || 1
+    );
+    const center = parseSimplePathPoints(String(paintNode.attrs?.path || ''));
+    if (center.length >= 2) {
+      strokeOut = tessellateStroke(center, {
+        width: sw,
+        closed: false,
+        align: 'center',
+        linejoin: 'round',
+        linecap: 'round',
+      });
+    }
+  }
   const entry: CachedShapeMesh = {
     geomFp: fp,
-    fill,
-    stroke,
+    fill: fillOut,
+    stroke: strokeOut,
     // Draw gate lives in the renderer (screen width); keep scale at 1.
     strokeAlphaScale: 1,
   };
