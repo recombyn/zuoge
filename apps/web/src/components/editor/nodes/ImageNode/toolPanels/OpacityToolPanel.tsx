@@ -29,14 +29,15 @@ function OpacityToolPanel({
         </PanelIconBtn>
       }
     >
-      <div className="flex flex-col items-stretch gap-3 py-3">
+      <div className="flex flex-col items-stretch gap-3 py-1">
         <Slider
           min={0}
           max={100}
           step={1}
           value={safe}
           onChange={onOpacityPctChange}
-          trackHeight={6}
+          /* Thick black pill + white ring thumb — shared opacity chrome. */
+          trackHeight={10}
           thumbWidth={16}
           thumbHeight={16}
         />

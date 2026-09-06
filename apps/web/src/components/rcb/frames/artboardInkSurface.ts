@@ -6,7 +6,6 @@
  * at full wantScale (no soft mush) composite into the single FO canvas.
  */
 import { nodeOwnerFrameId } from '@/components/rcb/frames/frameNodeBinding';
-import { frameClipRevealsOverflow } from '@/components/rcb/selection/selectionPaintRaise';
 import { getNodeTransformPreview } from '@/components/rcb/core/transformPreview';
 import { readDevicePixelRatio } from '@/components/rcb/core/dpr';
 import { buildNodeStackZMap } from '@/components/rcb/scene/document/sceneDocument';
@@ -164,7 +163,7 @@ function collectBoundIdleIndices(
     const id = buf.ids[i];
     if (!id) continue;
     if (hiddenNodeId && id === hiddenNodeId) continue;
-    if (frameClipRevealsOverflow(id)) continue;
+    // Keep painting revealed selection on the plate FO (clipped by overflow:hidden).
     const node = doc.deltaSetLike?.[id] as SceneNodeInput | undefined;
     if (!node || nodeOwnerFrameId(node) !== frameId) continue;
     if (getNodeTransformPreview(id)?.hidden) continue;

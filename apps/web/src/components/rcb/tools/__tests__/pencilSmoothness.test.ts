@@ -3,6 +3,9 @@ import {
   findPencilBrush,
   getPencilBrushPaintRev,
   outlinePathFromPoints,
+  downsampleStrokePointsForLive,
+  PENCIL_COMMIT_MAX_PTS,
+  PENCIL_LIVE_MAX_PTS,
   pencilSampleMinStep,
   pencilSimplifyEpsilon,
   resetPencilBrushOptions,
@@ -15,8 +18,34 @@ describe('pencil stroke smoothness', () => {
   it('sample min step is dense at 1px stroke', () => {
     const brush = findPencilBrush('vector-ink');
     const step = pencilSampleMinStep(1, brush);
-    expect(step).toBeLessThan(0.6);
-    expect(step).toBeGreaterThanOrEqual(0.12);
+    expect(step).toBeLessThan(0.3);
+    expect(step).toBeGreaterThanOrEqual(0.06);
+  });
+
+  it('downsampleStrokePointsForLive caps input and keeps endpoints', () => {
+    const dense: Pt[] = [];
+    for (let i = 0; i <= 500; i += 1) dense.push({ x: i, y: i * 0.1 });
+    const out = downsampleStrokePointsForLive(dense, PENCIL_LIVE_MAX_PTS);
+    expect(out.length).toBeLessThanOrEqual(PENCIL_LIVE_MAX_PTS);
+    expect(out.length).toBeGreaterThan(8);
+    expect(out[0]).toEqual(dense[0]);
+    expect(out[out.length - 1]).toEqual(dense[dense.length - 1]);
+  });
+
+  it('commit bake path caps before RDP (dense scribbles stay cheap)', () => {
+    const dense: Pt[] = [];
+    for (let i = 0; i <= 8000; i += 1) {
+      dense.push({ x: Math.sin(i * 0.05) * 40 + i * 0.02, y: Math.cos(i * 0.07) * 40 });
+    }
+    const t0 = performance.now();
+    const capped = downsampleStrokePointsForLive(dense, PENCIL_COMMIT_MAX_PTS);
+    const simplified = simplifyPencilCenterline(capped, pencilSimplifyEpsilon(4));
+    const ms = performance.now() - t0;
+    expect(capped.length).toBeLessThanOrEqual(PENCIL_COMMIT_MAX_PTS);
+    expect(simplified.length).toBeGreaterThanOrEqual(2);
+    expect(simplified.length).toBeLessThanOrEqual(capped.length);
+    // RDP-on-raw used to multi-second freeze; capped path must stay interactive.
+    expect(ms).toBeLessThan(50);
   });
 
   it('simplifyPencilCenterline drops colinear points and keeps pressure', () => {

@@ -150,6 +150,8 @@ export function resolvePaintIntent(
     };
   }
 
+  // Unbound world above a plate → SVG host (SoA sits under plate SVG).
+  // Surround is excluded inside worldNodeStacksAboveAnyFrame (mesh only).
   if (document && worldNodeStacksAboveAnyFrame(document, id)) {
     paintDebugStats.domObligatory += 1;
     return { kind: 'dom-obligatory', reason: 'stack-above-plate' };

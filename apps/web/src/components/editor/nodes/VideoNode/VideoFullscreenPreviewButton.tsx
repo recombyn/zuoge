@@ -185,7 +185,6 @@ export function VideoFullscreenPreview({
                 layout="fill"
                 objectFit="contain"
                 controlsMode="hover"
-                muted
                 crop={crop}
                 flipX={flipX === true}
                 flipY={flipY === true}

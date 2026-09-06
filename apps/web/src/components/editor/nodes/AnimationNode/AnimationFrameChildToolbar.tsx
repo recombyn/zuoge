@@ -91,9 +91,31 @@ import {
   BLEND_MODE_OPTIONS,
   parseBlendMode,
 } from '@/components/rcb/selection/chrome/BlendModeControl';
+import {
+  documentPointToNodeLocal,
+  isFrameLocalCoordSpace,
+} from '@/components/rcb/scene/paint/sceneToSvg';
 import store from '@/store';
 import { cn } from '@/utils/classnames';
 import type { SceneDocument, SceneNode } from '@/components/rcb/sceneNode';
+
+/**
+ * Inspector X/Y are plate-local (0 = frame TL). Node storage under frameLocal
+ * is also plate-local — never write world abs (that double-adds frame origin).
+ */
+export function inspectorLocalToStoredXY(
+  document: SceneDocument | null | undefined,
+  frameId: string | null | undefined,
+  frameX: number,
+  frameY: number,
+  localX: number,
+  localY: number
+): { x: number; y: number } {
+  if (isFrameLocalCoordSpace(document) && String(frameId || '').trim()) {
+    return { x: localX, y: localY };
+  }
+  return { x: frameX + localX, y: frameY + localY };
+}
 
 /** Timeline dock listens — expand the layer so new keyframes are visible. */
 export const LOTTIE_EXPAND_LAYER_EVENT = 'lottie-timeline-expand-layer';
@@ -802,6 +824,8 @@ function AnimationFrameChildToolbar({
   const frameY = Number(frame?.y) || 0;
   const frameW = Math.max(1, Number(frame?.width) || 1);
   const frameH = Math.max(1, Number(frame?.height) || 1);
+  const frameLocal = isFrameLocalCoordSpace(document);
+  // Selection chrome is world; inspector fields are plate-local.
   const localX = geom.left - frameX;
   const localY = geom.top - frameY;
   const w = Math.max(1, geom.width);
@@ -996,7 +1020,21 @@ function AnimationFrameChildToolbar({
   }, [frameId]);
 
   const commitWorldXY = (nextLocalX: number, nextLocalY: number) => {
-    patchAttrs({}, { x: frameX + nextLocalX, y: frameY + nextLocalY });
+    const stored = inspectorLocalToStoredXY(
+      document,
+      frameId,
+      frameX,
+      frameY,
+      nextLocalX,
+      nextLocalY
+    );
+    patchAttrs({}, { x: stored.x, y: stored.y });
+  };
+
+  /** World chrome origin → node storage x/y (frameLocal-aware). */
+  const commitWorldOrigin = (worldLeft: number, worldTop: number) => {
+    const stored = documentPointToNodeLocal(document, node, worldLeft, worldTop);
+    patchAttrs({}, { x: Math.round(stored.x), y: Math.round(stored.y) });
   };
 
   /** Keep visual pose when changing Anchor; write anchorX/Y so canvas R/Sk/Sa pivot. */
@@ -1005,8 +1043,8 @@ function AnimationFrameChildToolbar({
     const { fx: ofx, fy: ofy } = anchorPresetToFrac(prev);
     const { fx, fy } = anchorPresetToFrac(next);
     const angleDeg = rot;
-    let nextX = geom.left;
-    let nextY = geom.top;
+    let nextWorldX = geom.left;
+    let nextWorldY = geom.top;
     if (Math.abs(angleDeg) > 1e-6 && (ofx !== fx || ofy !== fy)) {
       const p0x = w * ofx;
       const p0y = h * ofy;
@@ -1019,16 +1057,17 @@ function AnimationFrameChildToolbar({
       const sin = Math.sin(rad);
       const rx = cos * dx - sin * dy;
       const ry = sin * dx + cos * dy;
-      nextX = geom.left + (dx - rx);
-      nextY = geom.top + (dy - ry);
+      nextWorldX = geom.left + (dx - rx);
+      nextWorldY = geom.top + (dy - ry);
     }
+    const stored = documentPointToNodeLocal(document, node, nextWorldX, nextWorldY);
     patchAttrs(
       {
         anchorPreset: next,
         anchorX: Math.round(fx * 100),
         anchorY: Math.round(fy * 100),
       },
-      { x: Math.round(nextX), y: Math.round(nextY) }
+      { x: Math.round(stored.x), y: Math.round(stored.y) }
     );
   };
 
@@ -1146,15 +1185,15 @@ function AnimationFrameChildToolbar({
   };
 
   const alignToFrame = (mode: (typeof ALIGN_ITEMS)[number]['mode']) => {
-    let nextX = geom.left;
-    let nextY = geom.top;
-    if (mode === 'left') nextX = frameX;
-    if (mode === 'centerX') nextX = frameX + (frameW - w) / 2;
-    if (mode === 'right') nextX = frameX + frameW - w;
-    if (mode === 'top') nextY = frameY;
-    if (mode === 'middle') nextY = frameY + (frameH - h) / 2;
-    if (mode === 'bottom') nextY = frameY + frameH - h;
-    patchAttrs({}, { x: Math.round(nextX), y: Math.round(nextY) });
+    let nextWorldX = geom.left;
+    let nextWorldY = geom.top;
+    if (mode === 'left') nextWorldX = frameX;
+    if (mode === 'centerX') nextWorldX = frameX + (frameW - w) / 2;
+    if (mode === 'right') nextWorldX = frameX + frameW - w;
+    if (mode === 'top') nextWorldY = frameY;
+    if (mode === 'middle') nextWorldY = frameY + (frameH - h) / 2;
+    if (mode === 'bottom') nextWorldY = frameY + frameH - h;
+    commitWorldOrigin(nextWorldX, nextWorldY);
   };
 
   const siblingBoxes = useMemo((): SiblingBox[] => {
@@ -1179,9 +1218,10 @@ function AnimationFrameChildToolbar({
 
   const justifyInFrame = (axis: 'h' | 'v') => {
     if (!canJustify || !frame) return;
+    // Sibling boxes use stored node.x/y — under frameLocal that is plate-local.
     const patches = justifyInFramePatches(siblingBoxes, axis, {
-      x: frameX,
-      y: frameY,
+      x: frameLocal ? 0 : frameX,
+      y: frameLocal ? 0 : frameY,
       w: frameW,
       h: frameH,
     });

@@ -40,6 +40,20 @@ import {
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 import { releaseArtboardTileCache } from '@/components/rcb/frames/artboardInkTiles';
 
+/**
+ * Whether the shared GL canvas has anything to blit onto the FO 2D canvas.
+ * Images live in `mediaTex` (not `kinds` / mesh) — media-only plates must blit.
+ */
+export function shouldBlitArtboardGlContent(opts: {
+  count: number;
+  meshVertCount: number;
+  mediaVertCount: number;
+}): boolean {
+  return (
+    opts.count > 0 || opts.meshVertCount >= 3 || opts.mediaVertCount >= 3
+  );
+}
+
 type ArtboardGlResources = {
   canvas: HTMLCanvasElement;
   gl: WebGL2RenderingContext;
@@ -415,8 +429,10 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
       bufferRevision: buf.revision,
       clips,
       document: args.document,
+      // effectiveScale is already CSS-zoom × dpr (backing px / scene). Do not
+      // multiply dpr again inside strokeRibbonPaint (would double-count).
       zoom: scale,
-      dpr,
+      dpr: 1,
       onlyFrameId: args.frameId,
       meshPos,
       meshCol,
@@ -575,8 +591,9 @@ export function paintArtboardWebglInk(args: PaintArtboardWebglInkArgs): boolean 
   if (!ctx) return false;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, bw, bh);
-  // Empty plate: clear only (SVG owns fill/edge).
-  if (count > 0 || meshVertCount >= 3) {
+  // Empty plate: clear only (SVG owns fill/edge). Media-only plates still
+  // need the blit — images no longer pack into `kinds` / mesh.
+  if (shouldBlitArtboardGlContent({ count, meshVertCount, mediaVertCount })) {
     ctx.drawImage(res.canvas, 0, 0, bw, bh, 0, 0, bw, bh);
   }
   return true;

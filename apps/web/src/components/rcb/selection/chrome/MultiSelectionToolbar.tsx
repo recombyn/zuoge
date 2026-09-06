@@ -959,18 +959,13 @@ function MultiSelectionToolbar({
       {sizeField('h', box.height)}
       <BlendModeControl
         blendMode={firstAttrs.blendMode}
-        opacity={firstAttrs.opacity}
+        opacityNodeId={opNodeIds[0]}
         allowPassThrough={opNodeIds.every(
           (id) => document?.deltaSetLike?.[id]?.key === 'frame'
         )}
         onBlendModeChange={(mode) => {
           applyPatches(
             opNodeIds.map((id) => ({ nodeId: id, patch: { attrs: { blendMode: mode } } }))
-          );
-        }}
-        onOpacityChange={(opacity) => {
-          applyPatches(
-            opNodeIds.map((id) => ({ nodeId: id, patch: { attrs: { opacity } } }))
           );
         }}
       />

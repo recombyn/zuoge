@@ -102,6 +102,27 @@ describe('finalizeNodeForAnimationWorkbenchFocus', () => {
     expect(isHiddenByAnimationWorkbenchFocus(node)).toBe(false);
   });
 
+  it('binds overlapping unbound shape into focused workbench (not surround behind plate)', () => {
+    setAnimationWorkbenchTimelineFocus('af1');
+    const raw = docWithPlateAndNode({
+      frameId: 'af1',
+      node: {
+        id: 'rect1',
+        key: 'shape',
+        x: 450,
+        y: 150,
+        width: 120,
+        height: 80,
+        attrs: {},
+      },
+    });
+    // Plate is 100,100,400×300 — rect overlaps right edge.
+    const next = finalizeNodeForAnimationWorkbenchFocus(raw, 'rect1');
+    const node = next.deltaSetLike.rect1;
+    expect(node.attrs.frameId).toBe('af1');
+    expect(node.attrs[WORKBENCH_SURROUND_ATTR]).toBeUndefined();
+  });
+
   it('hides unowned nodes that were never finalized', () => {
     setAnimationWorkbenchTimelineFocus('af1');
     const node = {

@@ -1996,6 +1996,7 @@ const zhCN = {
     clickToEdit: '点击编辑并再次发送',
     running: '执行中…',
     working: '处理中…',
+    thinking: '正在思考',
     workedFor: '{{duration}}',
     workLog: '工作记录',
     expandProcess: '展开过程',

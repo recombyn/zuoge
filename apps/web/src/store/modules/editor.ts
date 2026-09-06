@@ -263,7 +263,9 @@ const IMAGE_TOOL_SIDE_PANEL_KIND: Record<string, true> = {
 /** Blend / effects dock beside any selected node (not image-only tools). */
 const NODE_LAYER_TOOL_PANEL_KIND: Record<string, true> = {
   effects: true,
-  blendMode: true};
+  blendMode: true,
+  opacity: true,
+};
 
 const IMAGE_TOOL_CROP_SESSION_KIND: Record<string, true> = {
   crop: true,

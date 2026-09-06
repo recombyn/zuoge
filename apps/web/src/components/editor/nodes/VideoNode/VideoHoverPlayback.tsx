@@ -122,7 +122,8 @@ function createSharedVideoEl(): HTMLVideoElement {
   el.className = 'pointer-events-none absolute block';
   el.playsInline = true;
   el.preload = 'auto';
-  el.muted = true;
+  // Sound on by default — user can mute from the playback bar.
+  el.muted = false;
   el.draggable = false;
   el.controls = false;
   return el;

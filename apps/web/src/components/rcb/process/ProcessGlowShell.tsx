@@ -18,6 +18,8 @@ export type ProcessGlowShellProps = {
   angle?: number;
   labelDataAttr?: string;
   className?: string;
+  /** Hide while drag/resize (same contract as titles / toolbars). */
+  hidden?: boolean;
 };
 
 /**
@@ -35,6 +37,7 @@ export function ProcessGlowShell({
   angle = 0,
   labelDataAttr = 'data-image-process-label',
   className,
+  hidden = false,
 }: ProcessGlowShellProps): ReactNode {
   const dock = useMemo(
     () =>
@@ -49,6 +52,8 @@ export function ProcessGlowShell({
       ),
     [box.left, box.top, box.width, box.height, angle]
   );
+
+  if (hidden) return null;
 
   return (
     <WorldScreenChromeRoot

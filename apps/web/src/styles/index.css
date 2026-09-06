@@ -851,6 +851,47 @@ html[data-theme='dark'] .rcb-skeleton-card .rcb-skeleton-bone {
   }
 }
 
+/* Chat: “正在思考” text with horizontal light sweep */
+@keyframes rcb-thinking-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+.rcb-thinking-shimmer {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--muted) 88%, transparent) 0%,
+    color-mix(in srgb, var(--muted) 88%, transparent) 36%,
+    color-mix(in srgb, var(--ink) 92%, transparent) 50%,
+    color-mix(in srgb, var(--muted) 88%, transparent) 64%,
+    color-mix(in srgb, var(--muted) 88%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: rcb-thinking-shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rcb-thinking-shimmer {
+    animation: none;
+    background-image: none;
+    color: var(--muted);
+    -webkit-text-fill-color: var(--muted);
+  }
+}
+
 /* Global thin scrollbar with track inset */
 * {
   scrollbar-width: thin;

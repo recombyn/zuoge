@@ -15,14 +15,14 @@ describe('composerTextSnippet', () => {
     expect(nextTextSnippetChipLabel(chips)).toBe('文字 2');
   });
 
-  it('converts long single-line paste', () => {
-    expect(shouldConvertPasteToTextChip('a'.repeat(80))).toBe(true);
-    expect(shouldConvertPasteToTextChip('a'.repeat(79))).toBe(false);
+  it('converts only pastes at or above 1000 chars', () => {
+    expect(shouldConvertPasteToTextChip('a'.repeat(1000))).toBe(true);
+    expect(shouldConvertPasteToTextChip('a'.repeat(999))).toBe(false);
   });
 
-  it('converts multi-line paste', () => {
+  it('does not convert short multi-line paste', () => {
     const multi = ['line one here', 'line two here', 'line three here'].join('\n');
-    expect(shouldConvertPasteToTextChip(multi)).toBe(true);
+    expect(shouldConvertPasteToTextChip(multi)).toBe(false);
     expect(shouldConvertPasteToTextChip('ab\ncd')).toBe(false);
   });
 

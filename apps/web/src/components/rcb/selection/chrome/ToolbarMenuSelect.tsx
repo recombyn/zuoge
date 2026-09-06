@@ -18,6 +18,8 @@ type Props = {
   className?: string;
   /** Min trigger width */
   minWidth?: string;
+  /** Dropdown panel class (fixed width for weight menus, etc.). */
+  popupClassName?: string;
   /**
    * Combobox mode: type a custom value, chevron still opens the preset list.
    * Used for font size.
@@ -39,6 +41,7 @@ function ToolbarMenuSelect({
   displayLabel,
   className,
   minWidth,
+  popupClassName,
   editable = false,
   inputMin = 1,
   inputMax = 400,
@@ -70,7 +73,7 @@ function ToolbarMenuSelect({
   };
 
   const shellClass = cn(
-    'inline-flex h-8 max-w-[10rem] items-center gap-0.5 rounded-lg px-1.5 text-[12px] text-[var(--ink)] transition-colors hover:bg-[var(--accent-soft)]',
+    'inline-flex h-8 items-center gap-0.5 rounded-lg px-1.5 text-[12px] text-[var(--ink)] transition-colors hover:bg-[var(--accent-soft)]',
     open && 'bg-[var(--accent-soft)]',
     className
   );
@@ -90,7 +93,7 @@ function ToolbarMenuSelect({
         onChange(key);
         setOpen(false);
       }}
-      popupClassName="min-w-[7rem]"
+      popupClassName={cn('!w-[9rem] min-w-[9rem]', popupClassName)}
       floatingClassName="z-[80]"
       referenceClassName="inline-flex"
     >
@@ -149,7 +152,7 @@ function ToolbarMenuSelect({
           className={shellClass}
           style={minWidth ? { minWidth } : undefined}
         >
-          <span className="inline-grid max-w-[8.5rem] items-center">
+          <span className="inline-grid min-w-0 flex-1 items-center">
             <span
               aria-hidden
               className="invisible col-start-1 row-start-1 whitespace-pre truncate px-0.5"

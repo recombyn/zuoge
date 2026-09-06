@@ -126,4 +126,26 @@ describe('bindCreatedNodeToFrame final AABB', () => {
       'anim'
     );
   });
+
+  it('binds when finished box overlaps the open animation workbench', async () => {
+    const { bindCreatedNodeToFrame } = await import(
+      '@/components/editor/canvas/canvasSession'
+    );
+    setAnimationWorkbenchTimelineFocus('anim');
+    const doc = makeDoc({
+      ox: 0,
+      oy: 0,
+      frame: { x: 0, y: 0, width: 364, height: 364 },
+      // Overlaps right edge — must become a workbench layer (on plate), not surround.
+      node: { x: 300, y: 40, width: 120, height: 80 },
+    });
+    const next = bindCreatedNodeToFrame(
+      doc,
+      's1',
+      { left: 300, top: 40, width: 120, height: 80 },
+      null
+    );
+    expect(String(next.deltaSetLike?.s1?.attrs?.frameId || '')).toBe('anim');
+    expect(next.deltaSetLike?.s1?.attrs?.animationWorkbenchSurround).toBeUndefined();
+  });
 });
