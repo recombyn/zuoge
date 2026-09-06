@@ -55,6 +55,7 @@ export function shapeGeomFingerprint(
     String(attrs['fill-color'] ?? attrs.fill ?? ''),
     String(attrs['fill-enabled'] ?? ''),
     String(attrs['fill-visible'] ?? ''),
+    String(attrs['fill-rule'] ?? ''),
     String(attrs.brushStyle ?? ''),
     String(attrs.pathPressure ?? '').slice(0, 256),
     String(attrs.pressureEnabled ?? ''),

@@ -73,14 +73,14 @@ void main() {
   if (vKind > 2.5 && vKind < 3.5) {
     vec4 tex = texture(uAtlas, vAtlasUv);
     if (tex.a < 0.01) discard;
-    outColor = tex;
+    outColor = vec4(tex.rgb * tex.a, tex.a);
     outDepth = vec4(vDepth, 0.0, 0.0, 1.0);
     return;
   }
   if (vKind > 0.5 && vKind < 1.5) {
     if (dot(vUv, vUv) > 1.0) discard;
   }
-  outColor = vColor;
+  outColor = vec4(vColor.rgb * vColor.a, vColor.a);
   outDepth = vec4(vDepth, 0.0, 0.0, 1.0);
 }`;
 
@@ -315,7 +315,7 @@ export function createWebglDepthOfFieldPass(gl: WebGL2RenderingContext): WebglDe
       const p = params ?? getGpuDepthOfFieldParams();
       runBlurPass(colorTex, depthTex, 1, 0, pingFbo);
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       runBlurPass(pingTex, depthTex, 0, 1, null);
       gl.viewport(0, 0, w * clampDownsample(p.downsample), h * clampDownsample(p.downsample));
     },

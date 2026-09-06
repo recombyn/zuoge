@@ -45,6 +45,7 @@ import { invalidateTextOutlineMesh } from '@/components/rcb/render/vector/textOu
 import { pencilSilhouettePathD } from '@/components/rcb/render/vector/contour';
 import { parseNodeTextStyle } from '@/components/rcb/scene/document/sceneText';
 import { getSoaTextInkPainter } from '@/components/rcb/render/soaTextInkPainter';
+import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
 import { getShapeBaseline } from '@/components/rcb/core/geometry/baseline';
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 import { getShapeHost } from '@/components/rcb/shapes/shapeHostRegistry';
@@ -2297,7 +2298,7 @@ export function paintSoaIdleSlot(
       if (node && getSoaTextInkPainter()) {
         const paintText = getSoaTextInkPainter()!;
         const rot = livePreviewAngleDeg(id);
-        const opacity = Math.min(1, Math.max(0.05, Number(node.attrs?.opacity) || 1));
+        const opacity = Math.min(1, Math.max(0, parseLayerOpacity(node.attrs?.opacity, 1)));
         ctx.save();
         if (rot) {
           ctx.translate(x + w / 2, y + h / 2);
@@ -2310,7 +2311,7 @@ export function paintSoaIdleSlot(
           node: { ...node, id: id || node.id },
           width: w,
           height: h,
-          opacity,
+          opacity: Math.max(0.05, opacity),
         });
         ctx.restore();
       }

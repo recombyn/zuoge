@@ -1,16 +1,26 @@
 {
-  "generatedAt": "2026-09-01T18:45:26.159Z",
+  "generatedAt": "2026-09-06T03:30:30.023Z",
+  "env": "vitest+jsdom (SoA sync/cull/Canvas2D paint proxy)",
+  "budgets": {
+    "dirtyStripePaintFrameMs": 16,
+    "fullViewportPaintFrameMs": 20
+  },
   "row": {
     "n": 10000,
-    "syncMs": 765.2,
-    "paint60Ms": 439.2,
-    "dirtyStripePaintFrameMs": 7.32,
-    "fullViewportPaintFrameMs": 15.8,
+    "syncMs": 1736.5,
+    "paint60Ms": 851.7,
+    "dirtyStripePaintFrameMs": 14.19,
+    "fullViewportPaintFrameMs": 32.43,
     "visibleInView": 441,
     "basicGeomCount": 7000,
     "hostFullAt1x": 42,
     "hostCanvasAt1x": 399,
     "hostFullAtMotion": 42,
     "hostCanvasAtMotion": 399
+  },
+  "pass": {
+    "dirty": true,
+    "fullViewport": false,
+    "sync": false
   }
 }

@@ -165,6 +165,8 @@ fn tessellate_fill_inner(ring: &[f32]) -> Vec<f32> {
 }
 
 /// Bridge each hole onto the outer ring (nearest vertex), then ear-clip.
+/// Uses a hairline lateral offset so the corridor has non-zero area — a
+/// zero-width keyhole collapses ear-clip to 0 triangles.
 fn bridge_holes(outer: &[f32], holes: &[Vec<f32>]) -> Vec<f32> {
     let mut ring = outer.to_vec();
     let outer_a = ring_area(&ring);
@@ -200,16 +202,43 @@ fn bridge_holes(outer: &[f32], holes: &[Vec<f32>]) -> Vec<f32> {
                 }
             }
         }
+        let (ox, oy) = get_xy(&ring, best_o);
+        let (hx0, hy0) = get_xy(&hole, best_h);
+        let dx = hx0 - ox;
+        let dy = hy0 - oy;
+        let len = (dx * dx + dy * dy).sqrt().max(1e-6);
+        // Perpendicular hairline (~0.02 scene units, clamped by span).
+        let span = {
+            let mut min_x = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            for i in 0..on {
+                let (x, y) = get_xy(&ring, i);
+                min_x = min_x.min(x);
+                max_x = max_x.max(x);
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+            }
+            (max_x - min_x).max(max_y - min_y).max(1.0)
+        };
+        let eps = (span * 1e-5).max(0.02);
+        let nx = (-dy / len) * eps;
+        let ny = (dx / len) * eps;
+
         let mut insert: Vec<f32> = Vec::new();
+        // Outbound bridge edge (offset +n).
+        insert.push(ox + nx);
+        insert.push(oy + ny);
         for k in 0..=hn {
             let hi = (best_h + k) % hn;
             let (hx, hy) = get_xy(&hole, hi);
-            insert.push(hx);
-            insert.push(hy);
+            insert.push(hx + nx);
+            insert.push(hy + ny);
         }
-        let (ox, oy) = get_xy(&ring, best_o);
-        insert.push(ox);
-        insert.push(oy);
+        // Inbound bridge edge (offset -n) back to outer vertex.
+        insert.push(ox - nx);
+        insert.push(oy - ny);
         let at = (best_o + 1) * 2;
         ring.splice(at..at, insert);
     }
@@ -647,7 +676,7 @@ fn densify_path_inner(d: &str, flatness: f32) -> Vec<f32> {
         let mut ai = 0usize;
         match c {
             'M' => {
-                let subpath_start = true;
+                let mut subpath_start = true;
                 while ai + 1 < args.len() {
                     let mut x = args[ai];
                     let mut y = args[ai + 1];

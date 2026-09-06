@@ -10,6 +10,7 @@ import {
   nodeDocumentLeftTop,
   nodeLeftTop,
 } from '@/components/rcb/scene/paint/sceneToSvg';
+import { storedOriginForSceneResult } from '@/components/rcb/scene/paint/svgToScene';
 import { applyNodeFrameBindings } from '@/components/editor/canvas/canvasSession';
 import { setAnimationWorkbenchTimelineFocus } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
@@ -97,6 +98,15 @@ describe('frameLocal coord space', () => {
     expect(Number(moved.deltaSetLike.s1.x)).toBe(childX);
     expect(Number(moved.deltaSetLike.s1.y)).toBe(childY);
     expect(nodeLeftTop(moved, moved.deltaSetLike.s1)).toEqual({ left: 350, top: 450 });
+  });
+
+  it('boolean result store uses plate-local xy (not world abs)', () => {
+    const doc = normalizeDocument(worldDoc());
+    // Scene result at the child's painted origin (150,250) → local (50,50).
+    const stored = storedOriginForSceneResult(doc, 150, 250, 'f1');
+    expect(stored).toEqual({ x: 50, y: 50 });
+    // Free (no frame) keeps document abs.
+    expect(storedOriginForSceneResult(doc, 150, 250, null)).toEqual({ x: 150, y: 250 });
   });
 
   it('bind / unbind converts world ↔ local', () => {

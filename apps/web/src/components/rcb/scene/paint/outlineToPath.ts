@@ -1474,10 +1474,10 @@ function outlineTextLocal(node: SceneNodeInput): OutlineResult | null {
   const boxH = Math.max(1, Math.round(Number(node.height) || 1));
   const autoSize = String(node.attrs?.autoSize ?? 'true') !== 'false';
   const pad = 4;
-  // CJK glyphs are dense — scale 12 × per-char contour is multi-second main-thread
-  // work that freezes Outline UI. Keep Latin at 12; CJK at 5 (still multi-ring).
+  // CJK glyphs are dense — scale 8 keeps counters; 5 shredded thin strokes into
+  // hollow tubes after evenodd nest + remesh.
   const isCjk = /[\u3400-\u9fff\uf900-\ufaff]/.test(plain);
-  const scale = isCjk ? 5 : 12;
+  const scale = isCjk ? 8 : 12;
   const fontSizeScene = Math.max(1e-3, Number(style.fontSize) || 14);
   const fontSize = fontSizeScene * scale;
   const lineHeight = Math.max(0.8, Number(style.lineHeight) || 1.4);
@@ -1612,7 +1612,7 @@ export async function outlineTextLocalAsync(
   const autoSize = String(node.attrs?.autoSize ?? 'true') !== 'false';
   const pad = 4;
   const isCjk = /[\u3400-\u9fff\uf900-\ufaff]/.test(plain);
-  const scale = isCjk ? 5 : 12;
+  const scale = isCjk ? 8 : 12;
   const fontSizeScene = Math.max(1e-3, Number(style.fontSize) || 14);
   const fontSize = fontSizeScene * scale;
   const lineHeight = Math.max(0.8, Number(style.lineHeight) || 1.4);
@@ -1691,9 +1691,10 @@ export async function outlineTextLocalAsync(
             width: canvas.width,
             height: canvas.height,
             alphaThreshold: 20,
-            simplifyEps,
+            // Worker traces in pixel space — convert scene eps → pixels.
+            simplifyEps: simplifyEps * scale,
             simplifyMaxPts,
-            simplifyCap,
+            simplifyCap: simplifyCap * scale,
           });
           if (rings == null) {
             workerOk = false;

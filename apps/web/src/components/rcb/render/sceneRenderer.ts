@@ -25,6 +25,7 @@ import {
 import { PROCESS_PLATE_STROKE } from '@/components/rcb/process/processGlow';
 import { paintProcessPlateCanvas } from '@/components/rcb/process/processPlateSvg';
 import { framePlateStrokeSceneWidth, strokeCanvasPlateHairline } from '@/components/rcb/frames/types';
+import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
 import { generatorEmptyIconSize, generatorEmptyIconVisible } from '@/components/rcb/core/layout';
 import {
   GENERATOR_EMPTY_ICON_COLOR,
@@ -661,7 +662,7 @@ function paintZOrderedCanvasInk(opts: {
         angle: paint.angle,
         fill: resolveNodeProxyFill(node),
         shapeType: String(node.attrs?.shapeType || node.key || ''),
-        opacity: Math.min(1, Math.max(0.15, Number(node.attrs?.opacity) || 1)),
+        opacity: Math.min(1, Math.max(0.15, parseLayerOpacity(node.attrs?.opacity, 1) || 0.15)),
       });
     }
     if (!drawProxies) continue;
@@ -2161,7 +2162,12 @@ export function paintCanvasTextInk(
 
   const outline = getIdleTextOutlinePath(node);
   if (outline) {
-    ctx.fill(outline);
+    // Canvas-traced CJK / boolean compounds need evenodd; default nonzero fills holes.
+    try {
+      ctx.fill(outline, 'evenodd');
+    } catch {
+      ctx.fill(outline);
+    }
     clearCanvasDropShadow(ctx);
     ctx.restore();
     return;
@@ -2771,12 +2777,12 @@ export function bakeAudioInkForAtlas(
   const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (!ctx) return null;
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  const opacity = Math.min(1, Math.max(0.05, Number(node.attrs?.opacity) || 1));
+  const opacity = Math.min(1, Math.max(0, parseLayerOpacity(node.attrs?.opacity, 1)));
   const screenH = h * z;
   if (screenH < 18) {
     const c2 = ctx as CanvasRenderingContext2D;
     c2.save();
-    c2.globalAlpha = opacity;
+    c2.globalAlpha = Math.max(0.05, opacity);
     c2.fillStyle = '#e9eaee';
     c2.fillRect(0, 0, w, h);
     strokeCanvasPlateHairline(c2, w, h, {
@@ -2859,7 +2865,7 @@ export function paintCanvasIdleNode(
   const top = opts.top;
   const angle = opts.angle != null ? Number(opts.angle) : Number(node.attrs?.angle) || 0;
   const fill = resolveNodeProxyFill(node);
-  const opacity = Math.min(1, Math.max(0.15, Number(node.attrs?.opacity) || 1));
+  const opacity = Math.min(1, Math.max(0, parseLayerOpacity(node.attrs?.opacity, 1) || 0.15));
   const strokeOnly = canvasIdleIsStrokeOnly(node);
   const pathD = String(node.attrs?.path || '');
   const key = String(node.key || '');

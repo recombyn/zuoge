@@ -14,8 +14,13 @@ import {
   parseFillType,
 } from '@/components/rcb/scene/document/sceneFill';
 import { boolEffectAttr } from '@/components/rcb/scene/document/sceneEffects';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
+import {
+  nodeLeftTop,
+} from '@/components/rcb/scene/paint/sceneToSvg';
+import {
+  sceneToDocumentCoords,
+  storedOriginForSceneResult,
+} from '@/components/rcb/scene/paint/svgToScene';
 import {
   addNodeToDocument,
   removeNodesFromDocument
@@ -514,13 +519,15 @@ function MultiSelectionToolbar({
     const operandFrameIds = shapeBoxes
       .map((b) => String(document?.deltaSetLike?.[b.id]?.attrs?.frameId || '').trim())
       .filter(Boolean);
-    const origin = sceneToDocumentCoords(document, result.x, result.y);
+    const abs = sceneToDocumentCoords(document, result.x, result.y);
     const frameId = resolveBooleanResultFrameId(
       document,
       operandFrameIds,
-      origin.x + result.width / 2,
-      origin.y + result.height / 2
+      abs.x + result.width / 2,
+      abs.y + result.height / 2
     );
+    // frameLocal: plate-relative x/y (not world abs — that shifts by artboard origin).
+    const origin = storedOriginForSceneResult(document, result.x, result.y, frameId);
     const { id, node } = createShapeNode({
       x: origin.x,
       y: origin.y,

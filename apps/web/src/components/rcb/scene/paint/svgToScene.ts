@@ -10,7 +10,10 @@ import {
 } from '../document/sceneDocument';
 import { isCustomPathShape, scalePathData } from '../document/pathScale';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
-import { documentPointToNodeLocal } from '@/components/rcb/scene/paint/sceneToSvg';
+import {
+  documentPointToNodeLocal,
+  isFrameLocalCoordSpace,
+} from '@/components/rcb/scene/paint/sceneToSvg';
 
 function num(v: unknown, fallback = 0) {
   const n = Number(v);
@@ -23,6 +26,22 @@ export function sceneToDocumentCoords(document: SceneDocument, left: number, top
     x: num(left, 0) + num(document?.x, 0),
     y: num(top, 0) + num(document?.y, 0),
   };
+}
+
+/**
+ * Where to store a boolean (or similar) result's top-left.
+ * Scene-absolute geometry in → node x/y out (plate-local when frameLocal + frameId).
+ */
+export function storedOriginForSceneResult(
+  document: SceneDocument,
+  sceneLeft: number,
+  sceneTop: number,
+  frameId?: string | null
+): { x: number; y: number } {
+  const abs = sceneToDocumentCoords(document, sceneLeft, sceneTop);
+  const fid = String(frameId || '').trim();
+  if (!fid || !isFrameLocalCoordSpace(document)) return abs;
+  return documentPointToNodeLocal(document, { attrs: { frameId: fid } } as never, abs.x, abs.y);
 }
 
 export type TextResizeMode = 'scale' | 'wrap' | 'frame';

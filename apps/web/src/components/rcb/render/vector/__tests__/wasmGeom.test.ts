@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
-import { densifyPathDJs } from '@/components/rcb/render/vector/densifyPathDJs';
+import { densifyPathDJs, splitPolylineContours } from '@/components/rcb/render/vector/densifyPathDJs';
 import { tessellateFill, tessellateFillWithHoles } from '@/components/rcb/render/vector/tessellateFill';
 import { tessellateStroke } from '@/components/rcb/render/vector/tessellateStroke';
 import {
@@ -13,6 +13,8 @@ import {
   getWasmGeomBackend,
   setWasmGeomForceJs,
   initWasmGeom,
+  buildShapeMeshes,
+  buildCompoundFillMeshes,
 } from '@/components/rcb/render/vector/wasmGeom';
 import {
   clearShapeMeshCache,
@@ -156,6 +158,44 @@ describe('wasm geom adapter', () => {
     expect(via!.triangleCount).toBeGreaterThanOrEqual(1);
   });
 
+  it('falls back to JS when wasm hole fill returns empty (shipped keyhole bug)', () => {
+    __setWasmGeomApiForTests({
+      densify_path_d: () => new Float32Array(0),
+      tessellate_fill: () => new Float32Array(0),
+      // Shipped wasm keyhole path is broken; fillMeshFor must ignore it for holes.
+      tessellate_fill_with_holes: () => new Float32Array(0),
+      tessellate_stroke: () => new Float32Array(0),
+      tessellate_batch_fill: () => new Float32Array(0),
+    });
+    expect(getWasmGeomBackend()).toBe('wasm');
+    const via = tessellateFillWithHolesWasm(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ],
+      [
+        [
+          { x: 30, y: 30 },
+          { x: 70, y: 30 },
+          { x: 70, y: 70 },
+          { x: 30, y: 70 },
+        ],
+      ]
+    );
+    expect(via?.triangleCount ?? 0).toBeGreaterThan(2);
+
+    const pts = densifyPathDJs('M0 0H100V100H0Z M30 30H70V70H30Z', 0.5);
+    const shaped = buildShapeMeshes(pts, {
+      closed: true,
+      wantFill: true,
+      strokeWidth: 0,
+      fillRule: 'evenodd',
+    });
+    expect(shaped.fill?.triangleCount ?? 0).toBeGreaterThan(2);
+  });
+
   it('batch fill returns one mesh per ring', () => {
     const rings = [
       [
@@ -205,6 +245,69 @@ describe('wasm geom adapter', () => {
     const mesh = getOrBuildShapeMesh('donut', node, { width: 80, height: 80 });
     expect(mesh?.fill).not.toBeNull();
     expect(mesh!.fill!.triangleCount).toBeGreaterThanOrEqual(4);
+  });
+
+  it('buildShapeMeshes nests multi-M path holes', () => {
+    const d = 'M0 0H100V100H0Z M25 25H75V75H25Z';
+    const pts = densifyPathDJs(d, 0.5);
+    const runs = splitPolylineContours(pts);
+    expect(runs.length).toBe(2);
+    const compound = buildCompoundFillMeshes(pts, 'evenodd');
+    expect(compound?.triangleCount ?? 0).toBeGreaterThan(2);
+    const shaped = buildShapeMeshes(pts, {
+      closed: true,
+      wantFill: true,
+      strokeWidth: 0,
+      fillRule: 'evenodd',
+    });
+    expect(shaped.fill?.triangleCount ?? 0).toBeGreaterThan(2);
+  });
+
+  it('meshCache punches evenodd path hole (boolean subtract look)', () => {
+    // Outer square + inner square — must not paint as a solid outer-only plate.
+    const node = {
+      id: 'bool-hole',
+      key: 'shape',
+      width: 100,
+      height: 100,
+      attrs: {
+        shapeType: 'path',
+        path: 'M0 0H100V100H0Z M25 25H75V75H25Z',
+        closed: 'true',
+        'fill-rule': 'evenodd',
+        'fill-color': '#ffffff',
+        'stroke-enabled': false,
+      },
+    } as SceneNodeInput;
+    const punched = getOrBuildShapeMesh('bool-hole', node, { width: 100, height: 100 });
+    expect(punched?.fill).not.toBeNull();
+    // Solid AABB ear-clip is typically 2 tris; a punched ring must be denser.
+    // If compound nesting never ran, triangleCount stays at 2.
+    expect(punched!.fill!.triangleCount).toBeGreaterThan(2);
+    // Positions must leave the hole empty: no triangle covers the hole center.
+    const pos = punched!.fill!.positions;
+    const hx = 50;
+    const hy = 50;
+    let coversHole = false;
+    for (let i = 0; i + 5 < pos.length; i += 6) {
+      const x0 = pos[i]!;
+      const y0 = pos[i + 1]!;
+      const x1 = pos[i + 2]!;
+      const y1 = pos[i + 3]!;
+      const x2 = pos[i + 4]!;
+      const y2 = pos[i + 5]!;
+      // Barycentric inside test
+      const d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+      if (Math.abs(d) < 1e-9) continue;
+      const a = ((y1 - y2) * (hx - x2) + (x2 - x1) * (hy - y2)) / d;
+      const b = ((y2 - y0) * (hx - x2) + (x0 - x2) * (hy - y2)) / d;
+      const c = 1 - a - b;
+      if (a >= -1e-4 && b >= -1e-4 && c >= -1e-4) {
+        coversHole = true;
+        break;
+      }
+    }
+    expect(coversHole).toBe(false);
   });
 
   it('initWasmGeom resolves false without pkg', async () => {
