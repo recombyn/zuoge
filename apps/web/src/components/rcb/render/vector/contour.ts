@@ -8,7 +8,6 @@ import { densifyPathDJs, DENSIFY_DEFAULT_FLATNESS, splitPolylineContours, sceneF
 import { densifyPathDWasm } from '@/components/rcb/render/vector/wasmGeom';
 import {
   ellipseArcPercentFromAttrs,
-  ellipseInnerRatioFromAttrs,
 } from '@/components/rcb/scene/document/sceneShapes';
 import {
   parsePathPressures,
@@ -159,8 +158,10 @@ export function contourFromNode(
   const isEllipse =
     shapeType === 'ellipse' || shapeType === 'circle' || shapeType === 'oval';
   const arcPct = Math.abs(ellipseArcPercentFromAttrs(node.attrs || {}));
-  const inner = ellipseInnerRatioFromAttrs(node.attrs || {});
-  if (isEllipse && arcPct >= 99.95 && inner < 1e-4) {
+  // Full closed ellipse (solid or donut): sample a smooth outer ring.
+  // Donut hole is applied separately via `ellipseHoleRing` in meshCache —
+  // do not densify the compound outer+inner `d` (multi-M) for the fill outer.
+  if (isEllipse && arcPct >= 99.95) {
     points = sampleEllipseRing(w, h, flat);
   } else {
     points = densifyPathD(d, flat);

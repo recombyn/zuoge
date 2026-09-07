@@ -37,6 +37,7 @@ export function tessellate_fill(xy: Float32Array): Float32Array;
 
 /**
  * `holes_flat`: concatenated hole rings; `hole_counts`: vertex count per hole.
+ * Uses i_overlay difference + slit (not keyhole bridge) so donuts stay hollow.
  */
 export function tessellate_fill_with_holes(outer: Float32Array, holes_flat: Float32Array, hole_counts: Uint32Array): Float32Array;
 

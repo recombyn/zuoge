@@ -123,6 +123,128 @@ pub fn boolean_fold(op: u8, packed_polygons: &[f32]) -> Vec<f32> {
     encode_shapes(&acc)
 }
 
+fn xy_to_contour(xy: &[f32]) -> Contour {
+    let n = xy.len() / 2;
+    let mut c = Contour::with_capacity(n);
+    for i in 0..n {
+        c.push([xy[i * 2], xy[i * 2 + 1]]);
+    }
+    c
+}
+
+fn contour_to_xy(c: &Contour) -> Vec<f32> {
+    let mut out = Vec::with_capacity(c.len() * 2);
+    for p in c {
+        out.push(p[0]);
+        out.push(p[1]);
+    }
+    out
+}
+
+fn contour_bbox(c: &Contour) -> (f32, f32, f32, f32) {
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for p in c {
+        min_x = min_x.min(p[0]);
+        max_x = max_x.max(p[0]);
+        min_y = min_y.min(p[1]);
+        max_y = max_y.max(p[1]);
+    }
+    (min_x, max_x, min_y, max_y)
+}
+
+/// Thin horizontal slit from outside the outer ring into the hole (JS openHoleWithSlit).
+fn make_slit_contour(outer: &Contour, hole: &Contour) -> Contour {
+    let (min_x, max_x, min_y, max_y) = contour_bbox(outer);
+    let mut hy = 0.0f32;
+    for p in hole {
+        hy += p[1];
+    }
+    hy /= hole.len().max(1) as f32;
+    let mut best = hole[0];
+    let mut best_d = f32::INFINITY;
+    for p in hole {
+        let d = (p[0] - min_x) * (p[0] - min_x) + (p[1] - hy) * (p[1] - hy);
+        if d < best_d {
+            best_d = d;
+            best = *p;
+        }
+    }
+    let span = (max_x - min_x).max(max_y - min_y).max(1.0);
+    let eps = (span * 1e-5).max(1e-3);
+    let x0 = min_x - (span * 0.02).max(1.0);
+    vec![
+        [x0, best[1] - eps],
+        [best[0] + eps, best[1] - eps],
+        [best[0] + eps, best[1] + eps],
+        [x0, best[1] + eps],
+    ]
+}
+
+/// Open nested hole rings into simple C-rings via boolean slit cuts.
+fn open_shape_holes(mut shape: Shape) -> Vec<Contour> {
+    if shape.is_empty() {
+        return Vec::new();
+    }
+    let mut guard = 8usize;
+    while shape.len() > 1 && guard > 0 {
+        guard -= 1;
+        let hole = shape[1].clone();
+        if hole.len() < 3 {
+            shape.remove(1);
+            continue;
+        }
+        let slit = make_slit_contour(&shape[0], &hole);
+        let subj: Shapes = vec![shape.clone()];
+        let clip: Shapes = vec![vec![slit]];
+        let opened = subj.overlay(&clip, OverlayRule::Difference, FillRule::NonZero);
+        if opened.is_empty() {
+            break;
+        }
+        // Prefer the largest leftover shape; flatten if already simple.
+        shape = opened
+            .into_iter()
+            .max_by_key(|s| s.iter().map(|c| c.len()).sum::<usize>())
+            .unwrap_or_default();
+    }
+    if shape.len() <= 1 {
+        return shape;
+    }
+    // Still nested — emit each ring alone (outer solid is wrong but better than empty).
+    shape
+}
+
+/// Punch holes from an outer XY ring using i_overlay difference, then slit-open
+/// any remaining nested rings so the caller can ear-clip simple contours.
+/// Empty vec = hard failure (TS falls back to JS).
+pub fn punch_holes_to_simple_xy(outer_xy: &[f32], holes_xy: &[Vec<f32>]) -> Vec<Vec<f32>> {
+    if outer_xy.len() < 6 {
+        return Vec::new();
+    }
+    let mut acc: Shapes = vec![vec![xy_to_contour(outer_xy)]];
+    for h in holes_xy {
+        if h.len() < 6 {
+            continue;
+        }
+        let clip: Shapes = vec![vec![xy_to_contour(h)]];
+        acc = acc.overlay(&clip, OverlayRule::Difference, FillRule::NonZero);
+    }
+    if acc.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<Vec<f32>> = Vec::new();
+    for shape in acc {
+        for ring in open_shape_holes(shape) {
+            if ring.len() >= 3 {
+                out.push(contour_to_xy(&ring));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +285,26 @@ mod tests {
         assert!((max_x - 2.0).abs() < 0.05);
         assert!((min_y - 1.0).abs() < 0.05);
         assert!((max_y - 2.0).abs() < 0.05);
+    }
+
+    fn sample_circle(cx: f32, cy: f32, r: f32, n: usize) -> Vec<f32> {
+        let mut out = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let t = (i as f32 / n as f32) * std::f32::consts::PI * 2.0;
+            out.push(cx + t.cos() * r);
+            out.push(cy + t.sin() * r);
+        }
+        out
+    }
+
+    #[test]
+    fn punch_donut_yields_simple_ring() {
+        let outer = sample_circle(50.0, 50.0, 50.0, 64);
+        let hole = sample_circle(50.0, 50.0, 21.0, 48);
+        let rings = punch_holes_to_simple_xy(&outer, &[hole]);
+        assert!(!rings.is_empty(), "expected opened ring(s)");
+        assert!(rings[0].len() >= 6);
+        // Single C-ring should have more verts than outer alone (slit path).
+        assert!(rings.iter().map(|r| r.len()).sum::<usize>() >= outer.len());
     }
 }

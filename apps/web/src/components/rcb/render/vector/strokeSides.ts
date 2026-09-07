@@ -28,11 +28,51 @@ export function isRectLikeStrokeSidesShape(shapeType: string, nodeKey?: string):
 
 export type CornerRadiiLike = { tl: number; tr: number; br: number; bl: number };
 
+function clampRadii(w: number, h: number, r: CornerRadiiLike): CornerRadiiLike {
+  const maxR = Math.min(w, h) / 2;
+  return {
+    tl: Math.min(Math.max(0, r.tl), maxR),
+    tr: Math.min(Math.max(0, r.tr), maxR),
+    br: Math.min(Math.max(0, r.br), maxR),
+    bl: Math.min(Math.max(0, r.bl), maxR),
+  };
+}
+
+function nearlySame(a: Vec2, b: Vec2): boolean {
+  return Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4;
+}
+
+function pushPoint(poly: Vec2[], p: Vec2): void {
+  const last = poly[poly.length - 1];
+  if (last && nearlySame(last, p)) return;
+  poly.push({ x: p.x, y: p.y });
+}
+
+/** Densify a circular arc (inclusive of end; start may duplicate previous point). */
+function appendArc(
+  poly: Vec2[],
+  cx: number,
+  cy: number,
+  radius: number,
+  a0: number,
+  a1: number
+): void {
+  if (!(radius > 0.5)) return;
+  const sweep = a1 - a0;
+  const steps = Math.max(2, Math.ceil((Math.abs(sweep) / (Math.PI / 2)) * 8));
+  for (let i = 0; i <= steps; i += 1) {
+    const t = a0 + (sweep * i) / steps;
+    pushPoint(poly, { x: cx + radius * Math.cos(t), y: cy + radius * Math.sin(t) });
+  }
+}
+
 /**
  * Open edge polylines for partial rect strokes (local space).
  * Contiguous sides (CW: T→R→B→L, including wrap) merge into one polyline so
  * linejoin applies at shared corners. Isolated sides stay separate open segments.
- * - `null` → keep closed outline stroke (all sides, or has corner radius)
+ * Corner radii inset edge endpoints and include shared corner arcs when both
+ * adjacent sides are enabled (so partial sides work on rounded rects).
+ * - `null` → keep closed outline stroke (all sides)
  * - `[]` → no stroke (all sides off)
  * - otherwise → stroke only these open polylines (align forced to center, like SVG)
  */
@@ -47,31 +87,44 @@ export function rectStrokeSideRuns(
   const sides = resolveStrokeSideFlags(attrs);
   const all = sides.T && sides.R && sides.B && sides.L;
   const none = !sides.T && !sides.R && !sides.B && !sides.L;
-  const r = radii || { tl: 0, tr: 0, br: 0, bl: 0 };
-  const hasRadius = Math.max(r.tl, r.tr, r.br, r.bl) > 0.5;
-  if (all || hasRadius) return null;
+  if (all) return null;
   if (none) return [];
 
-  // Clockwise edge segments from each corner.
+  const r = clampRadii(w, h, radii || { tl: 0, tr: 0, br: 0, bl: 0 });
   const enabled = [sides.T, sides.R, sides.B, sides.L];
-  const segs: Array<[Vec2, Vec2]> = [
+
+  // Edge endpoints inset by corner radii (CW from top).
+  const edgeEnds: Array<[Vec2, Vec2]> = [
     [
-      { x: 0, y: 0 },
-      { x: w, y: 0 },
+      { x: r.tl, y: 0 },
+      { x: w - r.tr, y: 0 },
     ],
     [
-      { x: w, y: 0 },
-      { x: w, y: h },
+      { x: w, y: r.tr },
+      { x: w, y: h - r.br },
     ],
     [
-      { x: w, y: h },
-      { x: 0, y: h },
+      { x: w - r.br, y: h },
+      { x: r.bl, y: h },
     ],
     [
-      { x: 0, y: h },
-      { x: 0, y: 0 },
+      { x: 0, y: h - r.bl },
+      { x: 0, y: r.tl },
     ],
   ];
+
+  // Corner arc after side i (between side i and side i+1), CW.
+  const cornerAfter = (i: number, poly: Vec2[]) => {
+    if (i === 0 && r.tr > 0.5) {
+      appendArc(poly, w - r.tr, r.tr, r.tr, -Math.PI / 2, 0);
+    } else if (i === 1 && r.br > 0.5) {
+      appendArc(poly, w - r.br, h - r.br, r.br, 0, Math.PI / 2);
+    } else if (i === 2 && r.bl > 0.5) {
+      appendArc(poly, r.bl, h - r.bl, r.bl, Math.PI / 2, Math.PI);
+    } else if (i === 3 && r.tl > 0.5) {
+      appendArc(poly, r.tl, r.tl, r.tl, Math.PI, (3 * Math.PI) / 2);
+    }
+  };
 
   let start = 0;
   for (let i = 0; i < 4; i += 1) {
@@ -90,18 +143,23 @@ export function rectStrokeSideRuns(
       visited += 1;
       continue;
     }
-    const poly: Vec2[] = [
-      { ...segs[i]![0] },
-      { ...segs[i]![1] },
-    ];
-    let j = (i + 1) % 4;
-    let count = 1;
+    const poly: Vec2[] = [];
+    let j = i;
+    let count = 0;
     while (count < 4 && enabled[j]) {
-      poly.push({ ...segs[j]![1] });
-      j = (j + 1) % 4;
+      const [a, b] = edgeEnds[j]!;
+      pushPoint(poly, a);
+      pushPoint(poly, b);
+      const next = (j + 1) % 4;
+      if (enabled[next] && count + 1 < 4) {
+        // Shared corner between this side and the next enabled side.
+        cornerAfter(j, poly);
+      }
+      j = next;
       count += 1;
+      if (j === i) break;
     }
-    runs.push(poly);
+    if (poly.length >= 2) runs.push(poly);
     visited += count;
     i = j;
     if (i === start) break;

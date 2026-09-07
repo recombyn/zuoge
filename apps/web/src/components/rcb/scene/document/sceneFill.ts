@@ -487,6 +487,31 @@ export function parseFillType(raw: unknown): FillType {
   return 'solid';
 }
 
+/** Gradient / image / diffuse — not a single flat fill-color. */
+export function isRichFillType(type: FillType | string | null | undefined): boolean {
+  const t = parseFillType(type);
+  return (
+    t === 'linear' ||
+    t === 'radial' ||
+    t === 'angular' ||
+    t === 'image' ||
+    t === 'diffuse'
+  );
+}
+
+/**
+ * True when idle WebGL must not paint a solid `fill-color` mesh (would look white
+ * while the panel shows a gradient / image). Product path bakes Path2D ink to a
+ * per-node texture instead.
+ */
+export function nodeHasRichFill(node: SceneNodeInput | null | undefined): boolean {
+  if (!node) return false;
+  const attrs = node.attrs || {};
+  if (!boolEffectAttr(attrs['fill-enabled'], true)) return false;
+  if (!boolEffectAttr(attrs['fill-visible'], true)) return false;
+  return isRichFillType(attrs['fill-type']);
+}
+
 export function parseFillGradient(
   raw: unknown,
   typeHint?: Exclude<FillType, 'solid' | 'image'>,

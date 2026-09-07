@@ -30,8 +30,8 @@ import { generatorEmptyIconSize, generatorEmptyIconVisible } from '@/components/
 import {
   GENERATOR_EMPTY_ICON_COLOR,
 } from '@/components/rcb/core/generatorEmptyIcons';
-import { atlasBakePixelScale, SOA_ATLAS_INNER } from '@/components/rcb/render/webglInstanceAtlas';
-import { readDevicePixelRatio } from '@/components/rcb/core/dpr';
+import { atlasBakePixelScale, atlasZoomBucket, SOA_ATLAS_INNER } from '@/components/rcb/render/webglInstanceAtlas';
+import { readDevicePixelRatio, snapSceneStrokeAxis } from '@/components/rcb/core/dpr';
 import {
   hitTestUnifiedStackAtPoint,
   type SceneHitBox,
@@ -78,6 +78,7 @@ import {
   resolveBackdropBlur,
   hexWithOpacity,
   boolEffectAttr,
+  strokeVisualOutset,
   TEXT_FRAME_PADDING,
   textFrameCornerRadii,
   type InnerShadowSpec,
@@ -116,6 +117,7 @@ import {
   parseFillImageOffset,
   fillImageTileSize,
   buildImageAdjustFilterCss,
+  nodeHasRichFill,
   type FillStop,
   type FillGradient,
   type FillImageFit,
@@ -756,7 +758,7 @@ export function createCanvasSceneRenderer(deps: CanvasSceneRendererDeps): SceneR
       }
 
       if (paintGrid && shouldShowGrid(z)) {
-        drawSceneGrid(ctx, view, gridSize, z);
+        drawSceneGrid(ctx, view, gridSize, z, { panX: pan.x, panY: pan.y, dpr });
       }
 
       if (!(drawIdle || drawBasic || drawProxies)) {
@@ -828,35 +830,45 @@ export function sceneGridLineWidth(gridSize: number, zoom: number): number {
 
 /**
  * Scene-space lattice for the Canvas grid surface (camera already applied on ctx).
- * Axes are exact multiples of `gridSize` — same lattice as `snapCoordToGrid` /
- * pen tips. Do not device-snap axes here: that shifted lines off the snap grid
- * (visible mid-cell tips / off-grid plates at high zoom).
+ * Axes stay multiples of `gridSize` for snap tools. When `pan`/`dpr` are passed,
+ * each axis is nudged onto the device-pixel lattice (≤½ device px) so ~1px
+ * hairlines do not shimmer / break under AA while panning.
  */
 export function drawSceneGrid(
   ctx: CanvasRenderingContext2D,
   view: RcbBox,
   gridSize: number,
-  zoom = 1
+  zoom = 1,
+  opts?: { panX?: number; panY?: number; dpr?: number }
 ) {
   const g = gridSize > 0 ? gridSize : 1;
   const z = Math.max(0.05, zoom || 1);
+  const dpr = opts?.dpr && opts.dpr > 0 ? opts.dpr : 0;
+  const panX = Number(opts?.panX);
+  const panY = Number(opts?.panY);
+  const snapAxes =
+    dpr > 0 && Number.isFinite(panX) && Number.isFinite(panY);
   const x0 = Math.floor(view.x / g) * g;
   const y0 = Math.floor(view.y / g) * g;
   const x1 = view.x + view.width;
   const y1 = view.y + view.height;
-  const lineW = sceneGridLineWidth(g, z);
+  // ≥1 device px after the outer DPR transform — stable coverage, less ants.
+  const strokeCss = snapAxes ? Math.max(1 / dpr, 1) : 1;
+  const lineW = Math.min(g * 0.35, strokeCss / z);
 
   ctx.beginPath();
   ctx.strokeStyle = resolveGridStrokeStyle();
   ctx.lineWidth = lineW;
   ctx.lineCap = 'butt';
   for (let x = x0; x <= x1 + 1e-6; x += g) {
-    ctx.moveTo(x, y0);
-    ctx.lineTo(x, y1);
+    const sx = snapAxes ? snapSceneStrokeAxis(x, z, panX, dpr, strokeCss) : x;
+    ctx.moveTo(sx, y0);
+    ctx.lineTo(sx, y1);
   }
   for (let y = y0; y <= y1 + 1e-6; y += g) {
-    ctx.moveTo(x0, y);
-    ctx.lineTo(x1, y);
+    const sy = snapAxes ? snapSceneStrokeAxis(y, z, panY, dpr, strokeCss) : y;
+    ctx.moveTo(x0, sy);
+    ctx.lineTo(x1, sy);
   }
   ctx.stroke();
 }
@@ -2773,6 +2785,131 @@ export function bakeMediaInkForAtlas(
     return null;
   }
   return canvas;
+}
+
+export type ShapeRichInkBake = {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  /** Scene-unit pad around the geometry AABB (stroke outside / AA). */
+  pad: number;
+  worldW: number;
+  worldH: number;
+};
+
+/**
+ * Content key for rich-fill shape texture uploads (gradient / image / diffuse).
+ * Includes zoom bucket so Path2D densify / stroke AA restamps with coverage.
+ */
+export function richShapeTextureFingerprint(
+  node: SceneNodeInput,
+  nodeId: string,
+  width: number,
+  height: number,
+  zoom = 1,
+  pad = 0
+): string {
+  const id = String(nodeId || node.id || '').trim() || 'unknown';
+  const a = node.attrs || {};
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const fillType = parseFillType(a['fill-type']);
+  const gradRaw = a['fill-gradient'] != null ? String(a['fill-gradient']) : '';
+  const gradPart =
+    gradRaw.length > 140 ? `${gradRaw.slice(0, 100)}#${gradRaw.length}` : gradRaw;
+  const imgRaw = a['fill-image-src'] != null ? String(a['fill-image-src']) : '';
+  const imgPart =
+    imgRaw.length > 120 ? `${imgRaw.slice(0, 100)}#${imgRaw.length}` : imgRaw;
+  const imgXform = `${a['fill-image-fit']}|${a['fill-image-rotate']}|${a['fill-image-scale']}|${a['fill-image-offset-x']}|${a['fill-image-offset-y']}|${a['fill-opacity']}`;
+  const stroke = `${a['border-color']}|${a['border-width']}|${a.strokeLinejoin}|${a.strokeLinecap}|${a.strokeAlign}|${a.strokeStyle}|${a.T}|${a.R}|${a.B}|${a.L}`;
+  const rad = `${a.cornerRadius}|${a.radiusTL}|${a.radiusTR}|${a.radiusBR}|${a.radiusBL}`;
+  return `rich:${id}:${fillType}:${gradPart}:${imgPart}:${imgXform}:${stroke}:${rad}:w${w}:h${h}:p${pad}:z${atlasZoomBucket(zoom)}`;
+}
+
+/**
+ * Bake gradient / image / diffuse shape ink for WebGL textured quads.
+ * Product WebGL solid meshes only carry flat fill-color — rich fills must
+ * Path2D-paint into a texture (same kernel as Canvas2D idle / SVG host).
+ * Returns null while an image fill is still decoding (caller should bump paint).
+ */
+export function bakeShapeRichInkForWebgl(
+  node: SceneNodeInput,
+  width: number,
+  height: number,
+  zoom = 1,
+  dpr = 1
+): ShapeRichInkBake | null {
+  if (!nodeHasRichFill(node)) return null;
+  const attrs = node.attrs || {};
+  const fillType = parseFillType(attrs['fill-type']);
+  if (fillType === 'image') {
+    const src = String(attrs['fill-image-src'] || '').trim();
+    if (!src) return null;
+    if (isFillImageWebglUnsafe(src)) return null;
+    if (!getFillImageReady(src)) return null;
+  }
+
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const pad = Math.max(0, Math.ceil(strokeVisualOutset(node) + 1));
+  const worldW = w + pad * 2;
+  const worldH = h + pad * 2;
+  const z = Math.max(0.05, Number(zoom) || 1) * Math.max(0.5, Number(dpr) || 1);
+  const scale = Math.min(
+    atlasBakePixelScale(worldW, worldH, z),
+    512 / Math.max(worldW, worldH, 1)
+  );
+  const bw = Math.max(1, Math.round(worldW * scale));
+  const bh = Math.max(1, Math.round(worldH * scale));
+
+  let canvas: HTMLCanvasElement | OffscreenCanvas;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    canvas = new OffscreenCanvas(bw, bh);
+  } else if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas');
+    c.width = bw;
+    c.height = bh;
+    canvas = c;
+  } else {
+    return null;
+  }
+  const ctx = canvas.getContext('2d') as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) return null;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, worldW, worldH);
+  ctx.save();
+  ctx.translate(pad, pad);
+
+  const key = String(node.key || '');
+  const shapeType = String(attrs.shapeType || key || '').toLowerCase();
+  const pathLike =
+    shapeType === 'pencil' ||
+    shapeType === 'pen' ||
+    shapeType === 'path' ||
+    shapeType === 'line' ||
+    shapeType === 'arrow' ||
+    key === 'path' ||
+    Boolean(String(attrs.path || '').trim());
+
+  if (pathLike) {
+    paintCanvasPathInk(ctx as CanvasRenderingContext2D, {
+      node,
+      width: w,
+      height: h,
+      opacity: 1,
+      zoom: Math.max(0.05, Number(zoom) || 1),
+    });
+  } else {
+    paintCanvasShapeInk(ctx as CanvasRenderingContext2D, {
+      node,
+      width: w,
+      height: h,
+      opacity: 1,
+    });
+  }
+  ctx.restore();
+  return { canvas, pad, worldW, worldH };
 }
 
 /**

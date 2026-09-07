@@ -60,7 +60,7 @@
   },
   "scripts": {
     "postinstall": "node ./scripts/copy-ffmpeg-core.mjs",
-    "predev": "node ./scripts/copy-ffmpeg-core.mjs",
+    "predev": "node ./scripts/copy-ffmpeg-core.mjs && node ./scripts/build-wasm.mjs",
     "prebuild": "node ./scripts/copy-ffmpeg-core.mjs && node ./scripts/build-wasm.mjs",
     "build:wasm": "node ./scripts/build-wasm.mjs",
     "dev": "vite",

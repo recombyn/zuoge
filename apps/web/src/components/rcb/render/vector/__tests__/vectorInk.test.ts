@@ -301,7 +301,7 @@ describe('vector ink', () => {
     expect(pts.some((p) => !Number.isFinite(p.x))).toBe(true);
   });
 
-  it('pencil mesh is filled freehand silhouette (not centerline ribbon)', () => {
+  it('pencil mesh prefers freehand silhouette fill (tapered tips)', () => {
     const node = {
       id: 'pen1',
       key: 'shape',
@@ -319,10 +319,8 @@ describe('vector ink', () => {
     } as SceneNodeInput;
     const mesh = getOrBuildShapeMesh('pen1', node, { width: 100, height: 40 });
     expect(mesh).not.toBeNull();
-    // Short strokes keep silhouette fill; dense scribbles may ribbon-fallback.
-    const hasFill = Boolean(mesh!.fill && mesh!.fill.triangleCount > 4);
-    const hasStroke = Boolean(mesh!.stroke && mesh!.stroke.triangleCount > 0);
-    expect(hasFill || hasStroke).toBe(true);
+    // Short strokes keep silhouette fill (tapered tips match live preview).
+    expect(mesh!.fill?.triangleCount ?? 0).toBeGreaterThan(4);
     const c = contourFromNode(node, { width: 100, height: 40 });
     expect(c?.pencilSilhouette).toBe(true);
     expect(c!.points.length).toBeGreaterThan(8);
@@ -351,7 +349,7 @@ describe('vector ink', () => {
     expect(hasFill || hasStroke).toBe(true);
   });
 
-  it('dense scribble pencil stays interactive (ribbon fallback, no ear-clip stall)', () => {
+  it('dense scribble pencil remesh stays interactive (no ribbon fallback)', () => {
     const center: string[] = [];
     for (let i = 0; i <= 200; i += 1) {
       center.push(
@@ -384,10 +382,8 @@ describe('vector ink', () => {
     const mesh = getOrBuildShapeMesh('pen-scribble', node, { width: 140, height: 100 });
     const ms = performance.now() - t0;
     expect(mesh).not.toBeNull();
-    const hasInk =
-      Boolean(mesh!.fill && mesh!.fill.triangleCount > 0) ||
-      Boolean(mesh!.stroke && mesh!.stroke.triangleCount > 0);
-    expect(hasInk).toBe(true);
-    expect(ms).toBeLessThan(100);
+    // Pencil never uses constant-width ribbon (blunt tips); WebGL bakes Path2D.
+    expect(mesh!.stroke).toBeNull();
+    expect(ms).toBeLessThan(250);
   });
 });

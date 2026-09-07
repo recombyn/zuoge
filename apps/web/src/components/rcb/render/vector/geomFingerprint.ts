@@ -4,7 +4,8 @@
  */
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
 import { getPencilBrushPaintRev } from '@/components/rcb/tools/pencilBrushes';
-import { densifyLodBucket } from '@/components/rcb/render/vector/densifyPathDJs';
+import { densifyLodBucketSticky } from '@/components/rcb/render/vector/densifyPathDJs';
+import { strokeCoverageFingerprintKey } from '@/components/rcb/render/strokeScreenFloor';
 
 export function shapeGeomFingerprint(
   node: SceneNodeInput | null | undefined,
@@ -19,19 +20,24 @@ export function shapeGeomFingerprint(
   const lod =
     opts?.lodBucket != null
       ? Number(opts.lodBucket)
-      : densifyLodBucket(opts?.zoom ?? 1, opts?.dpr ?? 1);
+      : densifyLodBucketSticky(String(node.id || ''), opts?.zoom ?? 1, opts?.dpr ?? 1);
   const authoredSw = Math.max(0, Number(attrs['border-width'] ?? attrs.strokeWidth) || 0);
   // Baked freehand silhouette: skip zoom LOD remesh (outline already dense).
   const pencilBaked = t === 'pencil' && String(attrs.pencilOutlinePath || '').trim();
   const flatKey = pencilBaked ? 'flat:pencilBake' : `flat:${lod}`;
+  // Pencil silhouette has no stroke ribbon — do not hairline-remesh on zoom.
+  const strokeCovKey =
+    t === 'pencil'
+      ? `sw:${authoredSw.toFixed(3)}`
+      : strokeCoverageFingerprintKey(authoredSw, opts?.zoom ?? 1, opts?.dpr ?? 1);
   const parts = [
-    'strokeTess:v11-submitGt1px',
+    'strokeTess:v12-coverageHairline',
     'densify:v4',
     'arrowOpenChevron:v1',
     'pencilSil:v2-bake',
     flatKey,
-    // Geometric authored width only — hairline submit is draw-time, not remesh.
-    `sw:${authoredSw.toFixed(3)}`,
+    // Sub-pixel: remesh at quantized hairline width (Skia coverage); else geometric.
+    strokeCovKey,
     key,
     t,
     w.toFixed(2),

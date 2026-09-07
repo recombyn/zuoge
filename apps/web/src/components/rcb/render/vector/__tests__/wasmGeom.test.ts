@@ -103,7 +103,16 @@ describe('wasm geom adapter', () => {
           linejoin: (linejoin as 'miter' | 'round' | 'bevel') || 'miter',
           miterLimit: miterLimit || 100,
         });
-        return m ? m.positions : new Float32Array(0);
+        if (!m) return new Float32Array(0);
+        // Interleaved x,y,edge — matches rebuilt WASM stroke format.
+        const n = m.positions.length / 2;
+        const out = new Float32Array(n * 3);
+        for (let i = 0; i < n; i += 1) {
+          out[i * 3] = m.positions[i * 2]!;
+          out[i * 3 + 1] = m.positions[i * 2 + 1]!;
+          out[i * 3 + 2] = m.edges?.[i] ?? 0;
+        }
+        return out;
       },
       tessellate_batch_fill: (xyAll, counts) => {
         const out: number[] = [];
@@ -135,6 +144,7 @@ describe('wasm geom adapter', () => {
     const strokeJs = tessellateStroke(pts, { width: 2, closed: true })!;
     const strokeWa = tessellateStrokeWasm(pts, { width: 2, closed: true })!;
     almostEqualFlat(strokeJs.positions, strokeWa.positions);
+    expect(strokeWa.edges?.length).toBe(strokeWa.positions.length / 2);
   });
 
   it('tessellateFillWithHoles emits triangles for donut-like rings', () => {
@@ -158,12 +168,13 @@ describe('wasm geom adapter', () => {
     expect(via!.triangleCount).toBeGreaterThanOrEqual(1);
   });
 
-  it('falls back to JS when wasm hole fill returns empty (shipped keyhole bug)', () => {
+  it('rejects skeletal wasm hole mesh and falls back to JS', () => {
     __setWasmGeomApiForTests({
       densify_path_d: () => new Float32Array(0),
       tessellate_fill: () => new Float32Array(0),
-      // Shipped wasm keyhole path is broken; fillMeshFor must ignore it for holes.
-      tessellate_fill_with_holes: () => new Float32Array(0),
+      // Single triangle — must not be accepted as a punched hole fill.
+      tessellate_fill_with_holes: () =>
+        new Float32Array([0, 0, 100, 0, 0, 100]),
       tessellate_stroke: () => new Float32Array(0),
       tessellate_batch_fill: () => new Float32Array(0),
     });
@@ -185,6 +196,9 @@ describe('wasm geom adapter', () => {
       ]
     );
     expect(via?.triangleCount ?? 0).toBeGreaterThan(2);
+    // Must not be the single-triangle WASM stub above.
+    expect(via!.triangleCount).toBeGreaterThan(1);
+    expect(via!.positions.length).toBeGreaterThan(6);
 
     const pts = densifyPathDJs('M0 0H100V100H0Z M30 30H70V70H30Z', 0.5);
     const shaped = buildShapeMeshes(pts, {

@@ -164,87 +164,6 @@ fn tessellate_fill_inner(ring: &[f32]) -> Vec<f32> {
     tris
 }
 
-/// Bridge each hole onto the outer ring (nearest vertex), then ear-clip.
-/// Uses a hairline lateral offset so the corridor has non-zero area — a
-/// zero-width keyhole collapses ear-clip to 0 triangles.
-fn bridge_holes(outer: &[f32], holes: &[Vec<f32>]) -> Vec<f32> {
-    let mut ring = outer.to_vec();
-    let outer_a = ring_area(&ring);
-    for hole_in in holes {
-        if hole_in.len() < 6 {
-            continue;
-        }
-        let mut hole = hole_in.clone();
-        let hole_a = ring_area(&hole);
-        if hole_a * outer_a > 0.0 {
-            // reverse xy pairs
-            let n = hole.len() / 2;
-            for i in 0..n / 2 {
-                let j = n - 1 - i;
-                hole.swap(i * 2, j * 2);
-                hole.swap(i * 2 + 1, j * 2 + 1);
-            }
-        }
-        let hn = hole.len() / 2;
-        let mut best_o = 0usize;
-        let mut best_h = 0usize;
-        let mut best_d = f32::INFINITY;
-        let on = ring.len() / 2;
-        for oi in 0..on {
-            let (ox, oy) = get_xy(&ring, oi);
-            for hi in 0..hn {
-                let (hx, hy) = get_xy(&hole, hi);
-                let d = (ox - hx) * (ox - hx) + (oy - hy) * (oy - hy);
-                if d < best_d {
-                    best_d = d;
-                    best_o = oi;
-                    best_h = hi;
-                }
-            }
-        }
-        let (ox, oy) = get_xy(&ring, best_o);
-        let (hx0, hy0) = get_xy(&hole, best_h);
-        let dx = hx0 - ox;
-        let dy = hy0 - oy;
-        let len = (dx * dx + dy * dy).sqrt().max(1e-6);
-        // Perpendicular hairline (~0.02 scene units, clamped by span).
-        let span = {
-            let mut min_x = f32::INFINITY;
-            let mut max_x = f32::NEG_INFINITY;
-            let mut min_y = f32::INFINITY;
-            let mut max_y = f32::NEG_INFINITY;
-            for i in 0..on {
-                let (x, y) = get_xy(&ring, i);
-                min_x = min_x.min(x);
-                max_x = max_x.max(x);
-                min_y = min_y.min(y);
-                max_y = max_y.max(y);
-            }
-            (max_x - min_x).max(max_y - min_y).max(1.0)
-        };
-        let eps = (span * 1e-5).max(0.02);
-        let nx = (-dy / len) * eps;
-        let ny = (dx / len) * eps;
-
-        let mut insert: Vec<f32> = Vec::new();
-        // Outbound bridge edge (offset +n).
-        insert.push(ox + nx);
-        insert.push(oy + ny);
-        for k in 0..=hn {
-            let hi = (best_h + k) % hn;
-            let (hx, hy) = get_xy(&hole, hi);
-            insert.push(hx + nx);
-            insert.push(hy + ny);
-        }
-        // Inbound bridge edge (offset -n) back to outer vertex.
-        insert.push(ox - nx);
-        insert.push(oy - ny);
-        let at = (best_o + 1) * 2;
-        ring.splice(at..at, insert);
-    }
-    ring
-}
-
 fn left_normal(dx: f32, dy: f32) -> (f32, f32) {
     let len = (dx * dx + dy * dy).sqrt().max(1e-12);
     let nx = dx / len;
@@ -266,22 +185,41 @@ struct SegOff {
     r1y: f32,
 }
 
-fn push_tri(tris: &mut Vec<f32>, ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32) {
-    tris.extend_from_slice(&[ax, ay, bx, by, cx, cy]);
+/// Emit one triangle as interleaved x,y,edge triples (fragment AA rims ±1, center 0).
+fn push_tri_e(
+    out: &mut Vec<f32>,
+    ax: f32,
+    ay: f32,
+    ea: f32,
+    bx: f32,
+    by: f32,
+    eb: f32,
+    cx: f32,
+    cy: f32,
+    ec: f32,
+) {
+    out.extend_from_slice(&[ax, ay, ea, bx, by, eb, cx, cy, ec]);
 }
 
-fn push_quad(tris: &mut Vec<f32>, s: &SegOff) {
-    push_tri(tris, s.l0x, s.l0y, s.r0x, s.r0y, s.l1x, s.l1y);
-    push_tri(tris, s.l1x, s.l1y, s.r0x, s.r0y, s.r1x, s.r1y);
+fn push_quad_e(out: &mut Vec<f32>, s: &SegOff) {
+    // Four tris sharing the centerline (edge=0) — matches TS tessellateStroke.
+    let c0x = (s.l0x + s.r0x) * 0.5;
+    let c0y = (s.l0y + s.r0y) * 0.5;
+    let c1x = (s.l1x + s.r1x) * 0.5;
+    let c1y = (s.l1y + s.r1y) * 0.5;
+    push_tri_e(out, s.l0x, s.l0y, -1.0, c0x, c0y, 0.0, s.l1x, s.l1y, -1.0);
+    push_tri_e(out, s.l1x, s.l1y, -1.0, c0x, c0y, 0.0, c1x, c1y, 0.0);
+    push_tri_e(out, c0x, c0y, 0.0, s.r0x, s.r0y, 1.0, c1x, c1y, 0.0);
+    push_tri_e(out, c1x, c1y, 0.0, s.r0x, s.r0y, 1.0, s.r1x, s.r1y, 1.0);
 }
 
-fn push_bevel_wedges(tris: &mut Vec<f32>, cx: f32, cy: f32, a: &SegOff, b: &SegOff) {
-    push_tri(tris, cx, cy, a.l1x, a.l1y, b.l0x, b.l0y);
-    push_tri(tris, cx, cy, a.r1x, a.r1y, b.r0x, b.r0y);
+fn push_bevel_wedges_e(out: &mut Vec<f32>, cx: f32, cy: f32, a: &SegOff, b: &SegOff) {
+    push_tri_e(out, cx, cy, 0.0, a.l1x, a.l1y, -1.0, b.l0x, b.l0y, -1.0);
+    push_tri_e(out, cx, cy, 0.0, a.r1x, a.r1y, 1.0, b.r0x, b.r0y, 1.0);
 }
 
-fn fan_outer_arc(
-    tris: &mut Vec<f32>,
+fn fan_outer_arc_e(
+    out: &mut Vec<f32>,
     cx: f32,
     cy: f32,
     from_x: f32,
@@ -289,6 +227,7 @@ fn fan_outer_arc(
     to_x: f32,
     to_y: f32,
     radius: f32,
+    rim_edge: f32,
 ) {
     let a0 = (from_y - cy).atan2(from_x - cx);
     let a1 = (to_y - cy).atan2(to_x - cx);
@@ -318,20 +257,28 @@ fn fan_outer_arc(
             px = to_x;
             py = to_y;
         }
-        push_tri(tris, cx, cy, prev_x, prev_y, px, py);
+        push_tri_e(out, cx, cy, 0.0, prev_x, prev_y, rim_edge, px, py, rim_edge);
         prev_x = px;
         prev_y = py;
     }
 }
 
-fn push_round_join(tris: &mut Vec<f32>, cx: f32, cy: f32, a: &SegOff, b: &SegOff, hl: f32, hr: f32) {
+fn push_round_join_e(out: &mut Vec<f32>, cx: f32, cy: f32, a: &SegOff, b: &SegOff, hl: f32, hr: f32) {
     let cross = a.n0x * b.n0y - a.n0y * b.n0x;
-    if cross < 0.0 {
-        push_tri(tris, cx, cy, a.r1x, a.r1y, b.r0x, b.r0y);
-        fan_outer_arc(tris, cx, cy, a.l1x, a.l1y, b.l0x, b.l0y, hl.max(1e-4));
+    // Prefer the side with stroke extent (inside/outside align), else geometric outer.
+    let round_left = if hl > hr + 1e-6 {
+        true
+    } else if hr > hl + 1e-6 {
+        false
     } else {
-        push_tri(tris, cx, cy, a.l1x, a.l1y, b.l0x, b.l0y);
-        fan_outer_arc(tris, cx, cy, a.r1x, a.r1y, b.r0x, b.r0y, hr.max(1e-4));
+        cross < 0.0
+    };
+    if round_left {
+        push_tri_e(out, cx, cy, 0.0, a.r1x, a.r1y, 1.0, b.r0x, b.r0y, 1.0);
+        fan_outer_arc_e(out, cx, cy, a.l1x, a.l1y, b.l0x, b.l0y, hl.max(1e-4), -1.0);
+    } else {
+        push_tri_e(out, cx, cy, 0.0, a.l1x, a.l1y, -1.0, b.l0x, b.l0y, -1.0);
+        fan_outer_arc_e(out, cx, cy, a.r1x, a.r1y, b.r0x, b.r0y, hr.max(1e-4), 1.0);
     }
 }
 
@@ -375,6 +322,7 @@ fn try_miter_tips(
 }
 
 /// Miter joins by default (matches TS / Canvas attrs). Bevel only past miterLimit.
+/// Returns interleaved x,y,edge floats (3 per vertex) for mesh fragment AA.
 fn tessellate_stroke_inner(
     xy: &[f32],
     width: f32,
@@ -387,12 +335,13 @@ fn tessellate_stroke_inner(
         return Vec::new();
     }
     let half = width * 0.5;
+    // Full shift: inside/outside put the entire ribbon on one side (matches TS).
     let mut bias = 0.0f32;
     let a = align.to_ascii_lowercase();
     if a == "inside" {
-        bias = -half * 0.5;
+        bias = -half;
     } else if a == "outside" {
-        bias = half * 0.5;
+        bias = half;
     }
     let hl = half + bias;
     let hr = half - bias;
@@ -440,7 +389,7 @@ fn tessellate_stroke_inner(
         return Vec::new();
     }
 
-    let mut tris: Vec<f32> = Vec::new();
+    let mut out: Vec<f32> = Vec::new();
     let join_count = if closed {
         segs.len()
     } else {
@@ -475,18 +424,18 @@ fn tessellate_stroke_inner(
                 continue;
             }
         }
-        let a = segs[a_idx];
-        let b = segs[b_idx];
+        let a_seg = segs[a_idx];
+        let b_seg = segs[b_idx];
         if want_round {
-            push_round_join(&mut tris, cx, cy, &a, &b, hl, hr);
+            push_round_join_e(&mut out, cx, cy, &a_seg, &b_seg, hl, hr);
             continue;
         }
-        push_bevel_wedges(&mut tris, cx, cy, &a, &b);
+        push_bevel_wedges_e(&mut out, cx, cy, &a_seg, &b_seg);
     }
     for s in &segs {
-        push_quad(&mut tris, s);
+        push_quad_e(&mut out, s);
     }
-    tris
+    out
 }
 
 /// SVG elliptical arc → polyline samples (matches densifyPathDJs).
@@ -873,9 +822,13 @@ pub fn tessellate_fill(xy: &[f32]) -> Vec<f32> {
 }
 
 /// `holes_flat`: concatenated hole rings; `hole_counts`: vertex count per hole.
+/// Uses i_overlay difference + slit (not keyhole bridge) so donuts stay hollow.
 #[wasm_bindgen]
 pub fn tessellate_fill_with_holes(outer: &[f32], holes_flat: &[f32], hole_counts: &[u32]) -> Vec<f32> {
     let outer_c = clean_ring(outer);
+    if outer_c.len() < 6 {
+        return Vec::new();
+    }
     let mut holes: Vec<Vec<f32>> = Vec::new();
     let mut off = 0usize;
     for &c in hole_counts {
@@ -886,8 +839,18 @@ pub fn tessellate_fill_with_holes(outer: &[f32], holes_flat: &[f32], hole_counts
         }
         off = end;
     }
-    let bridged = bridge_holes(&outer_c, &holes);
-    tessellate_fill_inner(&bridged)
+    if holes.is_empty() {
+        return tessellate_fill_inner(&outer_c);
+    }
+    let rings = boolean::punch_holes_to_simple_xy(&outer_c, &holes);
+    if rings.is_empty() {
+        return Vec::new();
+    }
+    let mut tris: Vec<f32> = Vec::new();
+    for ring in rings {
+        tris.extend(tessellate_fill_inner(&ring));
+    }
+    tris
 }
 
 #[wasm_bindgen]
@@ -983,5 +946,61 @@ mod tests {
         let xy = [0.0, 0.0, 40.0, 0.0, 40.0, 20.0];
         let t = tessellate_stroke(&xy, 4.0, false, "center", "miter", 100.0);
         assert!(t.len() >= 12);
+    }
+}
+
+#[cfg(test)]
+mod hole_fill_tests {
+    use super::*;
+
+    fn sample_circle(cx: f32, cy: f32, r: f32, n: usize) -> Vec<f32> {
+        let mut out = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let t = (i as f32 / n as f32) * std::f32::consts::PI * 2.0;
+            out.push(cx + t.cos() * r);
+            out.push(cy + t.sin() * r);
+        }
+        out
+    }
+
+    fn point_in_any_tri(tris: &[f32], hx: f32, hy: f32) -> bool {
+        let mut i = 0usize;
+        while i + 5 < tris.len() {
+            let ax = tris[i];
+            let ay = tris[i + 1];
+            let bx = tris[i + 2];
+            let by = tris[i + 3];
+            let cx = tris[i + 4];
+            let cy = tris[i + 5];
+            let v0x = cx - ax;
+            let v0y = cy - ay;
+            let v1x = bx - ax;
+            let v1y = by - ay;
+            let v2x = hx - ax;
+            let v2y = hy - ay;
+            let dot00 = v0x * v0x + v0y * v0y;
+            let dot01 = v0x * v1x + v0y * v1y;
+            let dot02 = v0x * v2x + v0y * v2y;
+            let dot11 = v1x * v1x + v1y * v1y;
+            let dot12 = v1x * v2x + v1y * v2y;
+            let inv = 1.0 / (dot00 * dot11 - dot01 * dot01 + 1e-20);
+            let u = (dot11 * dot02 - dot01 * dot12) * inv;
+            let v = (dot00 * dot12 - dot01 * dot02) * inv;
+            if u >= 0.0 && v >= 0.0 && u + v <= 1.0 {
+                return true;
+            }
+            i += 6;
+        }
+        false
+    }
+
+    #[test]
+    fn donut_fill_hollow_and_covers_ring() {
+        let outer = sample_circle(100.0, 100.0, 100.0, 64);
+        let hole = sample_circle(100.0, 100.0, 42.0, 48);
+        let tris = tessellate_fill_with_holes(&outer, &hole, &[48]);
+        assert!(tris.len() >= 6 * 8, "tris floats {}", tris.len());
+        assert!(!point_in_any_tri(&tris, 100.0, 100.0), "hole center must be empty");
+        assert!(point_in_any_tri(&tris, 100.0, 20.0), "outer band must be filled");
     }
 }

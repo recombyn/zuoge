@@ -99,6 +99,40 @@ export async function tessellateBatchFillAsync(
   }
 }
 
+/**
+ * Tessellate one stroke centerline on the geom Worker (off main thread).
+ * Returns interleaved x,y,edge Float32Array or null if Worker unavailable.
+ */
+export async function strokeTessellateAsync(opts: {
+  xy: Float32Array;
+  width: number;
+  closed?: boolean;
+  align?: number;
+  linejoin?: number;
+  miterLimit?: number;
+}): Promise<Float32Array | null> {
+  const xy = opts.xy;
+  if (!xy || xy.length < 4 || !(opts.width > 0)) return null;
+  try {
+    await callWorker({ type: 'init' });
+    const res = await callWorker<{ packed: Float32Array }>(
+      {
+        type: 'stroke',
+        xy,
+        width: opts.width,
+        closed: Boolean(opts.closed),
+        align: Math.max(0, Math.min(2, Math.floor(opts.align ?? 0))),
+        linejoin: Math.max(0, Math.min(2, Math.floor(opts.linejoin ?? 0))),
+        miterLimit: Number.isFinite(opts.miterLimit) ? Number(opts.miterLimit) : 4,
+      },
+      [xy.buffer]
+    );
+    return res.packed ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export type TextGlyphOutlineOpts = {
   rgba: Uint8ClampedArray | Uint8Array;
   width: number;

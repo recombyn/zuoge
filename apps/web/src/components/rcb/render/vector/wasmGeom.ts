@@ -133,6 +133,32 @@ function meshFromFlat(flat: ArrayLike<number>): FillMesh | null {
   return { positions, triangleCount: positions.length / 6 };
 }
 
+/**
+ * Unpack WASM stroke: interleaved x,y,edge (3 floats/vert). Legacy packs that
+ * are only x,y pairs fall back to positions without edges (caller may JS-AA).
+ */
+function strokeMeshFromWasmFlat(flat: ArrayLike<number>): StrokeMesh | null {
+  if (flat.length < 9) return null;
+  // Edged format length is multiple of 3 and not of 2-only legacy (ambiguous
+  // when both divide — prefer edged when len%3===0 && (len/3)%3===0).
+  const asEdged = flat.length % 3 === 0 && (flat.length / 3) % 3 === 0;
+  if (asEdged) {
+    const n = flat.length / 3;
+    const positions = new Float32Array(n * 2);
+    const edges = new Float32Array(n);
+    for (let i = 0; i < n; i += 1) {
+      positions[i * 2] = Number(flat[i * 3]);
+      positions[i * 2 + 1] = Number(flat[i * 3 + 1]);
+      edges[i] = Number(flat[i * 3 + 2]);
+    }
+    return { positions, edges, triangleCount: n / 3 };
+  }
+  if (flat.length % 2 !== 0 || flat.length < 6) return null;
+  // Legacy positions-only — synthesize ±1 rim edges from triangle winding is
+  // unreliable; return null so JS tessellator owns AA.
+  return null;
+}
+
 function packHoles(holes: Vec2[][]): { flat: Float32Array; counts: Uint32Array } {
   const counts: number[] = [];
   const xy: number[] = [];
@@ -288,8 +314,23 @@ export function tessellateStrokeWasm(
   opts: StrokeTessOpts
 ): StrokeMesh | null {
   const t0 = geomNow();
-  // JS tessellator emits per-vertex `edges` for mesh stroke AA.
-  const mesh = tessellateStrokeJs(points, opts);
+  let mesh: StrokeMesh | null = null;
+  if (wasmLive() && points.length >= 2) {
+    try {
+      const raw = api!.tessellate_stroke(
+        pointsToFlat(points),
+        Math.max(0, Number(opts.width) || 0),
+        Boolean(opts.closed),
+        String(opts.align || 'center'),
+        String(opts.linejoin || 'miter'),
+        Math.max(1, Number(opts.miterLimit) || 100)
+      );
+      mesh = strokeMeshFromWasmFlat(raw);
+    } catch {
+      mesh = null;
+    }
+  }
+  if (!mesh) mesh = tessellateStrokeJs(points, opts);
   recordOp('stroke', t0, points.length, 0, mesh?.triangleCount ?? 0);
   return mesh;
 }
@@ -299,9 +340,22 @@ function fillMeshFor(
   holes: Vec2[][] | undefined
 ): FillMesh | null {
   const hasHoles = Boolean(holes?.length);
-  // WASM keyhole bridge + ear-clip returns 0 tris for donuts (boolean subtract,
-  // ellipse inner ratio). Always use the JS slit/boolean path for holes.
-  if (hasHoles) return tessellateFillWithHolesJs(points, holes!);
+  if (hasHoles) {
+    // Prefer WASM boolean-difference + slit; reject skeletal failures.
+    if (wasmLive()) {
+      try {
+        const { flat, counts } = packHoles(holes!);
+        const mesh = meshFromFlat(
+          api!.tessellate_fill_with_holes(pointsToFlat(points), flat, counts)
+        );
+        const minTris = Math.max(4, Math.floor(points.length / 4));
+        if (mesh && mesh.triangleCount >= minTris) return mesh;
+      } catch {
+        /* fall through */
+      }
+    }
+    return tessellateFillWithHolesJs(points, holes!);
+  }
 
   if (wasmLive()) {
     try {
@@ -318,9 +372,7 @@ function fillMeshFor(
 
 function strokeMeshFor(points: Vec2[], opts: StrokeTessOpts): StrokeMesh | null {
   if (points.length < 2) return null;
-  // Prefer JS so stroke meshes carry `edges` for fragment AA. WASM stroke
-  // returns positions only (no rim attribute) and would paint hard stairs.
-  return tessellateStrokeJs(points, opts);
+  return tessellateStrokeWasm(points, opts);
 }
 
 /** Tessellate a centerline, optionally splitting into SVG dash segments. */

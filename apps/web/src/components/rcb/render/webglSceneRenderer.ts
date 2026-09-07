@@ -47,15 +47,19 @@ import {
 import {
   bakeAudioInkForAtlas,
   bakeMediaInkForAtlas,
+  bakeShapeRichInkForWebgl,
   bumpSceneCanvasIdlePaint,
   getSceneCanvasIdlePaint,
   isFillImageWebglUnsafe,
   hitTestWithSpatialIndex,
   mediaPaintSrc,
+  richShapeTextureFingerprint,
   type CanvasSceneRendererDeps,
   type SceneRenderRequest,
   type SceneRenderer,
 } from '@/components/rcb/render/sceneRenderer';
+import { nodeHasRichFill } from '@/components/rcb/scene/document/sceneFill';
+import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
 import { getOrBuildShapeMesh } from '@/components/rcb/render/vector/meshCache';
 import { appendMeshLocal } from '@/components/rcb/render/vector/appendMesh';
 import {
@@ -90,7 +94,6 @@ import {
   adaptivePathStrokeMaxSegs,
   strokeRibbonPaint,
 } from '@/components/rcb/render/strokeScreenFloor';
-import { parseLayerOpacity } from '@/components/rcb/selection/chrome/BlendModeControl';
 
 /** Scene-space LTRB when the slot has no clipContent owner (or reveal-overflow). */
 export const SOA_WEBGL_NO_CLIP: [number, number, number, number] = [-1e8, -1e8, 1e8, 1e8];
@@ -794,14 +797,15 @@ export function collectSoaWebglInstances(
     const strokeBaseRgba = soaWebglStrokeRgba(buf, i);
     const authoredStrokeW = soaStrokeWidth(buf, i);
     const strokePaint = strokeRibbonPaint(authoredStrokeW, zoom, dpr);
-    // Geometric authored width only — same as timeline-open pasteboard draw.
+    // Coverage: hairline scene width when sub-pixel; geometric otherwise.
     const lineW = strokePaint.width;
     const submitStroke = strokePaint.submit;
+    const strokeAlphaScale = strokePaint.alphaScale;
     const strokeRgba: [number, number, number, number] = [
       strokeBaseRgba[0],
       strokeBaseRgba[1],
       strokeBaseRgba[2],
-      strokeBaseRgba[3],
+      strokeBaseRgba[3] * strokeAlphaScale,
     ];
     const pathMaxSegs = adaptivePathStrokeMaxSegs(zoom, SOA_WEBGL_PATH_MAX_SEGS);
     const forceStamp = (flags & SOA_FLAG_DIRTY) !== 0;
@@ -934,6 +938,70 @@ export function collectSoaWebglInstances(
       kind === SOA_KIND_LINE
     ) {
       const node = paintDoc?.deltaSetLike?.[id];
+      // Rich fills (gradient / image / diffuse): solid fill-color meshes paint
+      // flat white. Bake Path2D ink to a per-node texture like media idle.
+      // Pencil stays on vector silhouette mesh — texture bake softens on zoom-in.
+      if (node && mediaTex && nodeHasRichFill(node)) {
+        const preview = id ? getNodeTransformPreview(id) : undefined;
+        const liveAngle = Number.isFinite(preview?.angle)
+          ? Number(preview!.angle)
+          : Number(node.attrs?.angle) || 0;
+        const paintNode =
+          Number.isFinite(preview?.angle) &&
+          Math.abs(liveAngle - (Number(node.attrs?.angle) || 0)) > 1e-4
+            ? { ...node, attrs: { ...(node.attrs || {}), angle: liveAngle } }
+            : node;
+        const baked = bakeShapeRichInkForWebgl(paintNode, w, h, zoom, dpr);
+        if (!baked) {
+          // Image fill still decoding — request another idle paint pass.
+          const src = String(paintNode.attrs?.['fill-image-src'] || '').trim();
+          if (src && !isFillImageWebglUnsafe(src)) bumpSceneCanvasIdlePaint();
+          clearSoaDirtyFlag(buf, i, flags, forceStamp);
+          continue;
+        }
+        const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1);
+        const rgbaOut: [number, number, number, number] = [1, 1, 1, opacity];
+        const fingerprint = richShapeTextureFingerprint(
+          paintNode,
+          id,
+          w,
+          h,
+          zoom,
+          baked.pad
+        );
+        const vertStart = Math.floor(mediaTex.pos.length / 2);
+        let wrote = 0;
+        for (const activeClip of paintClips) {
+          wrote += appendTexturedMediaQuad(
+            baked.worldW,
+            baked.worldH,
+            x - baked.pad,
+            y - baked.pad,
+            rgbaOut,
+            activeClip,
+            mediaTex,
+            {
+              angleDeg: liveAngle,
+              pivotW: w,
+              pivotH: h,
+              pivotX: baked.pad + w * 0.5,
+              pivotY: baked.pad + h * 0.5,
+            }
+          );
+        }
+        if (wrote > 0) {
+          mediaTex.draws.push({
+            nodeId: `rich:${id}`,
+            fingerprint,
+            source: baked.canvas as TexImageSource,
+            force: forceStamp,
+            vertStart,
+            vertCount: wrote,
+          });
+        }
+        if (forceStamp) buf.flags[i] = (flags & ~SOA_FLAG_DIRTY) >>> 0;
+        continue;
+      }
       if (node && meshPos && meshCol && meshClip) {
         const preview = id ? getNodeTransformPreview(id) : undefined;
         const liveAngle = Number.isFinite(preview?.angle)
@@ -954,6 +1022,7 @@ export function collectSoaWebglInstances(
           const opacity = parseLayerOpacity(paintNode.attrs?.opacity, 1);
           const shapeType = String(paintNode.attrs?.shapeType || '').toLowerCase();
           const isPencil = shapeType === 'pencil';
+          const richFill = nodeHasRichFill(paintNode);
           const fillRgba: [number, number, number, number] = [
             rgba[0],
             rgba[1],
@@ -961,11 +1030,18 @@ export function collectSoaWebglInstances(
             rgba[3] * opacity,
           ];
           const strokeBase = soaWebglStrokeRgba(buf, i);
-          const strokeInk: [number, number, number, number] = [
+          // Coverage alpha applies to stroke ribbons only — not pencil silhouette fill.
+          const strokeColor: [number, number, number, number] = [
             strokeBase[0],
             strokeBase[1],
             strokeBase[2],
             strokeBase[3] * opacity,
+          ];
+          const strokeInk: [number, number, number, number] = [
+            strokeColor[0],
+            strokeColor[1],
+            strokeColor[2],
+            strokeColor[3] * strokeAlphaScale,
           ];
           const strokeOut = strokeInk;
           const rotOpts = {
@@ -977,9 +1053,10 @@ export function collectSoaWebglInstances(
           for (const activeClip of paintClips) {
             // Pencil silhouette: ink color lives in strokeColors
             // (fill attrs are typically transparent for freehand).
+            // Rich fills must not use solid fill-color (looks white).
             const fillCol =
-              isPencil && mesh.fill && fillRgba[3] < 0.01 ? strokeInk : fillRgba;
-            if (mesh.fill && fillCol[3] > 0.01) {
+              isPencil && mesh.fill && fillRgba[3] < 0.01 ? strokeColor : fillRgba;
+            if (mesh.fill && fillCol[3] > 0.01 && !richFill) {
               wrote += appendMeshLocal(
                 mesh.fill.positions,
                 x,
@@ -1037,12 +1114,16 @@ export function collectSoaWebglInstances(
       }
       // Fallback without mesh buffers: sharp rect/ellipse instances only.
       if (kind === SOA_KIND_RECT || kind === SOA_KIND_ELLIPSE) {
+        // Never stamp a flat fill-color plate for rich fills (white ghost).
+        if (node && nodeHasRichFill(node)) {
+          clearSoaDirtyFlag(buf, i, flags, forceStamp);
+          continue;
+        }
         const liveAngle = id ? getNodeTransformPreview(id)?.angle : undefined;
         let rotRad = 0;
         if (Number.isFinite(liveAngle) && Math.abs(Number(liveAngle)) > 0.5) {
           rotRad = (Number(liveAngle) * Math.PI) / 180;
         }
-        const node = paintDoc?.deltaSetLike?.[id];
         const opacity = parseLayerOpacity(node?.attrs?.opacity, 1);
         const a = rgba[3] * opacity;
         for (const activeClip of paintClips) {

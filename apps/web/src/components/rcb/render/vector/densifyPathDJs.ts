@@ -22,6 +22,39 @@ export function densifyLodBucket(zoom = 1, dpr = 1): number {
   return Math.round(Math.log2(s) * 16);
 }
 
+const stickyLodById = new Map<string, number>();
+const STICKY_LOD_MAX = 8192;
+
+/**
+ * Sticky densify LOD — ignore ±`hysteresis` bucket flicker mid-zoom so mesh /
+ * text outline fingerprints do not thrash on every wheel tick.
+ */
+export function densifyLodBucketSticky(
+  id: string,
+  zoom = 1,
+  dpr = 1,
+  hysteresis = 1
+): number {
+  const key = String(id || '').trim();
+  const raw = densifyLodBucket(zoom, dpr);
+  if (!key) return raw;
+  const prev = stickyLodById.get(key);
+  const slack = Math.max(0, Math.floor(Number(hysteresis) || 0));
+  if (prev != null && Math.abs(raw - prev) <= slack) return prev;
+  stickyLodById.set(key, raw);
+  while (stickyLodById.size > STICKY_LOD_MAX) {
+    const oldest = stickyLodById.keys().next().value as string | undefined;
+    if (oldest == null) break;
+    stickyLodById.delete(oldest);
+  }
+  return raw;
+}
+
+export function clearDensifyLodSticky(id?: string): void {
+  if (id != null && String(id)) stickyLodById.delete(String(id));
+  else stickyLodById.clear();
+}
+
 function curveSteps(approxLen: number, flatness: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.ceil(approxLen / Math.max(0.25, flatness))));
 }
