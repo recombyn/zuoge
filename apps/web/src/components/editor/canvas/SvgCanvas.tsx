@@ -2038,7 +2038,7 @@ function SvgCanvas({
     return out;
   }, [ids, editingTextId, editingPenId, processingNodeIds, document, selectedFrameIds]);
 
-  /** Unclip selected shapes only — keep clip when their owning plate is also selected. */
+  /** SoftGlow / editors may unclip; plain selection keeps artboard clipContent. */
   const revealOverflowIds = useMemo(
     () =>
       listSelectionRevealOverflowIds({

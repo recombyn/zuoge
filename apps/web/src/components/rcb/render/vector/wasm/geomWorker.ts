@@ -19,6 +19,16 @@ type WorkerReq =
     }
   | {
       id: number;
+      type: 'stroke';
+      xy: Float32Array;
+      width: number;
+      closed: boolean;
+      align: string;
+      linejoin: string;
+      miterLimit: number;
+    }
+  | {
+      id: number;
       type: 'text_glyph';
       rgba: Uint8Array;
       width: number;
@@ -32,11 +42,20 @@ type WorkerReq =
 type WorkerRes =
   | { id: number; ok: true; type: 'init' }
   | { id: number; ok: true; type: 'batch_fill'; packed: Float32Array }
+  | { id: number; ok: true; type: 'stroke'; packed: Float32Array }
   | { id: number; ok: true; type: 'text_glyph'; packed: Float32Array }
   | { id: number; ok: false; error: string };
 
 type WasmApi = {
   tessellate_batch_fill: (xy: Float32Array, counts: Uint32Array) => Float32Array;
+  tessellate_stroke?: (
+    xy: Float32Array,
+    width: number,
+    closed: boolean,
+    align: string,
+    linejoin: string,
+    miterLimit: number
+  ) => Float32Array;
   trace_rgba_contours?: (
     rgba: Uint8Array,
     width: number,
@@ -59,6 +78,10 @@ async function ensureInit(): Promise<void> {
   }
   api = {
     tessellate_batch_fill: mod.tessellate_batch_fill as WasmApi['tessellate_batch_fill'],
+    tessellate_stroke:
+      typeof mod.tessellate_stroke === 'function'
+        ? (mod.tessellate_stroke as NonNullable<WasmApi['tessellate_stroke']>)
+        : undefined,
     trace_rgba_contours:
       typeof mod.trace_rgba_contours === 'function'
         ? (mod.trace_rgba_contours as NonNullable<WasmApi['trace_rgba_contours']>)
@@ -134,6 +157,21 @@ self.onmessage = async (ev: MessageEvent<WorkerReq>) => {
       await ensureInit();
       const packed = api!.tessellate_batch_fill(msg.xyAll, msg.counts);
       const res: WorkerRes = { id: msg.id, ok: true, type: 'batch_fill', packed };
+      (self as unknown as Worker).postMessage(res, [packed.buffer]);
+      return;
+    }
+    if (msg.type === 'stroke') {
+      await ensureInit();
+      if (!api?.tessellate_stroke) throw new Error('tessellate_stroke unavailable');
+      const packed = api.tessellate_stroke(
+        msg.xy,
+        msg.width,
+        msg.closed,
+        msg.align,
+        msg.linejoin,
+        msg.miterLimit
+      );
+      const res: WorkerRes = { id: msg.id, ok: true, type: 'stroke', packed };
       (self as unknown as Worker).postMessage(res, [packed.buffer]);
       return;
     }

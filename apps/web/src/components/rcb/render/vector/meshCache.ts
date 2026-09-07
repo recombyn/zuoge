@@ -9,7 +9,6 @@ import type { FillMesh } from '@/components/rcb/render/vector/tessellateFill';
 import type { StrokeMesh } from '@/components/rcb/render/vector/tessellateStroke';
 import { buildShapeMeshes } from '@/components/rcb/render/vector/wasmGeom';
 import type { Vec2 } from '@/components/rcb/render/vector/contour';
-import { ellipseInnerRatioFromAttrs } from '@/components/rcb/scene/document/sceneShapes';
 import { sceneFlatness } from '@/components/rcb/render/vector/densifyPathDJs';
 import {
   boolEffectAttr,
@@ -19,51 +18,41 @@ import {
   resolveStrokeMiterlimit,
 } from '@/components/rcb/scene/document/sceneEffects';
 import { mergeLiveCornerRadiiIntoAttrs, radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
-import { mergeLiveShapeParamsIntoAttrs } from '@/components/rcb/scene/document/sceneShapes';
+import {
+  ellipseArcPercentFromAttrs,
+  ellipseInnerRatioFromAttrs,
+  mergeLiveShapeParamsIntoAttrs,
+} from '@/components/rcb/scene/document/sceneShapes';
 import { strokeDashForStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
 import {
   isRectLikeStrokeSidesShape,
   rectStrokeSideRuns,
 } from '@/components/rcb/render/vector/strokeSides';
-import { parseSimplePathPoints } from '@/components/rcb/tools/pencilBrushes';
-import { tessellateStroke } from '@/components/rcb/render/vector/tessellateStroke';
+import { lruDelete, lruSet, lruTouch } from '@/components/rcb/render/vector/stringKeyLru';
+import { strokeRibbonPaint } from '@/components/rcb/render/strokeScreenFloor';
 
 export type CachedShapeMesh = {
   geomFp: string;
   fill: FillMesh | null;
   stroke: StrokeMesh | null;
   /**
-   * Legacy field; hairline gating is draw-time via strokeRibbonPaint.submit.
-   * Always 1 for newly built meshes.
+   * Coverage alpha from build-time strokeRibbonPaint (draw path multiplies live
+   * alphaScale again from strokeRibbonPaint for smooth zoom between remesh buckets).
    */
   strokeAlphaScale: number;
 };
 
 const cache = new Map<string, CachedShapeMesh>();
 const MESH_CACHE_MAX = 4096;
-const touchOrder: string[] = [];
-
-function touch(id: string) {
-  const i = touchOrder.indexOf(id);
-  if (i >= 0) touchOrder.splice(i, 1);
-  touchOrder.push(id);
-  while (touchOrder.length > MESH_CACHE_MAX) {
-    const drop = touchOrder.shift();
-    if (drop) cache.delete(drop);
-  }
-}
 
 export function invalidateShapeMesh(nodeId: string) {
   const id = String(nodeId || '');
   if (!id) return;
-  cache.delete(id);
-  const i = touchOrder.indexOf(id);
-  if (i >= 0) touchOrder.splice(i, 1);
+  lruDelete(cache, id);
 }
 
 export function clearShapeMeshCache() {
   cache.clear();
-  touchOrder.length = 0;
 }
 
 export function getShapeMeshCacheSize(): number {
@@ -136,9 +125,10 @@ export function getOrBuildShapeMesh(
   const fp = shapeGeomFingerprint(paintNode, opts);
   const hit = cache.get(id);
   if (hit && hit.geomFp === fp) {
-    touch(id);
+    lruTouch(cache, id);
     return hit;
   }
+
   const flat = sceneFlatness(opts?.zoom ?? 1, opts?.dpr ?? 1);
   const contour = contourFromNode(paintNode, opts);
   if (!contour) return null;
@@ -146,9 +136,24 @@ export function getOrBuildShapeMesh(
   const h = Math.max(1, Number(opts?.height ?? paintNode.height) || 1);
   const t = String(paintNode.attrs?.shapeType || '').toLowerCase();
   const holes: Vec2[][] = [];
-  if (t === 'ellipse' || t === 'circle' || t === 'oval') {
+  let meshPoints = contour.points;
+  // Full donut only: outer ring + punched hole. Partial annular sectors already
+  // densify PathBuilder's C-ring (outer arc → radial → inner arc → radial);
+  // punching a full circle hole here bridged a fake chord across the open gap.
+  const arcPct = Math.abs(ellipseArcPercentFromAttrs(paintNode.attrs || {}));
+  if (
+    (t === 'ellipse' || t === 'circle' || t === 'oval') &&
+    arcPct >= 99.95
+  ) {
     const hole = ellipseHoleRing(paintNode, w, h, flat);
-    if (hole) holes.push(hole);
+    if (hole) {
+      holes.push(hole);
+      meshPoints = [
+        ...contour.points,
+        { x: Number.NaN, y: Number.NaN },
+        ...hole,
+      ];
+    }
   }
   const fillRule =
     String(paintNode.attrs?.['fill-rule'] || 'nonzero').toLowerCase() === 'evenodd'
@@ -158,6 +163,16 @@ export function getOrBuildShapeMesh(
   // Arrow stays open chevron (shaft + V strokes) — match Canvas/SVG live preview.
   // Do not fill the head triangle (that made idle look solid after commit).
   const authoredStroke = pencilSil ? 0 : strokeWidthOf(paintNode);
+  const strokePaint = strokeRibbonPaint(
+    authoredStroke,
+    opts?.zoom ?? 1,
+    opts?.dpr ?? 1
+  );
+  // Hairline coverage is a centered 1px strip (Skia); don't inflate inside/outside inset.
+  const strokeAlign =
+    !pencilSil && strokePaint.alphaScale < 1 - 1e-6
+      ? 'center'
+      : strokeAlignOf(paintNode);
   const dasharray = pencilSil
     ? undefined
     : strokeDashForStyle(paintNode.attrs?.strokeStyle) ||
@@ -168,16 +183,12 @@ export function getOrBuildShapeMesh(
     !pencilSil && isRectLikeStrokeSidesShape(shapeType, paintNode.key)
       ? rectStrokeSideRuns(w, h, paintNode.attrs, radiiFromAttrs(paintNode.attrs))
       : null;
-  // Dense freehand silhouettes self-intersect; skip fill tessellation when the
-  // densified ring is large (ear-clip stalls). Short strokes still get fill.
-  const pencilPreferRibbon = pencilSil && contour.points.length >= 280;
-  const { fill, stroke } = pencilPreferRibbon
-    ? { fill: null, stroke: null }
-    : buildShapeMeshes(contour.points, {
+  const { fill, stroke } = buildShapeMeshes(meshPoints, {
         closed: contour.closed,
         wantFill: pencilSil || (contour.closed && nodeWantsSolidFill(paintNode)),
-        strokeWidth: authoredStroke,
-        strokeAlign: strokeAlignOf(paintNode),
+        // Sub-pixel: tessellate hairline scene width (Skia coverage); else authored.
+        strokeWidth: pencilSil ? 0 : strokePaint.width,
+        strokeAlign,
         linejoin: resolveStrokeLinejoin(paintNode.attrs),
         linecap: resolveStrokeLinecap(paintNode.attrs),
         miterLimit: resolveStrokeMiterlimit(paintNode.attrs),
@@ -189,32 +200,14 @@ export function getOrBuildShapeMesh(
       });
   let fillOut = fill;
   let strokeOut = stroke;
-  // Self-intersecting freehand rings can fail ear-clip. Prefer a round centerline
-  // ribbon over empty ink (WebGL no longer falls through to butt segment quads).
-  if (pencilSil && !fillOut) {
-    const sw = Math.max(
-      0.5,
-      Number(paintNode.attrs?.['border-width'] ?? paintNode.attrs?.strokeWidth) || 1
-    );
-    const center = parseSimplePathPoints(String(paintNode.attrs?.path || ''));
-    if (center.length >= 2) {
-      strokeOut = tessellateStroke(center, {
-        width: sw,
-        closed: false,
-        align: 'center',
-        linejoin: 'round',
-        linecap: 'round',
-      });
-    }
-  }
+  // Pencil: vector silhouette fill only (scales crisp). No constant-width ribbon
+  // (blunt tips) and no Path2D texture bake (soft on zoom-in).
   const entry: CachedShapeMesh = {
     geomFp: fp,
     fill: fillOut,
-    stroke: strokeOut,
-    // Draw gate lives in the renderer (screen width); keep scale at 1.
-    strokeAlphaScale: 1,
+    stroke: pencilSil ? null : strokeOut,
+    strokeAlphaScale: strokePaint.alphaScale,
   };
-  cache.set(id, entry);
-  touch(id);
+  lruSet(cache, id, entry, MESH_CACHE_MAX);
   return entry;
 }

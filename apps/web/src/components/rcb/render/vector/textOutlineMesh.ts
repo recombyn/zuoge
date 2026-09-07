@@ -7,9 +7,10 @@ import type { SceneNodeInput } from '@/components/rcb/sceneNode';
 import { parseNodeText, parseNodeTextStyle } from '@/components/rcb/scene/document/sceneText';
 import { buildOutlinePathAsync } from '@/components/rcb/scene/paint/outlineToPath';
 import { densifyPathD, sceneFlatness } from '@/components/rcb/render/vector/contour';
-import { densifyLodBucket } from '@/components/rcb/render/vector/densifyPathDJs';
+import { densifyLodBucketSticky } from '@/components/rcb/render/vector/densifyPathDJs';
 import { buildCompoundFillMeshes, buildTextGlyphFillMeshes } from '@/components/rcb/render/vector/wasmGeom';
 import type { FillMesh } from '@/components/rcb/render/vector/tessellateFill';
+import { lruDelete, lruSet, lruTouch } from '@/components/rcb/render/vector/stringKeyLru';
 
 export type CachedTextOutlineMesh = {
   fp: string;
@@ -29,7 +30,6 @@ type WantedBuild = {
 const wanted = new Map<string, WantedBuild>();
 const inflight = new Map<string, Promise<void>>();
 const TEXT_MESH_MAX = 2048;
-const touchOrder: string[] = [];
 const QUEUE_CONCURRENCY = 3;
 type QueueJob = () => Promise<void>;
 const jobQueue: QueueJob[] = [];
@@ -62,16 +62,6 @@ function scheduleIdleBump() {
   });
 }
 
-function touch(id: string) {
-  const i = touchOrder.indexOf(id);
-  if (i >= 0) touchOrder.splice(i, 1);
-  touchOrder.push(id);
-  while (touchOrder.length > TEXT_MESH_MAX) {
-    const drop = touchOrder.shift();
-    if (drop) cache.delete(drop);
-  }
-}
-
 function fillUsable(fill: FillMesh | null | undefined): fill is FillMesh {
   return Boolean(fill && fill.triangleCount > 0 && fill.positions.length >= 6);
 }
@@ -85,7 +75,11 @@ export function textOutlineGeomFingerprint(
   const style = parseNodeTextStyle(attrs);
   const w = Math.max(1, Number(opts?.width ?? node.width) || 1);
   const h = Math.max(1, Number(opts?.height ?? node.height) || 1);
-  const lod = densifyLodBucket(opts?.zoom ?? 1, opts?.dpr ?? 1);
+  const lod = densifyLodBucketSticky(
+    String(node.id || ''),
+    opts?.zoom ?? 1,
+    opts?.dpr ?? 1
+  );
   return [
     'textOutline:v3',
     `flat:${lod}`,
@@ -109,18 +103,15 @@ export function textOutlineGeomFingerprint(
 export function invalidateTextOutlineMesh(nodeId: string) {
   const id = String(nodeId || '').trim();
   if (!id) return;
-  cache.delete(id);
+  lruDelete(cache, id);
   wanted.delete(id);
   inflight.delete(id);
-  const i = touchOrder.indexOf(id);
-  if (i >= 0) touchOrder.splice(i, 1);
 }
 
 export function clearTextOutlineMeshCache() {
   cache.clear();
   wanted.clear();
   inflight.clear();
-  touchOrder.length = 0;
 }
 
 /**
@@ -137,7 +128,7 @@ export function getTextOutlineMesh(
   const fp = textOutlineGeomFingerprint(node, opts);
   const hit = cache.get(id);
   if (!hit || !fillUsable(hit.fill)) return null;
-  touch(id);
+  lruTouch(cache, id);
   if (hit.fp === fp) return hit;
   // Stale but drawable — ensureTextOutlineMesh will rebuild for `fp`.
   return hit;
@@ -184,8 +175,7 @@ export function ensureTextOutlineMesh(
       const d = String(outline?.pathD || '').trim();
       if (!d) {
         if (!fillUsable(cache.get(id)?.fill)) {
-          cache.set(id, { fp: req.fp, fill: null, fillRule: 'evenodd' });
-          touch(id);
+          lruSet(cache, id, { fp: req.fp, fill: null, fillRule: 'evenodd' }, TEXT_MESH_MAX);
         }
         return;
       }
@@ -202,13 +192,11 @@ export function ensureTextOutlineMesh(
           console.warn('[textOutlineMesh] empty fill', id, 'tris', fill?.triangleCount ?? 0);
         }
         if (!fillUsable(cache.get(id)?.fill)) {
-          cache.set(id, { fp: req.fp, fill: null, fillRule });
-          touch(id);
+          lruSet(cache, id, { fp: req.fp, fill: null, fillRule }, TEXT_MESH_MAX);
         }
         return;
       }
-      cache.set(id, { fp: req.fp, fill, fillRule });
-      touch(id);
+      lruSet(cache, id, { fp: req.fp, fill, fillRule }, TEXT_MESH_MAX);
       scheduleIdleBump();
     } catch (err) {
       if (import.meta.env.DEV) {
@@ -216,7 +204,7 @@ export function ensureTextOutlineMesh(
         console.warn('[textOutlineMesh] build failed', id, err);
       }
       if (!fillUsable(cache.get(id)?.fill)) {
-        cache.set(id, { fp: req.fp, fill: null, fillRule: 'evenodd' });
+        lruSet(cache, id, { fp: req.fp, fill: null, fillRule: 'evenodd' }, TEXT_MESH_MAX);
       }
     }
   };
@@ -273,7 +261,6 @@ export function setTextOutlineMeshForTests(
   const flat = sceneFlatness(opts?.zoom ?? 1, opts?.dpr ?? 1);
   const fill = buildCompoundFillMeshes(densifyPathD(pathD, flat), fillRule);
   const entry: CachedTextOutlineMesh = { fp, fill, fillRule };
-  cache.set(id, entry);
-  touch(id);
+  lruSet(cache, id, entry, TEXT_MESH_MAX);
   return entry;
 }

@@ -11,21 +11,21 @@ import {
 } from '@/components/rcb/selection/selectionPaintRaise';
 
 describe('shouldRevealShapeOverflow', () => {
-  it('reveals overflow for selected / SoftGlow hosts, keeps clip when idle', () => {
+  it('keeps clip for plain selection; reveals only SoftGlow / process', () => {
     expect(
       shouldRevealShapeOverflow(true, {
         id: 'n1',
         key: 'image',
         attrs: {},
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldRevealShapeOverflow(true, {
         id: 'n1',
         key: 'shape',
         attrs: { frameId: 'f1' },
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldRevealShapeOverflow(true, {
         id: 'load',
@@ -77,8 +77,6 @@ describe('shouldRevealShapeOverflow', () => {
   });
 
   it('frame-selected children stay clipped (reveal flag false)', () => {
-    // Selecting the artboard keeps children mounted (cull / paint-raise) but
-    // must not pass selectedOrForceFull=true — only selecting the child does.
     expect(
       shouldRevealShapeOverflow(false, {
         id: 'child',
@@ -143,33 +141,36 @@ describe('listSelectionRevealOverflowIds', () => {
     },
   };
 
-  it('reveals selected shapes when their plate is not selected', () => {
+  it('does not reveal plain selection (keeps artboard clip)', () => {
     expect(
       listSelectionRevealOverflowIds({
         selectedNodeIds: ['inside', 'world'],
         selectedFrameIds: [],
         document: doc,
       })
+    ).toEqual([]);
+  });
+
+  it('still reveals SoftGlow / process and editors', () => {
+    expect(
+      listSelectionRevealOverflowIds({
+        selectedNodeIds: ['inside'],
+        selectedFrameIds: [],
+        document: doc,
+        processingNodeIds: ['inside'],
+        editingPenId: 'world',
+      })
     ).toEqual(['inside', 'world']);
   });
 
-  it('keeps clip when frame and its children are selected together', () => {
+  it('keeps clip when frame owns the processing child', () => {
     expect(
       listSelectionRevealOverflowIds({
-        selectedNodeIds: ['inside', 'world'],
+        selectedNodeIds: ['inside'],
         selectedFrameIds: ['board'],
         document: doc,
+        processingNodeIds: ['inside'],
       })
-    ).toEqual(['world']);
-  });
-
-  it('still reveals children of a different unselected plate', () => {
-    expect(
-      listSelectionRevealOverflowIds({
-        selectedNodeIds: ['other'],
-        selectedFrameIds: ['board'],
-        document: doc,
-      })
-    ).toEqual(['other']);
+    ).toEqual([]);
   });
 });

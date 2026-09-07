@@ -101,7 +101,6 @@ type TexEntry = {
 };
 
 const caches = new WeakMap<WebGL2RenderingContext, Map<string, TexEntry>>();
-const lruByGl = new WeakMap<WebGL2RenderingContext, string[]>();
 const MEDIA_TEX_MAX = 256;
 
 function cacheFor(gl: WebGL2RenderingContext): Map<string, TexEntry> {
@@ -113,27 +112,18 @@ function cacheFor(gl: WebGL2RenderingContext): Map<string, TexEntry> {
   return m;
 }
 
-function lruFor(gl: WebGL2RenderingContext): string[] {
-  let l = lruByGl.get(gl);
-  if (!l) {
-    l = [];
-    lruByGl.set(gl, l);
-  }
-  return l;
-}
-
 function touch(gl: WebGL2RenderingContext, nodeId: string) {
-  const lru = lruFor(gl);
-  const i = lru.indexOf(nodeId);
-  if (i >= 0) lru.splice(i, 1);
-  lru.push(nodeId);
+  const map = cacheFor(gl);
+  const hit = map.get(nodeId);
+  if (!hit) return;
+  map.delete(nodeId);
+  map.set(nodeId, hit);
 }
 
 function evictOne(gl: WebGL2RenderingContext): boolean {
-  const lru = lruFor(gl);
   const map = cacheFor(gl);
-  const drop = lru.shift();
-  if (!drop) return false;
+  const drop = map.keys().next().value as string | undefined;
+  if (drop == null) return false;
   const e = map.get(drop);
   if (e) {
     gl.deleteTexture(e.tex);
@@ -278,15 +268,12 @@ export function pruneMediaNodeTextures(
 ): number {
   const keep = new Set([...keepIds].map((x) => String(x || '').trim()).filter(Boolean));
   const map = cacheFor(gl);
-  const lru = lruFor(gl);
   let n = 0;
   for (const id of [...map.keys()]) {
     if (keep.has(id)) continue;
     const e = map.get(id);
     if (e) gl.deleteTexture(e.tex);
     map.delete(id);
-    const i = lru.indexOf(id);
-    if (i >= 0) lru.splice(i, 1);
     n += 1;
   }
   return n;
@@ -296,7 +283,6 @@ export function disposeAllMediaNodeTextures(gl: WebGL2RenderingContext): void {
   const map = cacheFor(gl);
   for (const e of map.values()) gl.deleteTexture(e.tex);
   map.clear();
-  lruByGl.set(gl, []);
 }
 
 export function drawMediaTexBatch(

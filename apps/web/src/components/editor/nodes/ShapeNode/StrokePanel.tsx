@@ -258,7 +258,23 @@ function StrokePanel({
       {showSides ? (
         <PanelToggleIcons
           value={sides}
-          onChange={(next) => patch({ sides: next as StrokeSides })}
+          onChange={(next) => {
+            const allWasOn = Boolean(sides.T && sides.R && sides.B && sides.L);
+            const flipped = (['T', 'R', 'B', 'L'] as const).find((k) => next[k] !== sides[k]);
+            // All sides on → click one side: solo that side (design-tool expectation).
+            if (allWasOn && flipped && next[flipped] === false) {
+              patch({
+                sides: {
+                  T: flipped === 'T',
+                  R: flipped === 'R',
+                  B: flipped === 'B',
+                  L: flipped === 'L',
+                },
+              });
+              return;
+            }
+            patch({ sides: next as StrokeSides });
+          }}
           leading={{
             tip: t('editor.strokeSideAll'),
             Icon: IconSideAll,

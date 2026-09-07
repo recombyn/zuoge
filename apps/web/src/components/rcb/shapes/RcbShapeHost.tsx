@@ -157,12 +157,9 @@ function RcbShapeHost({
   const clipGeometryToken = [node?.x, node?.y, node?.width, node?.height].join('|');
   const blendMode = parseBlendMode(node?.attrs?.blendMode, { allowPassThrough: false });
   const layerOpacity = parseLayerOpacity(node?.attrs?.opacity, 1);
-  // Selected: drop mix-blend so paint can sit above artboard plates.
-  // Modest data-z boost keeps selected SVG hosts above sibling hosts in the
-  // same mount. Chrome lives on a sibling CSS layer (z-[4]), so this does not
-  // put ink above the control box (unlike a 2e9 mega-z).
+  // SoftGlow / process may clear clipContent; plain selection keeps plate clip.
   const activeBlendCss = revealOverflow ? '' : blendModeToCss(blendMode);
-  // revealOverflow clears clipContent so selection matches unclipped chrome.
+  // revealOverflow clears clipContent only for SoftGlow / editors — not selection.
   const paintZIndex = zIndex;
   // Remount when stroke/fill paint attrs change — not on every geometry nudge.
   const paintToken = [

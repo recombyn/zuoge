@@ -1021,14 +1021,15 @@ function createRectLike(
   const body = appendChild(g, svgEl('path', { d: roundedRectPath(width, height, r) }));
   setAttrs(body, { 'data-radius-body': '1', 'data-baseline': '1' });
   applySvgFill(root, body, paint, `n-${nodeId}`);
-  const hasRadius = Math.max(r.tl, r.tr, r.br, r.bl) > 0.5;
-  if ((allSides || hasRadius) && !noSides) {
+  // Full outline only when every side is on. Partial sides (incl. with corner
+  // radius) stroke open edge runs so T/R/B/L toggles stay visible.
+  if (allSides && !noSides) {
     applyElementStroke(root, body, strokeFull, { hasOpaqueFill: !fillTransparent });
   } else {
     setStroke(body, 'none');
   }
 
-  if (!allSides && !noSides && !hasRadius) {
+  if (!allSides && !noSides) {
     const runs = rectStrokeSideRuns(width, height, node.attrs, r) || [];
     for (const run of runs) {
       const d = strokeSideRunPathD(run);

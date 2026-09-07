@@ -424,6 +424,14 @@ export function worldNodeStacksAboveAnyFrame(
   for (const key of order) {
     const parsed = parseStackKey(String(key));
     if (!parsed || parsed.kind !== 'frame') continue;
+    // Skip hidden plates — they are not mounted, so they do not need DomHost
+    // occlusion. Avoid importing animationWorkbenchFocus (TDZ cycles).
+    const frame = Array.isArray(doc.frames)
+      ? doc.frames.find((f) => String(f?.id) === parsed.id)
+      : null;
+    if (frame && (frame.hidden === true || String(frame.hidden) === 'true')) {
+      continue;
+    }
     if (nodeZ > stackZIndex(doc, 'frame', parsed.id)) return true;
   }
   return false;

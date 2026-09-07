@@ -416,7 +416,7 @@ describe('collectSoaWebglInstances', () => {
     expect(cached!.stroke!.triangleCount).toBeGreaterThan(0);
   });
 
-  it('floors zoomed-out 1px strokes so artboard content stays visible', () => {
+  it('applies coverage alpha for zoomed-out 1px strokes (Skia-style)', () => {
     let doc = createEmptyDocument({ width: 800, height: 600, emptyWorld: true });
     doc = addNodeToDocument(doc, 'p2', {
       id: 'p2',
@@ -452,9 +452,9 @@ describe('collectSoaWebglInstances', () => {
       zoom: 0.25,
       dpr: 1,
     });
-    // Fit-zoom / large-frame view: hairline still submits at geometric width.
+    // screenW = 0.25 → hairline submits with alphaScale 0.25
     expect(meshPos.length).toBeGreaterThanOrEqual(6);
-    expect(meshCol[3]).toBeGreaterThan(0.9);
+    expect(Number(meshCol[3])).toBeCloseTo(0.25, 2);
   });
 
   it('closed stroked path uses vector mesh (no atlas kind 3 / no segment notches)', () => {

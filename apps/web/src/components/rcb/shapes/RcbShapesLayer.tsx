@@ -376,24 +376,24 @@ export function soaBufferMembershipChanged(
 }
 
 /**
- * Drop artboard clipContent for selected / SoftGlow hosts so overflow matches
- * unclipped selection chrome. Idle (unselected) ink stays clipped.
- * Frame-only selection must NOT reveal child overflow — pass selected node ids
- * (not frame-kept cull ids) into the reveal set.
+ * Temporarily drop artboard clipContent only for SoftGlow / process plates
+ * (and callers that pass selectedOrForceFull for those hosts).
  *
- * Video/audio stay as forceFull DOM hosts for the HTML decoder, but must NOT
- * clear clipContent — sole-on-board media would otherwise paint past the Frame.
+ * Plain selection must keep clip — otherwise center strokes / overflow ink paint
+ * past the plate while selected ("裁剪超出画板"). Selection chrome may still
+ * extend outside; ink stays clipped (Figma-like).
+ *
+ * Video/audio stay forceFull for the HTML decoder but must NOT clear clip —
+ * sole-on-board media would otherwise paint past the Frame (unless SoftGlow).
  */
 export function shouldRevealShapeOverflow(
   selectedOrForceFull: boolean,
   node: SceneNodeInput | null | undefined
 ): boolean {
   if (!selectedOrForceFull) return false;
-  const key = String(node?.key || '');
-  if (key === 'video' || key === 'audio') {
-    return isImageProcessRunning(node);
-  }
-  return true;
+  // SoftGlow / running process overlays need to paint past the plate.
+  if (isImageProcessRunning(node)) return true;
+  return false;
 }
 
 type Props = {
@@ -1096,8 +1096,8 @@ function RcbShapesLayer({
             reloadToken={hostReloadTokenFor(id)}
             frameClipToken={frameClipToken}
             forceHidden={isNodeOverlayHidden(document, node, hiddenNodeId === id)}
-            // SoftGlow / selected shapes: drop clip so overflow matches chrome.
-            // Video/audio keep clip even when forceFull (decoder host).
+            // SoftGlow / process: drop clip so overlays can paint past the plate.
+            // Plain selection keeps clipContent (ink must not exceed artboard).
             revealOverflow={shouldRevealShapeOverflow(
               revealSet.has(id) || forceFullSet.has(id),
               node

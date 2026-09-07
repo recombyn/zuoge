@@ -568,7 +568,7 @@ describe('scene grid (Canvas underlay)', () => {
     expect(ops).toContain('stroke');
   });
 
-  it('drawSceneGrid keeps axes on integer grid (no device-axis snap)', () => {
+  it('drawSceneGrid keeps axes on integer grid without pan/dpr snap', () => {
     const moves: Array<[number, number]> = [];
     const ctx = {
       beginPath() {},
@@ -587,9 +587,34 @@ describe('scene grid (Canvas underlay)', () => {
       1,
       100
     );
-    // First vertical line starts at floor(0.2)=0 — not shifted by stroke snap.
+    // First vertical line starts at floor(0.2)=0 — not shifted without pan/dpr.
     expect(moves.some(([x, y]) => x === 0 && y === 0)).toBe(true);
     expect(moves.every(([x]) => Math.abs(x - Math.round(x)) < 1e-9)).toBe(true);
+  });
+
+  it('drawSceneGrid device-snaps axes when pan/dpr provided', () => {
+    const moves: Array<[number, number]> = [];
+    const ctx = {
+      beginPath() {},
+      moveTo(x: number, y: number) {
+        moves.push([x, y]);
+      },
+      lineTo() {},
+      stroke() {},
+      strokeStyle: '',
+      lineWidth: 0,
+      lineCap: '',
+    };
+    drawSceneGrid(
+      ctx as unknown as CanvasRenderingContext2D,
+      { x: 0, y: 0, width: 4, height: 4 },
+      1,
+      8,
+      { panX: 0.3, panY: 0.3, dpr: 2 }
+    );
+    const firstX = moves[0]?.[0] ?? 0;
+    expect(firstX).not.toBe(0);
+    expect(Math.abs(firstX)).toBeLessThan(1 / 8);
   });
 
   it('paintBasicShapeFill uses ellipse for circle', () => {

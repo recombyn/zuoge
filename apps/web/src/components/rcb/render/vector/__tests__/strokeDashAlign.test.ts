@@ -92,14 +92,33 @@ describe('stroke dash + align + caps + sides', () => {
       { x: 0, y: 0 },
       { x: 100, y: 0 },
     ]);
-    expect(
-      rectStrokeSideRuns(
-        100,
-        50,
-        { T: true, R: false, B: false, L: false },
-        { tl: 8, tr: 0, br: 0, bl: 0 }
-      )
-    ).toBeNull();
+    // Rounded rect: partial sides still stroke (inset by corner radii).
+    const topRounded = rectStrokeSideRuns(
+      100,
+      50,
+      { T: true, R: false, B: false, L: false },
+      { tl: 8, tr: 8, br: 0, bl: 0 }
+    );
+    expect(topRounded).toHaveLength(1);
+    expect(topRounded![0]![0]).toEqual({ x: 8, y: 0 });
+    expect(topRounded![0]![topRounded![0]!.length - 1]).toEqual({ x: 92, y: 0 });
+  });
+
+  it('rectStrokeSideRuns includes shared corner arcs when contiguous sides share radius', () => {
+    const tr = rectStrokeSideRuns(
+      100,
+      50,
+      { T: true, R: true, B: false, L: false },
+      { tl: 0, tr: 10, br: 0, bl: 0 }
+    );
+    expect(tr).toHaveLength(1);
+    const poly = tr![0]!;
+    expect(poly[0]).toEqual({ x: 0, y: 0 });
+    expect(poly.length).toBeGreaterThan(4);
+    // Ends on the right edge below the TR arc.
+    expect(poly[poly.length - 1]).toEqual({ x: 100, y: 50 });
+    // Arc densify should leave the corner of the bounding box.
+    expect(poly.some((p) => p.x > 95 && p.y > 0 && p.y < 10)).toBe(true);
   });
 
   it('rectStrokeSideRuns merges contiguous sides so joins share corners', () => {
@@ -122,7 +141,6 @@ describe('stroke dash + align + caps + sides', () => {
       { x: 0, y: 50 },
     ]);
   });
-
   it('inside-align round join fans the fat side (not a zero-radius outer)', () => {
     const pts = [
       { x: 0, y: 0 },

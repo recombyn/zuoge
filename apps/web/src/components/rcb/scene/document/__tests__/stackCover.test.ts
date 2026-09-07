@@ -180,6 +180,34 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(worldNodeStacksAboveAnyFrame(doc, 's1')).toBe(false);
   });
 
+  it('hidden plate does not force stack-above DomHost', () => {
+    let doc = createBareDocument();
+    doc.frames = [
+      {
+        id: 'hidden',
+        name: 'Hidden',
+        backgroundColor: '#fff',
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        hidden: true,
+      },
+    ];
+    doc.stackOrder = ['frame:hidden'];
+    doc = addNodeToDocument(doc, 'w1', {
+      id: 'w1',
+      key: 'rect',
+      x: 200,
+      y: 0,
+      width: 20,
+      height: 20,
+      attrs: {},
+      children: [],
+    });
+    expect(worldNodeStacksAboveAnyFrame(doc, 'w1')).toBe(false);
+  });
+
   it('world node below all frames can stay on SoA', () => {
     let doc = createBareDocument();
     doc = addNodeToDocument(doc, 'under', {

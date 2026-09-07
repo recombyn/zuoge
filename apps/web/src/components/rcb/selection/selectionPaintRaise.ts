@@ -34,9 +34,9 @@ export function frameClipRevealsOverflow(nodeId: string | null | undefined): boo
 }
 
 /**
- * Node ids that may temporarily drop clipContent while selected / editing.
- * When the owning artboard is also selected (marquee frame+content), keep clip
- * so overflow does not leak past the plate.
+ * Node ids that may temporarily drop clipContent (SoftGlow / inline editors).
+ * Plain selection is excluded so clipContent ink never paints past the plate.
+ * When the owning artboard is also selected, children stay clipped either way.
  */
 export function listSelectionRevealOverflowIds(opts: {
   selectedNodeIds: readonly string[];
@@ -63,7 +63,7 @@ export function listSelectionRevealOverflowIds(opts: {
     seen.add(id);
     out.push(id);
   };
-  for (const id of opts.selectedNodeIds) push(id);
+  // Do not push selectedNodeIds — selection keep clipContent.
   for (const id of opts.processingNodeIds || []) push(id);
   push(opts.editingTextId);
   push(opts.editingPenId);
