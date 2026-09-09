@@ -55,6 +55,8 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.join(root, 'src'),
         '@canvas-plugins': path.join(repoRoot, 'plugins/canvas'),
+        // Local MIT vector-editor reference (engine + CanvasKit sources).
+        '@rcb-vector': path.join(repoRoot, 'vendor/vector-editor-ref/packages/editor/src'),
       },
       extensionAlias: {
         '.js': ['.ts', '.tsx', '.js', '.jsx'],
@@ -73,7 +75,13 @@ export default defineConfig(({ mode }) => {
         'nuqs',
         'nuqs/adapters/react-router/v6',
       ],
-      exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core', '@orpc/server', '@recombyn/contracts'],
+      exclude: [
+        '@ffmpeg/ffmpeg',
+        '@ffmpeg/util',
+        '@ffmpeg/core',
+        '@orpc/server',
+        '@recombyn/contracts',
+      ],
     },
     assetsInclude: ['**/*.wasm'],
     server: {
@@ -81,7 +89,7 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       strictPort: true,
       open: !isTauri,
-      fs: { allow: [root, repoRoot] },
+      fs: { allow: [root, repoRoot, path.join(repoRoot, 'vendor/vector-editor-ref')] },
       watch: { ignored: ['**/src-tauri/**'] },
       proxy: {
         '/api': {

@@ -17,8 +17,8 @@ import {
   rcbSceneToScreen,
   useRcbCamera,
 } from '@/components/rcb';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
-import { liveShapeGeomBox } from '@/components/rcb/selection/HostPathChrome';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
+import { liveShapeGeomBox } from '@/components/rcb/selection/hostGeom';
 import { mockupErrorMessage } from '@/service/mockupTools';
 import { uploadImageFromSrc } from '@/utils/uploadImage';
 import { cn } from '@/utils/classnames';

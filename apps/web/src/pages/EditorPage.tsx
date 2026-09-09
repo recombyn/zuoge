@@ -70,7 +70,6 @@ import {
 } from '@/components/rcb';
 import LayerPanel from '@/components/editor/panels/LayerPanel';
 import EditorToolStrip from '@/components/editor/chrome/EditorToolStrip';
-import type { PathEditSubtool } from '@/components/editor/chrome/PathEditToolbar';
 import { getDocumentGridSize } from '@/components/rcb/selection/alignGuides';
 import { cn } from '@/utils/classnames';
 import { fetchProject, syncProjectRowFromServer, refreshProjectsListAfterMutation } from '@/service/projects';
@@ -103,7 +102,7 @@ import {
 import type { ArtboardFrame } from '@/components/rcb/frames/types';
 import type { FillPanelValue } from '@/components/editor/panels/FillPanel';
 import { cssSolidWithOpacity } from '@/components/base/colorPanel';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   cssPreviewForGradient,
   fillImageFieldsFromDocumentBackground,
@@ -586,8 +585,6 @@ function EditorPage() {
   const [zoomFitActive, setZoomFitActive] = useState(true);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
-  const [pathEditOpen, setPathEditOpen] = useState(false);
-  const [pathEditSubtool, setPathEditSubtool] = useState<PathEditSubtool>('select');
   const [canvasMeshSelectedIndex, setCanvasMeshSelectedIndex] = useState(0);
   const [canvasMeshShowGuides, setCanvasMeshShowGuides] = useState(true);
   const themeCanvas = useThemeCanvasColor();
@@ -726,26 +723,6 @@ function EditorPage() {
     desktop && inspectOpen,
     workspaceMode
   );
-
-  useEffect(() => {
-    const onPathEdit = (e: Event) => {
-      const active = Boolean((e as CustomEvent).detail?.active);
-      setPathEditOpen(active);
-      // Keep toolbar in sync with canvas: Select is the default when entering path edit.
-      if (active) setPathEditSubtool('select');
-    };
-    const onSubtool = (e: Event) => {
-      const s = (e as CustomEvent).detail?.subtool;
-      if (s === 'pen' || s === 'add-anchor' || s === 'curve') setPathEditSubtool(s);
-      else setPathEditSubtool('select');
-    };
-    window.addEventListener('resume:path-edit', onPathEdit);
-    window.addEventListener('resume:path-edit-subtool', onSubtool);
-    return () => {
-      window.removeEventListener('resume:path-edit', onPathEdit);
-      window.removeEventListener('resume:path-edit-subtool', onSubtool);
-    };
-  }, []);
 
   const followThemeCanvas = isThemeFollowCanvasBg(String(document?.backgroundColor || ''));
   const canvasFillValue = useMemo(
@@ -1685,7 +1662,7 @@ function EditorPage() {
         style={stageBackground ? { background: stageBackground } : undefined}
       >
         <div className="relative min-h-0 min-w-0 flex-1">
-          <main
+          <div
             className={cn(
               'absolute inset-0 flex flex-col overflow-hidden',
               followThemeCanvas && 'bg-[var(--canvas)]'
@@ -1709,17 +1686,23 @@ function EditorPage() {
               bandRightPx={toolsRightDockPx}
             />
 
-            <EditorToolDocks
-              isDevMode={isDevMode}
-              pathEditOpen={pathEditOpen}
-              pathEditSubtool={pathEditSubtool}
-              onPathEditSubtool={setPathEditSubtool}
-              onPathEditExit={() => setPathEditOpen(false)}
-              activeTool={activeTool}
-              zoom={camera.zoom}
-              viewportWidth={stageEl?.clientWidth}
-              docWidth={Number(document?.width) || undefined}
-            />
+            {/* Pen / pencil / bucket options — top center (not above bottom tool strip) */}
+            <div
+              data-tour="editor-create-dock"
+              className="pointer-events-none absolute z-30 -translate-x-1/2 hidden md:block"
+              style={{
+                left: `calc(${toolsLeftDockPx}px + (100% - ${toolsLeftDockPx + toolsRightDockPx}px) / 2)`,
+                top: 12,
+              }}
+            >
+              <EditorToolDocks
+                isDevMode={isDevMode}
+                activeTool={activeTool}
+                zoom={camera.zoom}
+                viewportWidth={stageEl?.clientWidth}
+                docWidth={Number(document?.width) || undefined}
+              />
+            </div>
 
             <AnimationTimelineFocusHost
               document={deferredDocument}
@@ -1836,7 +1819,7 @@ function EditorPage() {
               onFitView={onFitViewManual}
               zoomAtStageCenter={zoomAtStageCenter}
             />
-          </main>
+          </div>
 
           {layersOpen && !isMobileViewport ? (
             <div className="pointer-events-none absolute inset-y-0 left-0 z-30">

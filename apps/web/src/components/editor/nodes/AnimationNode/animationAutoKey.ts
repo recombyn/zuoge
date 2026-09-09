@@ -21,7 +21,7 @@ import {
   parseLottieAnimationData,
   serializeLottieAnimationData,
 } from '@/components/rcb/scene/document/nodeFactories';
-import { isFrameLocalCoordSpace } from '@/components/rcb/scene/paint/sceneToSvg';
+import { isFrameLocalCoordSpace } from '@/components/rcb/scene/layout/nodeLayout';
 import { lottieLayerBaseSize } from '@/components/editor/nodes/AnimationNode/animationLottieMaterialize';
 
 export type AnimationLayerLink = {

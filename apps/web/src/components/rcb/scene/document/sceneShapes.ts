@@ -1,32 +1,32 @@
-/** Regular polygon / star / stroke (line·arrow) geometry helpers. */
+/** Regular polygon / star / stroke (line閻犺櫣妫弐row) geometry helpers. */
 
 import { ARROW_HEAD as ARROW_HEAD_GEOM } from '@/components/rcb/core/geometry';
 
 export const DEFAULT_SHAPE_SIDES = 5;
 export const MIN_SHAPE_SIDES = 3;
 export const MAX_SHAPE_SIDES = 24;
-/** Inner / outer radius ratio for stars (内角半径). */
+/** Inner / outer radius ratio for stars (闂佸憡鍔曢幊鎾伙綖濡ゅ懎纭€濠电姴鍊荤粣?. */
 export const DEFAULT_STAR_INNER_RATIO = 0.45;
 export const MIN_STAR_INNER_RATIO = 0.08;
 export const MAX_STAR_INNER_RATIO = 0.92;
 
-/** Circle / ellipse hole as fraction of outer radii (内半径). */
+/** Circle / ellipse hole as fraction of outer radii (闂佸憡鍔曢幊搴＄暦閹邦剦鍤?. */
 export const DEFAULT_ELLIPSE_INNER_RATIO = 0;
 export const MIN_ELLIPSE_INNER_RATIO = 0;
 export const MAX_ELLIPSE_INNER_RATIO = 0.92;
-/** Circle / ellipse remaining sweep as % of full turn (弧度 / 周弧度). Signed. */
+/** Circle / ellipse remaining sweep as % of full turn (閻庢鍟崘顭戝敽 / 闂佸憡绋忛崝灞炬叏椤掍焦鍎?. Signed. */
 export const DEFAULT_ELLIPSE_ARC_PERCENT = 100;
 export const MIN_ELLIPSE_ARC_PERCENT = 0;
 export const MAX_ELLIPSE_ARC_PERCENT = 100;
 /**
- * Snap inner hole → solid disk when ratio is within this.
- * Generous so dragging the hole closed is easy (was 3.5% ≈ 1–2px on small shapes).
+ * Snap inner hole 闂?solid disk when ratio is within this.
+ * Generous so dragging the hole closed is easy (was 3.5% 闂?1闂?px on small shapes).
  */
 export const ELLIPSE_INNER_SNAP_SOLID = 0.12;
 /** Also snap closed when the pointer is within this many screen px of the center. */
 export const ELLIPSE_INNER_SNAP_SOLID_PX = 18;
 /**
- * Fixed cut-end “开始位置” in atan2 degrees (0 = east, 90 = south).
+ * Fixed cut-end 闂佺偨鍎茬划宀€妲愰幋鐐村弿閻庯絺鏅濈粔瀵哥磽閸愭儳鏋撻柍?in atan2 degrees (0 = east, 90 = south).
  * Start knob does not drag; arc end must not cross past this ray.
  */
 export const DEFAULT_ELLIPSE_START_DEG = 90;
@@ -41,8 +41,8 @@ export function clampEllipseInnerRatio(
 }
 
 /**
- * Signed arc percent in [−100, −0.5] ∪ [0.5, 100].
- * |value| = remaining sweep from 开始位置; sign = sweep direction.
+ * Signed arc percent in [闂?00, 闂?.5] 闂?[0.5, 100].
+ * |value| = remaining sweep from 閻庢鍠掗崑鎾斥攽椤旂⒈鍎庣紓宥呮噽缁? sign = sweep direction.
  */
 export function clampEllipseArcPercent(
   n: unknown,
@@ -56,7 +56,7 @@ export function clampEllipseArcPercent(
 }
 
 /**
- * Near-zero hole → solid disk (easy restore).
+ * Near-zero hole 闂?solid disk (easy restore).
  * Optional ``sceneDist`` + ``zoom`` also snap when the pointer is near the center in screen px.
  */
 export function snapEllipseInnerRatio(
@@ -84,7 +84,7 @@ export function clampEllipseStartDeg(
   return m < 0 ? m + 360 : m;
 }
 
-/** Normalize an incremental angle delta into (−π, π]. */
+/** Normalize an incremental angle delta into (闂佹剚鍘藉畷濠氬焵? 闁挎粎顕? */
 export function wrapAngleDelta(delta: number): number {
   let d = delta;
   while (d > Math.PI) d -= Math.PI * 2;
@@ -113,7 +113,7 @@ export function ellipseArcPercentFromAlongRad(
 }
 
 /**
- * Cut ends: a0 = fixed 开始位置, a1 = movable 弧度 end.
+ * Cut ends: a0 = fixed 閻庢鍠掗崑鎾斥攽椤旂⒈鍎庣紓宥呮噽缁? a1 = movable 閻庢鍟崘顭戝敽 end.
  * mid = bisector of the remaining sweep (inner-radius seat).
  */
 export function ellipseArcEndAngles(
@@ -142,7 +142,7 @@ export function ellipseInnerRatioFromAttrs(
   );
 }
 
-/** Read ellipse arc sweep percent (100 = full / 周弧度). */
+/** Read ellipse arc sweep percent (100 = full / 闂佸憡绋忛崝灞炬叏椤掍焦鍎?. */
 export function ellipseArcPercentFromAttrs(
   attrs: Record<string, unknown> | null | undefined
 ): number {
@@ -152,7 +152,7 @@ export function ellipseArcPercentFromAttrs(
   );
 }
 
-/** Read fixed 开始位置 degrees. */
+/** Read fixed 閻庢鍠掗崑鎾斥攽椤旂⒈鍎庣紓宥呮噽缁?degrees. */
 export function ellipseStartDegFromAttrs(
   attrs: Record<string, unknown> | null | undefined
 ): number {
@@ -212,7 +212,7 @@ export function starInnerRatioFromAttrs(
 }
 
 /**
- * Live polygon / star / ellipse params while knob-dragging (DOM + SoA preview).
+ * Live polygon / star / ellipse params while knob-dragging (DOM + Kit preview).
  * Document store stays idle mid-drag; toolbars and canvas ink subscribe here.
  */
 export type LiveShapeParamsPreview = {
@@ -366,7 +366,7 @@ export function polygonPoints(
   return points;
 }
 
-/** Scale/translate points so their AABB exactly fills width × height. */
+/** Scale/translate points so their AABB exactly fills width 闁?height. */
 export function fitPointsToBox(
   points: Array<[number, number]>,
   width: number,
@@ -390,7 +390,7 @@ export function fitPointsToBox(
   return points.map(([x, y]) => [((x - minX) / bw) * w, ((y - minY) / bh) * h]);
 }
 
-/** Uniform scale + center — keeps regular polygon / star proportions. */
+/** Uniform scale + center 闂?keeps regular polygon / star proportions. */
 export function fitPointsUniformToBox(
   points: Array<[number, number]>,
   width: number,
@@ -446,22 +446,8 @@ export function shapeVertexPoints(
   return [];
 }
 
-/** Hit/selection thickness for line & arrow nodes (world units). */
-export const STROKE_HIT = 24;
-/** Stored line/arrow thickness. Hit tolerance stays separate in STROKE_HIT. */
+/** Stored line/arrow thickness. */
 export const STROKE_GEOMETRY_HEIGHT = 1;
-
-/**
- * Hit-test slop in **scene** units from a constant screen-pixel budget.
- * Must divide by zoom — using raw `STROKE_HIT/2` as scene pad makes a ~12u
- * fat finger at 4000% zoom (~480 CSS px) and blocks blank-click deselect.
- */
-export function sceneHitSlop(
-  zoom: number,
-  screenPx: number = Math.max(STROKE_HIT / 2, 12)
-): number {
-  return Math.max(0, screenPx) / Math.max(0.05, Number(zoom) || 1);
-}
 
 export type StrokeEndpoints = { x0: number; y0: number; x1: number; y1: number };
 
@@ -483,7 +469,7 @@ export function strokeNodeFromEndpoints(ep: StrokeEndpoints) {
   };
 }
 
-/** World-space endpoints of a line/arrow AABB + angle (local shaft left→right). */
+/** World-space endpoints of a line/arrow AABB + angle (local shaft left闂佹剚鍋呮慨鐧穏ht). */
 export function strokeEndpointsFromBox(
   box: { left: number; top: number; width: number; height: number },
   angleDeg: number
@@ -533,452 +519,5 @@ export function resizeStrokeByEndpoint(
   return strokeNodeFromEndpoints({ x0: nextX, y0: nextY, x1: ep.x1, y1: ep.y1 });
 }
 
-/** Distance from point to segment (for line/arrow hit-testing). */
-export function distPointToSegment(
-  px: number,
-  py: number,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number
-) {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const len2 = dx * dx + dy * dy;
-  if (len2 < 1e-8) return Math.hypot(px - x0, py - y0);
-  let t = ((px - x0) * dx + (py - y0) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy));
-}
-
-/**
- * Canvas Path2D geometry cache — shared by Canvas2D idle paint, artboard ink,
- * hit-test, and selection overlay. Same geom fingerprint as meshCache (via path `d`).
- * Zoom must not invalidate entries.
- */
-const PATH2D_CACHE_MAX = 4096;
-const path2dByD = new Map<string, Path2D>();
-const path2dTouch: string[] = [];
-/** nodeId → path `d` fingerprint currently cached for that node. */
-const nodePathFp = new Map<string, string>();
-
-let hitCtx: CanvasRenderingContext2D | null = null;
-
-function getPath2DHitCtx(): CanvasRenderingContext2D | null {
-  if (typeof document === 'undefined') return null;
-  if (hitCtx) return hitCtx;
-  const c = document.createElement('canvas');
-  c.width = 1;
-  c.height = 1;
-  hitCtx = c.getContext('2d', { willReadFrequently: true });
-  return hitCtx;
-}
-
-function touchPath2DKey(d: string) {
-  const i = path2dTouch.indexOf(d);
-  if (i >= 0) path2dTouch.splice(i, 1);
-  path2dTouch.push(d);
-  while (path2dTouch.length > PATH2D_CACHE_MAX) {
-    const drop = path2dTouch.shift();
-    if (drop) path2dByD.delete(drop);
-  }
-}
-
-/** Cached Path2D for an SVG path `d` (empty / invalid → null). */
-export function getCachedPath2D(pathD: string): Path2D | null {
-  const d = String(pathD || '').trim();
-  if (!d || typeof Path2D === 'undefined') return null;
-  let path = path2dByD.get(d);
-  if (path) {
-    touchPath2DKey(d);
-    return path;
-  }
-  try {
-    path = new Path2D(d);
-  } catch {
-    return null;
-  }
-  path2dByD.set(d, path);
-  touchPath2DKey(d);
-  return path;
-}
-
-/** Bind a node id to a path `d` so paint remounts can drop the entry. */
-export function rememberNodePath2D(nodeId: string, pathD: string): Path2D | null {
-  const id = String(nodeId || '');
-  const d = String(pathD || '').trim();
-  if (!id || !d) return null;
-  const prev = nodePathFp.get(id);
-  if (prev && prev !== d) {
-    // Keep Path2D for `prev` if other nodes share it — only forget the binding.
-  }
-  nodePathFp.set(id, d);
-  return getCachedPath2D(d);
-}
-
-export function invalidateNodePath2D(nodeId: string) {
-  const id = String(nodeId || '');
-  if (!id) return;
-  nodePathFp.delete(id);
-}
-
-/** Drop all node→path fingerprints (full document replace / SoA rebuild). */
-export function clearNodePathFingerprints(): void {
-  nodePathFp.clear();
-}
-
-/** Test / probe: Path2D entries currently retained. */
-export function getPath2DCacheSize(): number {
-  return path2dByD.size;
-}
-
-/** Test helper — clear Path2D LRU (does not clear node bindings). */
-export function clearPath2DCache(): void {
-  path2dByD.clear();
-  path2dTouch.length = 0;
-}
-
-export type Path2DHitOpts = {
-  /** Test fill (closed shapes / pencil blobs). */
-  fill?: boolean;
-  /** Stroke hit width in local units (0 / omit → skip stroke test). */
-  strokeWidth?: number;
-  fillRule?: CanvasFillRule;
-  lineCap?: CanvasLineCap;
-  lineJoin?: CanvasLineJoin;
-};
-
-/**
- * Local-space hit against a cached Path2D (same coords as path `d`).
- * Prefer this over sampling `getPointAtLength` for pen/path hover.
- */
-export function hitTestPath2DLocal(
-  pathD: string,
-  lx: number,
-  ly: number,
-  opts?: Path2DHitOpts
-): boolean {
-  if (![lx, ly].every(Number.isFinite)) return false;
-  const path = getCachedPath2D(pathD);
-  if (!path) return false;
-  const ctx = getPath2DHitCtx();
-  if (!ctx) return false;
-
-  const wantFill = Boolean(opts?.fill);
-  const sw = Math.max(0, Number(opts?.strokeWidth) || 0);
-  const rule: CanvasFillRule =
-    opts?.fillRule === 'evenodd' ? 'evenodd' : 'nonzero';
-
-  try {
-    if (wantFill && ctx.isPointInPath(path, lx, ly, rule)) return true;
-    if (sw > 0 && typeof ctx.isPointInStroke === 'function') {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.lineWidth = sw;
-      ctx.lineCap = opts?.lineCap || 'round';
-      ctx.lineJoin = opts?.lineJoin || 'round';
-      ctx.miterLimit = 10;
-      if (ctx.isPointInStroke(path, lx, ly)) return true;
-    }
-  } catch {
-    return false;
-  }
-  return false;
-}
-
-/** Reused off-DOM path for length sampling (Bezier pen / freehand). */
-let measurePathEl: SVGPathElement | null = null;
-
-function getMeasurePathEl(): SVGPathElement {
-  if (measurePathEl) return measurePathEl;
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute(
-    'style',
-    'position:absolute;left:-99999px;top:0;width:0;height:0;overflow:hidden;pointer-events:none'
-  );
-  measurePathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  svg.appendChild(measurePathEl);
-  if (typeof document !== 'undefined') {
-    document.documentElement.appendChild(svg);
-  }
-  return measurePathEl;
-}
-
-/** Outlined text / dense logos — avoid re-parsing & dense sampling every pointermove. */
+/** Outlined text / dense logos - avoid re-parsing heavy path d. */
 export const HEAVY_PATH_D_CHARS = 12_000;
-
-let measurePathDCache = '';
-let measurePathRuleCache = '';
-
-function syncMeasurePathD(el: SVGPathElement, d: string, fillRule?: string) {
-  if (measurePathDCache !== d) {
-    el.setAttribute('d', d);
-    measurePathDCache = d;
-  }
-  if (fillRule != null) {
-    const rule = fillRule === 'evenodd' ? 'evenodd' : 'nonzero';
-    if (measurePathRuleCache !== rule) {
-      el.setAttribute('fill-rule', rule);
-      measurePathRuleCache = rule;
-    }
-  }
-}
-
-/**
- * Whether a local-space point lies inside a path fill (respects `fill-rule`, incl. boolean holes).
- */
-export function pathDContainsPoint(
-  px: number,
-  py: number,
-  pathD: string,
-  fillRule: string = 'nonzero'
-): boolean {
-  const d = String(pathD || '').trim();
-  if (!d || typeof document === 'undefined') return false;
-  // Prefer Canvas Path2D (cached) — no DOM CTM / createSVGPoint per probe.
-  if (
-    hitTestPath2DLocal(d, px, py, {
-      fill: true,
-      fillRule: fillRule === 'evenodd' ? 'evenodd' : 'nonzero',
-    })
-  ) {
-    return true;
-  }
-  try {
-    const el = getMeasurePathEl();
-    syncMeasurePathD(el, d, fillRule);
-    if (typeof el.isPointInFill !== 'function') return false;
-    const svg = el.ownerSVGElement;
-    if (!svg?.createSVGPoint) return false;
-    const pt = svg.createSVGPoint();
-    pt.x = px;
-    pt.y = py;
-    return el.isPointInFill(pt);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Min distance from a local-space point to an SVG path `d` (samples the stroke centerline).
- * Used so pen/pencil selection requires clicking near the ink — not the AABB.
- */
-export function distPointToPathD(px: number, py: number, d: string): number {
-  const pathD = String(d || '').trim();
-  if (!pathD || typeof document === 'undefined') return Infinity;
-  // Outlined text / multi-glyph paths: dense getPointAtLength walks freeze the main thread.
-  if (pathD.length >= HEAVY_PATH_D_CHARS) return Infinity;
-  try {
-    const el = getMeasurePathEl();
-    syncMeasurePathD(el, pathD);
-    const len = el.getTotalLength();
-    if (!(len > 0) || !Number.isFinite(len)) return Infinity;
-    const step = Math.max(1.5, Math.min(6, len / 120));
-    let min = Infinity;
-    let prev = el.getPointAtLength(0);
-    for (let t = step; t < len; t += step) {
-      const p = el.getPointAtLength(t);
-      min = Math.min(min, distPointToSegment(px, py, prev.x, prev.y, p.x, p.y));
-      prev = p;
-      if (min <= 0.5) return min;
-    }
-    const end = el.getPointAtLength(len);
-    return Math.min(min, distPointToSegment(px, py, prev.x, prev.y, end.x, end.y));
-  } catch {
-    return Infinity;
-  }
-}
-
-/** Resolve SVG.js wrapper or raw DOM element → Element. */
-function asDomElement(el: unknown): Element | null {
-  if (!el || typeof el !== 'object') return null;
-  const rec = el as { nodeType?: number; node?: { nodeType?: number } };
-  if (typeof rec.nodeType === 'number' && rec.nodeType === 1) return el as Element;
-  if (rec.node && typeof rec.node.nodeType === 'number' && rec.node.nodeType === 1) {
-    return rec.node as Element;
-  }
-  return null;
-}
-
-/**
- * Liang–Barsky: true when segment (x0,y0)→(x1,y1) intersects the closed AABB.
- * Midpoint-only checks miss small marquees that a stroke segment crosses off-center.
- */
-export function segmentIntersectsAabb(
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  left: number,
-  top: number,
-  right: number,
-  bottom: number
-): boolean {
-  let t0 = 0;
-  let t1 = 1;
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const edges: Array<[number, number]> = [
-    [-dx, x0 - left],
-    [dx, right - x0],
-    [-dy, y0 - top],
-    [dy, bottom - y0],
-  ];
-  for (const [p, q] of edges) {
-    if (p === 0) {
-      if (q < 0) return false;
-      continue;
-    }
-    const r = q / p;
-    if (p < 0) {
-      if (r > t1) return false;
-      if (r > t0) t0 = r;
-    } else {
-      if (r < t0) return false;
-      if (r < t1) t1 = r;
-    }
-  }
-  return t0 <= t1;
-}
-
-/**
- * Whether a local-space path stroke intersects a world-space AABB
- * (marquee / box select). Samples the centerline — not the path's own AABB.
- */
-export function pathStrokeHitsSceneBox(
-  pathD: string,
-  nodeBox: { left: number; top: number; width: number; height: number },
-  angleDeg: number,
-  sceneBox: { left: number; top: number; width: number; height: number },
-  pad = 2
-): boolean {
-  const d = String(pathD || '').trim();
-  if (!d || typeof document === 'undefined') return false;
-  const left = sceneBox.left - pad;
-  const top = sceneBox.top - pad;
-  const right = sceneBox.left + sceneBox.width + pad;
-  const bottom = sceneBox.top + sceneBox.height + pad;
-  const angle = Number(angleDeg) || 0;
-  const rad = (angle * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  const cx = nodeBox.width / 2;
-  const cy = nodeBox.height / 2;
-  const toWorld = (lx: number, ly: number) => {
-    const dx = lx - cx;
-    const dy = ly - cy;
-    return {
-      x: nodeBox.left + cx + dx * cos - dy * sin,
-      y: nodeBox.top + cy + dx * sin + dy * cos,
-    };
-  };
-  const inBox = (x: number, y: number) => x >= left && x <= right && y >= top && y <= bottom;
-  try {
-    const el = getMeasurePathEl();
-    el.setAttribute('d', d);
-    const len = el.getTotalLength();
-    if (!(len > 0) || !Number.isFinite(len)) return false;
-    const step = Math.max(1.5, Math.min(8, len / 100));
-    let prev = toWorld(el.getPointAtLength(0).x, el.getPointAtLength(0).y);
-    if (inBox(prev.x, prev.y)) return true;
-    for (let t = step; t <= len; t += step) {
-      const lp = el.getPointAtLength(Math.min(t, len));
-      const p = toWorld(lp.x, lp.y);
-      if (inBox(p.x, p.y)) return true;
-      if (segmentIntersectsAabb(prev.x, prev.y, p.x, p.y, left, top, right, bottom)) {
-        return true;
-      }
-      prev = p;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Hit-test the rendered SVG node with browser geometry APIs.
- * Pen: stroke only. Pencil outline: fill (ink blob) and/or stroke.
- * Returns false when the element is missing — caller should fall back.
- */
-export function hitTestSvgNodeAtClient(
-  el: unknown,
-  clientX: number,
-  clientY: number,
-  opts?: { mode?: 'stroke' | 'fill' | 'auto'; strokeHitWidth?: number }
-): boolean {
-  const root = asDomElement(el);
-  if (!root || typeof document === 'undefined') return false;
-
-  const geoms: SVGGeometryElement[] = [];
-  const push = (n: Element | null | undefined) => {
-    if (!n) return;
-    const anyN = n as SVGGeometryElement;
-    if (typeof anyN.isPointInStroke === 'function' || typeof anyN.isPointInFill === 'function') {
-      geoms.push(anyN);
-    }
-  };
-  push(root);
-  root.querySelectorAll?.('path,line,polyline,polygon,circle,ellipse,rect').forEach((n) => push(n));
-
-  const mode = opts?.mode || 'auto';
-  const hitW = opts?.strokeHitWidth;
-
-  for (const geom of geoms) {
-    const svg = geom.ownerSVGElement;
-    if (!svg) continue;
-    const ctm = geom.getScreenCTM?.();
-    if (!ctm) continue;
-    let local: DOMPoint;
-    try {
-      const pt = svg.createSVGPoint();
-      pt.x = clientX;
-      pt.y = clientY;
-      local = pt.matrixTransform(ctm.inverse());
-    } catch {
-      continue;
-    }
-
-    try {
-      const fill = String(geom.getAttribute('fill') || '').toLowerCase();
-      // SVG default fill is black when the attribute is omitted — only skip explicit none.
-      const skipFill = fill === 'none' || fill === 'transparent';
-
-      if (mode === 'fill' || mode === 'auto') {
-        if (!skipFill && typeof geom.isPointInFill === 'function' && geom.isPointInFill(local)) {
-          return true;
-        }
-      }
-
-      if (mode === 'stroke' || mode === 'auto') {
-        if (typeof geom.isPointInStroke === 'function') {
-          let prev: string | null = null;
-          if (hitW != null && hitW > 0) {
-            prev = geom.getAttribute('stroke-width');
-            geom.setAttribute('stroke-width', String(hitW));
-            // Some engines ignore stroke hit when stroke is none / transparent.
-            const prevStroke = geom.getAttribute('stroke');
-            if (!prevStroke || prevStroke === 'none') {
-              geom.setAttribute('stroke', '#000');
-              const hit = geom.isPointInStroke(local);
-              if (prevStroke == null) geom.removeAttribute('stroke');
-              else geom.setAttribute('stroke', prevStroke);
-              if (prev != null) geom.setAttribute('stroke-width', prev);
-              else geom.removeAttribute('stroke-width');
-              if (hit) return true;
-              continue;
-            }
-          }
-          const hit = geom.isPointInStroke(local);
-          if (hitW != null) {
-            if (prev != null) geom.setAttribute('stroke-width', prev);
-            else geom.removeAttribute('stroke-width');
-          }
-          if (hit) return true;
-        }
-      }
-    } catch {
-      /* try next geom */
-    }
-  }
-  return false;
-}

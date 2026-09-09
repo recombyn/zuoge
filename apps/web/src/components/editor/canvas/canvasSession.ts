@@ -2,7 +2,6 @@
  * Canvas write / hit / geometry session — imperative API used by SvgCanvas.
  */
 import {
-  addNodeToDocument,
   patchDeltaSetLike,
   reconcileStackOrder,
   updateNodesInDocument,
@@ -11,11 +10,7 @@ import {
   nodeIdsBoundToFrames,
 } from '@/components/rcb/scene/document/sceneClipboard';
 import {
-  createImageNode,
-  createShapeNode,
-  createTextNode,
   fitImageSize,
-  measureImageNaturalSize,
 } from '@/components/rcb/scene/document/nodeFactories';
 import {
   isAudioNode,
@@ -24,7 +19,6 @@ import {
   isTextFrameNode,
   isVideoNode,
 } from '@/components/rcb/scene/document/nodeCapabilities';
-import { frameIdAtPoint } from '@/components/rcb/scene/document/sceneHitBridge';
 import {
   canBindToArtboard,
   getAnimationWorkbenchTimelineFocus,
@@ -37,13 +31,12 @@ import { getLottiePrecompEditFocus } from '@/components/editor/nodes/AnimationNo
 import { clearImageProcessAttrs } from '@/components/rcb/scene/document/mediaLifecycle';
 import {
   STROKE_GEOMETRY_HEIGHT,
-  strokeNodeFromEndpoints,
 } from '@/components/rcb/scene/document/sceneShapes';
 import {
   deflateSelectionBox,
   inflateSelectionBox,
 } from '@/components/rcb/scene/document/sceneEffects';
-import { hitTestWithSpatialIndex } from '@/components/rcb/render/sceneRenderer';
+import { hitTestRcbIdFromKit } from '@/components/rcb/canvas/kitBridge';
 import {
   clearNodeTransformPreviews,
   effectivePaintBox,
@@ -57,40 +50,35 @@ import {
   measurePlainTextSize,
 } from '@/components/rcb/scene/document/sceneText';
 import {
-  clearSceneDragPreview,
-  dedupeSceneNode,
   nodeLeftTop,
   isFrameLocalCoordSpace,
   nodeDocumentLeftTop,
   nodeLocalToDocumentPoint,
   frameSceneBounds,
-  previewSvgNodeAngle,
-  previewSvgNodeGeometry,
+} from '@/components/rcb/scene/layout/nodeLayout';
+import {
+  clearSceneDragPreview,
   purgeOrphanSceneNodes,
-} from '@/components/rcb/scene/paint/sceneToSvg';
-import { patchNodesGeometry, sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
-import type { SceneSpatialRuntime } from '@/components/rcb/core/spatialIndex';
+} from '@/components/rcb/scene/dom/domHostBoard';
+import { patchNodesGeometry, sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 import {
   getShapeHost,
   getSharedNodeEls,
   replaceShapePaint,
   shapeHostRevealsOverflow,
-  type SvgBoardHandle,
+  type DomHostBoardHandle,
 } from '@/components/rcb';
 import {
   getSceneWorldRoot,
   listShapeHosts,
 } from '@/components/rcb/shapes/shapeHostRegistry';
 import {
-  rcbCenterOnPoint,
-  rcbPlaceTextFontSize,
   rcbFitImageIntoViewport,
   rcbLayoutGeneratorPlate,
   GENERATOR_EMPTY_STROKE_OUTSET,
   getDocumentGridSize,
-  snapCoordToGrid,
 } from '@/components/rcb';
-import { parseFrameSelId } from '@/components/rcb/selection/frameSelectionIds';
+import { parseFrameSelId } from '@/components/rcb/frames/frameSceneQuery';
 import { syncFrameContentClip } from '@/components/rcb/frames/frameContentClip';
 import {
   canBindNodeToArtboardFrame,
@@ -114,7 +102,6 @@ import {
   setActiveTool,
   setDocument,
   setDocumentFromCanvas,
-  setPendingImageSrc,
   setSelectedNodeId,
   setSelectedNodeIds,
   touchDocumentRevision,
@@ -125,13 +112,13 @@ import type { SceneDocument, SceneNode } from '@/components/rcb/sceneNode';
 type DragWriteCoalescer = ReturnType<typeof createDragWriteCoalescer>;
 
 /** Infinite canvas leaves `board.root` null — clip defs live on the shared scene SVG. */
-function resolveBoardClipRoot(board: SvgBoardHandle | null | undefined): SVGSVGElement | null {
+function resolveBoardClipRoot(board: DomHostBoardHandle | null | undefined): SVGSVGElement | null {
   if (board?.root) return board.root;
   return getSceneWorldRoot();
 }
 
 /** Merge live DOM hosts into board.nodeEls so frame-drag clip sync can find boolean paths. */
-function mergeLiveHostElsIntoBoard(board: SvgBoardHandle): void {
+function mergeLiveHostElsIntoBoard(board: DomHostBoardHandle): void {
   const shared = getSharedNodeEls();
   for (const host of listShapeHosts()) {
     if (!host.el) continue;
@@ -141,7 +128,7 @@ function mergeLiveHostElsIntoBoard(board: SvgBoardHandle): void {
 }
 
 function syncOwnedFrameClipsOnBoard(
-  board: SvgBoardHandle,
+  board: DomHostBoardHandle,
   document: SceneDocument,
   opts: {
     zoom: number;
@@ -361,10 +348,6 @@ export function normalizeGeomPatches(doc: SceneDocument | null | undefined, patc
   });
 }
 
-export function hitTestFrameInDoc(doc: SceneDocument | null | undefined, x: number, y: number): string | null {
-  return frameIdAtPoint(doc, x, y);
-}
-
 function rectIntersectsFrame(
   rect: { left: number; top: number; width: number; height: number },
   frame: { x?: number; y?: number; width?: number; height?: number }
@@ -525,43 +508,6 @@ export function applyNodeFrameBindings(
   return next;
 }
 
-/** Insert a new node; prefer create-time frameId, then reconcile against final AABB. */
-function insertCreatedNode(
-  doc: SceneDocument,
-  id: string,
-  node: SceneNode,
-  preferredFrameId?: string | null
-): SceneDocument {
-  const preferred = acceptCreateFrameId(doc, preferredFrameId, node);
-  if (preferred) {
-    node.attrs.frameId = preferred;
-    // Create tools place in world/scene; store plate-local when bound.
-    if (isFrameLocalCoordSpace(doc)) {
-      const frame = (Array.isArray(doc.frames) ? doc.frames : []).find(
-        (f) => String(f?.id) === preferred
-      );
-      if (frame) {
-        node.x = (Number(node.x) || 0) - (Number(frame.x) || 0);
-        node.y = (Number(node.y) || 0) - (Number(frame.y) || 0);
-      }
-    }
-  }
-  const added = addNodeToDocument(doc, id, node);
-  // Always reconcile — pointer-down may hit the plate while the finished
-  // box sits outside (kept frameId → timeline layer + unclipped “ghost” on
-  // the main canvas after the dock closes).
-  const bound = applyNodeFrameBindings(added, [
-    {
-      nodeId: id,
-      left: Number(node.x) || 0,
-      top: Number(node.y) || 0,
-      width: Math.max(1, Number(node.width) || 1),
-      height: Math.max(1, Number(node.height) || 1),
-    },
-  ]);
-  return tagCreatedNodeForWorkbenchSurround(bound, id);
-}
-
 /** Bind a freshly created node to the clipContent frame its bbox intersects. */
 export function bindCreatedNodeToFrame(
   doc: SceneDocument,
@@ -702,10 +648,10 @@ export type CanvasSessionDeps = {
   /** Prefer store head during transform — local ref can lag finishImageProcess. */
   getCommittedDocument?: () => SceneDocument | null;
   setDocumentLocal: (doc: SceneDocument) => void;
-  getBoard: () => SvgBoardHandle | null;
+  getBoard: () => DomHostBoardHandle | null;
   getZoom: () => number;
   isReadOnly: () => boolean;
-  spatial: SceneSpatialRuntime;
+
   setEditingTextId: (id: string | null) => void;
   measureViewport: () => DOMRect | null;
   getDragWriteCoalescer: () => DragWriteCoalescer;
@@ -715,7 +661,7 @@ export type CanvasSessionDeps = {
   clearVideoLiveGeom: () => void;
 };
 
-function resolvePreviewHostEl(board: SvgBoardHandle, nodeId: string): SVGElement | null {
+function resolvePreviewHostEl(board: DomHostBoardHandle, nodeId: string): SVGElement | null {
   const cached = board.nodeEls.get(nodeId);
   if (cached) return cached;
   const fromHost = getShapeHost(nodeId)?.el;
@@ -731,44 +677,11 @@ function resolvePreviewHostEl(board: SvgBoardHandle, nodeId: string): SVGElement
   return null;
 }
 
-/**
- * Gesture SVG DOM preview only when a host is mounted.
- * Canvas-ink nodes have no lattice — TransformPreview + SoA paint/hit own live pose.
- */
-function previewMountedHostGeometry(
-  board: SvgBoardHandle,
-  nodeId: string,
-  box: { left: number; top: number; width: number; height: number },
-  opts?: {
-    textResizeMode?: 'scale' | 'wrap' | 'frame';
-    plainText?: string;
-    textStyle?: ReturnType<typeof parseNodeTextStyle>;
-  }
-): boolean {
-  if (!resolvePreviewHostEl(board, nodeId)) return false;
-  return previewSvgNodeGeometry(board.nodeEls, nodeId, box, {
-    ...opts,
-    publishPreview: false,
-  });
-}
-
 function previewAngleDeg(nodeId: string, node: { attrs?: Record<string, unknown> } | null | undefined): number {
   const live = getNodeTransformPreview(nodeId)?.angle;
   if (Number.isFinite(live)) return Number(live);
   return Number(node?.attrs?.angle) || 0;
 }
-
-export type ShapeCreateBox = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  x0?: number;
-  y0?: number;
-  x1?: number;
-  y1?: number;
-  frameId?: string | null;
-};
 
 export type CanvasSession = {
   listNodeIds: () => readonly string[];
@@ -778,22 +691,11 @@ export type CanvasSession = {
     y: number,
     screen?: { clientX: number; clientY: number }
   ) => string | null;
-  hitTestFrame: (x: number, y: number) => string | null;
-  queryNodeIdsInRect: (box: SceneBox) => string[];
   finishToSelect: () => void;
-  onCreateShape: (kind: string, box: ShapeCreateBox) => void;
-  onPlaceText: (point: {
-    x: number;
-    y: number;
-    width?: number;
-    autoSize?: boolean;
-    fontSize?: number;
-  }) => void;
   imageSizeForViewport: (natural: { width: number; height: number }) => {
     width: number;
     height: number;
   };
-  placeImageAt: (src: string, x: number, y: number) => Promise<void>;
   onGeometryCommit: (
     patches: GeomPatch[],
     options?: { textResizeMode?: 'scale' | 'wrap'; skipHistory?: boolean }
@@ -817,144 +719,11 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
   const hitTest = (
     x: number,
     y: number,
-    screen?: { clientX: number; clientY: number }
-  ) => {
-    const board = deps.getBoard();
-    return hitTestWithSpatialIndex(
-      {
-        getDocument: deps.getDocument,
-        getSpatial: () => deps.spatial,
-        getZoom: deps.getZoom,
-        listNodeIds,
-        getNodeBox,
-        getNodeEls: () => board?.nodeEls ?? null,
-      },
-      { x, y },
-      screen
-    );
-  };
-
-  const hitTestFrame = (x: number, y: number) => hitTestFrameInDoc(deps.getDocument(), x, y);
-
-  const queryNodeIdsInRect = (box: SceneBox) =>
-    deps.spatial.queryIdsInRect(box, { ascending: true });
+    _screen?: { clientX: number; clientY: number }
+  ) => hitTestRcbIdFromKit(x, y);
 
   const finishToSelect = () => {
     setActiveTool('select');
-  };
-
-  const onCreateShape = (kind: string, box: ShapeCreateBox) => {
-    const doc = deps.getDocument();
-    if (!doc || deps.isReadOnly()) return;
-    const isStroke = kind === 'line' || kind === 'arrow';
-
-    if (isStroke && box.x0 != null && box.y0 != null && box.x1 != null && box.y1 != null) {
-      const a = sceneToDocumentCoords(doc, box.x0, box.y0);
-      const b = sceneToDocumentCoords(doc, box.x1, box.y1);
-      const placed = strokeNodeFromEndpoints({
-        x0: a.x,
-        y0: a.y,
-        x1: b.x,
-        y1: b.y,
-      });
-      const { id, node } = createShapeNode({
-        x: placed.x,
-        y: placed.y,
-        width: placed.width,
-        height: placed.height,
-        shapeType: kind,
-        fill: 'transparent',
-        angle: placed.angle,
-      });
-      const bound = insertCreatedNode(doc, id, node, box.frameId);
-      deps.setDocumentLocal(bound);
-      pushEditorHistory();
-      setDocumentFromCanvas(bound);
-      setSelectedNodeIds([id]);
-      setSelectedNodeId(id);
-      finishToSelect();
-      return;
-    }
-
-    // Circles / regular polygons / stars are already squared in ShapeDrawFeature
-    // (visual→geom). Do NOT Math.max(3, size) here — that inflated geom 2→3 and
-    // made committed ink jump from visual 3×3 to 4×4 after center stroke.
-    const origin = sceneToDocumentCoords(doc, box.left, box.top);
-    const { id, node } = createShapeNode({
-      x: origin.x,
-      y: origin.y,
-      width: box.width,
-      height: box.height,
-      shapeType: kind,
-      fill: '#FFFFFF',
-    });
-    const bound = insertCreatedNode(doc, id, node, box.frameId);
-    deps.setDocumentLocal(bound);
-    pushEditorHistory();
-    setDocumentFromCanvas(bound);
-    setSelectedNodeIds([id]);
-    setSelectedNodeId(id);
-    finishToSelect();
-  };
-
-  const onPlaceText = (point: {
-    x: number;
-    y: number;
-    width?: number;
-    autoSize?: boolean;
-    fontSize?: number;
-  }) => {
-    const doc = deps.getDocument();
-    if (!doc || deps.isReadOnly()) return;
-    const autoSize = point.autoSize !== false;
-    const gridSize = getDocumentGridSize(doc);
-    const view = deps.measureViewport();
-    const zoom = Math.max(0.05, deps.getZoom() || 1);
-    const docW = Math.max(0, Number(doc.width) || 0);
-    // Screen-constant default so fit-to-board / high zoom does not spawn invisible glyphs.
-    const fontSize =
-      point.fontSize != null && point.fontSize > 0
-        ? point.fontSize
-        : rcbPlaceTextFontSize(zoom, undefined, {
-            viewportWidth: view?.width,
-            docWidth: docW > 0 ? docW : undefined,
-          });
-    const origin = sceneToDocumentCoords(
-      doc,
-      snapCoordToGrid(point.x, gridSize),
-      snapCoordToGrid(point.y, gridSize)
-    );
-    const fixedW = autoSize
-      ? 2
-      : Math.max(gridSize, snapCoordToGrid(Math.max(gridSize, point.width || 160), gridSize));
-    const { id, node } = createTextNode({
-      x: origin.x,
-      y: origin.y,
-      text: '',
-      width: fixedW,
-      // Height comes from measured font metrics — do not hardcode 20.
-      autoSize,
-      fontSize,
-    });
-    const bound = insertCreatedNode(
-      doc,
-      id,
-      node,
-      hitTestFrame(origin.x, origin.y)
-    );
-    deps.setDocumentLocal(bound);
-    // Match shape draw — setDocument remounts hosts and drops the caret.
-    pushEditorHistory();
-    setDocumentFromCanvas(bound);
-    setSelectedNodeIds([id]);
-    setSelectedNodeId(id);
-    finishToSelect();
-    // Open caret after the store write + tool switch settle (same-tick focus is stolen).
-    if (typeof queueMicrotask === 'function') {
-      queueMicrotask(() => deps.setEditingTextId(id));
-    } else {
-      deps.setEditingTextId(id);
-    }
   };
 
   const imageSizeForViewport = (natural: { width: number; height: number }) => {
@@ -963,38 +732,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
       return fitImageSize(natural.width, natural.height, 2400);
     }
     return rcbFitImageIntoViewport(natural, view, deps.getZoom());
-  };
-
-  const placeImageAt = async (src: string, x: number, y: number) => {
-    if (deps.isReadOnly()) return;
-    try {
-      const natural = await measureImageNaturalSize(src);
-      const { width, height } = imageSizeForViewport(natural);
-      const latest = deps.getDocument();
-      if (!latest) return;
-      const placed = rcbCenterOnPoint({ x, y }, { width, height });
-      const origin = sceneToDocumentCoords(latest, placed.left, placed.top);
-      const { id, node } = createImageNode({
-        x: origin.x,
-        y: origin.y,
-        width: placed.width,
-        height: placed.height,
-        src,
-      });
-      const bound = insertCreatedNode(
-        latest,
-        id,
-        node,
-        hitTestFrame(origin.x, origin.y)
-      );
-      setDocument(bound);
-      setSelectedNodeId(id);
-      setPendingImageSrc(null);
-      finishToSelect();
-    } catch {
-      setPendingImageSrc(null);
-      finishToSelect();
-    }
   };
 
   const applyFrameGeometryPatches = (
@@ -1071,34 +808,9 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
       deps.setDocumentLocal(next);
       if (board) {
         normalized.forEach((p) => {
-          const el = board.nodeEls.get(p.nodeId) as any;
-          const shapeType = String(
-            el?.sceneShapeType ||
-              el?.attr?.('data-scene-shape-type') ||
-              next?.deltaSetLike?.[p.nodeId]?.attrs?.shapeType ||
-              ''
-          );
-          const isStrokeShape = shapeType === 'line' || shapeType === 'arrow';
-          const isText = next?.deltaSetLike?.[p.nodeId]?.key === 'text';
-          const didResize = Boolean(el?.__sceneDidResize);
           clearSceneDragPreview(board.nodeEls, p.nodeId);
-          // Images/svg use scale preview while dragging — remount to bake
-          // width/height (and refresh the infinite SVG viewport) on commit.
-          if (didResize || isStrokeShape || isText) {
-            void replaceShapePaint(next, board.nodeEls, p.nodeId, board.root ? board : null);
-            return;
-          }
-          const synced = previewSvgNodeGeometry(board.nodeEls, p.nodeId, p);
-          if (!synced) {
-            void replaceShapePaint(next, board.nodeEls, p.nodeId, board.root ? board : null);
-            return;
-          }
-          const host = getShapeHost(p.nodeId);
-          if (host?.layer) {
-            dedupeSceneNode(host.layer, p.nodeId, board.nodeEls.get(p.nodeId) ?? null);
-          } else if (board.layer) {
-            dedupeSceneNode(board.layer, p.nodeId, board.nodeEls.get(p.nodeId) ?? null);
-          }
+          // Bake drag preview into host paint (noop preview always returned false).
+          void replaceShapePaint(next, board.nodeEls, p.nodeId, board.root ? board : null);
         });
         const validIds = next?.deltaSetLike?.ROOT?.children || [];
         if (board.layer) {
@@ -1372,11 +1084,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
         height: Math.max(1, box.height),
         angle: Number.isFinite(patchAngle) ? patchAngle : previewAngleDeg(p.nodeId, node),
       });
-      previewMountedHostGeometry(board, p.nodeId, box, {
-        textResizeMode: options?.textResizeMode,
-        plainText: isText ? parseNodeText(node.attrs || {}) : undefined,
-        textStyle: isText ? parseNodeTextStyle(node.attrs || {}) : undefined,
-      });
       if (
         node?.key === 'video' ||
         node?.key === 'lottie' ||
@@ -1413,11 +1120,11 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
     if (frames.length) {
       const movingFrameIds = new Set(frames.map((frame) => String(frame.id || '').trim()));
       const frameLocal = isFrameLocalCoordSpace(previewDocument);
-      // Frame-local plate drag: children keep local x/y. SoA ink follows live plate
+      // Frame-local plate drag: children keep local x/y. Kit ink follows live plate
       // via nodeLeftTop — do NOT spatial-patch / rewrite every bound child each move
       // (animation workbench with hundreds of layers freezes the tab).
       if (frameLocal && !normalized.length) {
-        // Only touch mounted DOM hosts — SoA shapes have no lattice entry.
+        // Only touch mounted DOM hosts — Kit shapes have no lattice entry.
         if (board.nodeEls.size) {
           mergeLiveHostElsIntoBoard(board);
           const animHostByFrame = new Map<string, string | null>();
@@ -1435,12 +1142,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
               host.attrs?.animationFrameHost === true ||
               host.attrs?.animationFrameHost === 'true';
             if (isAnimHost) continue;
-            previewMountedHostGeometry(board, hostId, {
-              left: frame.x,
-              top: frame.y,
-              width: frame.width,
-              height: frame.height,
-            });
             if (host.key === 'lottie' || host.key === 'video' || host.key === 'image') {
               hasVideo = true;
               videoOverrides[hostId] = {
@@ -1461,16 +1162,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
             ).trim();
             if (!owner || !movingFrameIds.has(owner)) continue;
             if (animHostByFrame.get(owner) === nodeId) continue;
-            const { left, top } = nodeLeftTop(previewDocument, node);
-            previewMountedHostGeometry(board, nodeId, {
-              left,
-              top,
-              width: Math.max(1, Number(node.width) || 1),
-              height: Math.max(1, Number(node.height) || 1),
-            }, {
-              plainText: node.key === 'text' ? parseNodeText(node.attrs || {}) : undefined,
-              textStyle: node.key === 'text' ? parseNodeTextStyle(node.attrs || {}) : undefined,
-            });
             clipIds.push(nodeId);
           }
           if (clipIds.length) {
@@ -1487,27 +1178,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
           });
         }
         return;
-      }
-      // Frame-local: re-seat DOM hosts from live plate + local attrs (no child x/y writes).
-      mergeLiveHostElsIntoBoard(board);
-      for (const [nodeId] of board.nodeEls.entries()) {
-        const node = previewDocument.deltaSetLike?.[nodeId];
-        if (!node) continue;
-        const owner = String(
-          (node.attrs as Record<string, unknown> | undefined)?.frameId || ''
-        ).trim();
-        if (!owner || !movingFrameIds.has(owner)) continue;
-        const { left, top } = nodeLeftTop(previewDocument, node);
-        const box = {
-          left,
-          top,
-          width: Math.max(1, Number(node.width) || 1),
-          height: Math.max(1, Number(node.height) || 1),
-        };
-        previewMountedHostGeometry(board, nodeId, box, {
-          plainText: node.key === 'text' ? parseNodeText(node.attrs || {}) : undefined,
-          textStyle: node.key === 'text' ? parseNodeTextStyle(node.attrs || {}) : undefined,
-        });
       }
       // Animation frame host tracks plate size — local 0,0 under frameLocal.
       let hostDelta = previewDocument.deltaSetLike || {};
@@ -1531,7 +1201,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
           // Invisible host — do not re-seat FO or rewrite geom mid-drag.
           continue;
         }
-        previewMountedHostGeometry(board, hostId, box);
         if (host.key === 'lottie' || host.key === 'video' || host.key === 'image') {
           hasVideo = true;
           videoOverrides[hostId] = {
@@ -1572,15 +1241,6 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
     // TransformPreview before clip — findClippingFrameForNode prefers preview
     // over node x/y; stale preview + live plate = one-frame spill/jitter.
     setNodeTransformPreviews(previewPatches);
-    // Geom patches that carry angle (stroke endpoints) skip onAnglePreview — sync
-    // SVG host rotate without a second TransformPreview publish.
-    for (const p of previewPatches) {
-      if (!Number.isFinite(p.angle)) continue;
-      if (!board.nodeEls.get(p.nodeId)) continue;
-      previewSvgNodeAngle(board.nodeEls, p.nodeId, Number(p.angle), previewDocument, {
-        publishPreview: false,
-      });
-    }
     // Frame move/resize: clip only hosts bound to the moving plate(s).
     // Infinite canvas: board.root is null — use shared scene world root.
     if (frames.length) {
@@ -1624,21 +1284,7 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
         }
       }
     }
-    const spatialPatchIds = new Set<string>(
-      normalized.map((p) => String(p.nodeId || '').trim()).filter(Boolean)
-    );
-    // Plate-only under frameLocal: child world boxes follow live plate — patching
-    // every bound id each pointermove freezes animation workbenches.
-    if (frames.length && !isFrameLocalCoordSpace(previewDocument)) {
-      for (const frame of frames) {
-        for (const nodeId of frameMoveOwners.get(frame.id) || []) {
-          spatialPatchIds.add(String(nodeId || '').trim());
-        }
-      }
-    }
-    if (spatialPatchIds.size) {
-      deps.spatial.patchNodes(previewDocument, [...spatialPatchIds]);
-    }
+    // Kit owns ink AABB - DomHost cull uses live document geometry.
     // Keep HTML <video> plates glued to chrome (store doc is still pre-gesture).
     if (hasVideo) {
       deps.publishVideoLiveGeom({
@@ -1708,27 +1354,18 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
         },
       }),
     });
-    deps.spatial.patchNodes(deps.getDocument()!, [nodeId]);
+
     setNodeTransformAngles([{ nodeId, angle: nextAngle }]);
     if (!resolvePreviewHostEl(board, nodeId)) {
       return;
     }
     if (board.nodeEls.get(nodeId)) {
-      const synced = previewSvgNodeAngle(
+      void replaceShapePaint(
+        deps.getDocument(),
         board.nodeEls,
         nodeId,
-        nextAngle,
-        deps.getDocument(),
-        { publishPreview: false }
+        board.root ? board : null
       );
-      if (!synced) {
-        void replaceShapePaint(
-          deps.getDocument(),
-          board.nodeEls,
-          nodeId,
-          board.root ? board : null
-        );
-      }
     }
     // HTML video / lottie / audio / image SoftGlow plates read store doc —
     // push live angle so rotate tracks chrome.
@@ -1762,13 +1399,8 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
     listNodeIds,
     getNodeBox,
     hitTest,
-    hitTestFrame,
-    queryNodeIdsInRect,
     finishToSelect,
-    onCreateShape,
-    onPlaceText,
     imageSizeForViewport,
-    placeImageAt,
     onGeometryCommit,
     onGeometryPreview,
     resetFrameMoveOwners: () => {

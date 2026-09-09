@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 
 export type MediaGeomOverride = {

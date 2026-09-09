@@ -90,7 +90,7 @@ function commitPasteThenSelect(opts: {
     document: opts.document as never,
     patchedNodeIds: opts.newIds,
     addedFrameIds: opts.newFrameIds,
-    // Clear prior multi-select during the SoA commit — keep 64 chrome off the
+    // Clear prior multi-select during the Kit commit — keep 64 chrome off the
     // critical path, then apply the new selection after paint.
     selectedNodeIds: large ? [] : opts.sel.nodeIds,
     selectedFrameIds: large ? [] : opts.sel.frameIds,

@@ -16,7 +16,7 @@ import { DropdownPanel, DropdownPanelItem } from '@/components/base/dropdown/Dro
 import { exportVideoAudio } from '@/utils/audioExporter';
 import { imageSrcToFile } from '@/utils/uploadImage';
 import { cn } from '@/utils/classnames';
-import { downloadFileBlob } from '@/components/rcb/scene/paint/exportImage';
+import { downloadFileBlob } from '@/components/rcb/scene/export/exportImage';
 import { videoToolBtn } from './videoToolbarShared';
 
 type CropFractions = { x: number; y: number; w: number; h: number };

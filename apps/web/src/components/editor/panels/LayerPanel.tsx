@@ -1023,7 +1023,7 @@ function LayerPanel({
   const { t } = useTranslation();
   const documentCommitted = useEditorDocumentOnCommit();
   // Paste bumps documentRevision / sceneRevision  - defer layer-list rebuild so the
-  // canvas SoA paint stays ahead of the dock at 2k - 0k nodes.
+  // Kit paint stays ahead of the dock at 2k - 0k nodes.
   // canvas commit is not blocked by dock work while history snaps accumulate.
   const document = useDeferredValue(documentCommitted);
   const selectedNodeId = useSelectedNodeId();

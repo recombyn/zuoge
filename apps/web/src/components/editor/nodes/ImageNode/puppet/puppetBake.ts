@@ -7,7 +7,7 @@ import {
   nodeNeedsPuppetWarp,
 } from '@/components/editor/nodes/ImageNode/puppet/puppetModel';
 import { bakePuppetWarpDataUrl } from '@/components/rcb/scene/paint/puppetWarp';
-import { getFillImageReady } from '@/components/rcb/render/sceneRenderer';
+import { getFillImageReady } from '@/components/rcb/scene/media/fillImageCache';
 
 function loadImageElement(src: string): Promise<HTMLImageElement | null> {
   if (typeof Image === 'undefined') return Promise.resolve(null);

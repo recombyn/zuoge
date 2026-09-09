@@ -8,6 +8,7 @@
  * `worldToScreen` / `stageLocalToWorld` / `screenDeltaToWorldDelta`.
  */
 import {
+  RCB_MIN_ZOOM,
   rcbCameraCssZoom,
   rcbCameraScreenOffset,
   rcbClientDeltaToScene,
@@ -36,6 +37,12 @@ export function cameraZoom(t: CameraTransform): number {
 /** Snapped pan offset written as CSS translate on the world layer. */
 export function cameraPan(t: CameraTransform): RcbVec {
   return rcbCameraScreenOffset(t.camera, t.dpr);
+}
+
+/** CSS transform for HTML camera layer (same pan/zoom as former SVG attr). */
+export function cameraCssTransform(t: CameraTransform): string {
+  const pan = cameraPan(t);
+  return `translate(${pan.x}px, ${pan.y}px) scale(${cameraZoom(t)})`;
 }
 
 /** SVG transform attribute for a scene root painted directly in screen space. */
@@ -98,7 +105,7 @@ export function worldBoxToScreen(
  * Only for ink still painted under the world CSS scale layer.
  */
 export function screenPxToWorld(t: CameraTransform, screenPx: number): number {
-  return screenPx / Math.max(0.05, cameraZoom(t));
+  return screenPx / Math.max(RCB_MIN_ZOOM, cameraZoom(t));
 }
 
 /**

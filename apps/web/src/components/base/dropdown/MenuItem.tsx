@@ -137,23 +137,16 @@ const MenuItem: FC<MenuItemProps> = ({
           ) : null}
         </DropdownPanelItem>
       </div>
-      {hasChildren ? (
+      {hasChildren && isSubMenuOpen ? (
         <FloatingPortal>
           <div
             ref={refs.setFloating}
-            style={{
-              ...floatingStyles,
-              visibility: isSubMenuOpen ? 'visible' : 'hidden',
-              pointerEvents: isSubMenuOpen ? 'auto' : 'none',
-            }}
+            style={floatingStyles}
             className="z-[1000]"
             {...getFloatingProps()}
           >
             <DropdownPanel
-              className={cn(
-                'min-w-[120px]',
-                isSubMenuOpen ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0'
-              )}
+              className="min-w-[120px] translate-y-0 opacity-100"
               onMouseEnter={() => {
                 onSubMenuOpenChange?.(item.key, true);
               }}

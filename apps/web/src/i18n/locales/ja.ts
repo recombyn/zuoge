@@ -986,6 +986,7 @@ const ja = {
       frameTool: 'フレームツールに切替',
       textTool: 'テキストツールに切替',
       penTool: 'ペンツールに切替',
+      pencilTool: '鉛筆ツールに切替',
       bucketTool: 'バケツツールに切替',
       nodeEdit: 'ノード編集',
       copy: '選択をコピー',

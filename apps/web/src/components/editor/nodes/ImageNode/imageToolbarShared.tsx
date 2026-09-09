@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from 'react';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 
 export const imageToolBtn =

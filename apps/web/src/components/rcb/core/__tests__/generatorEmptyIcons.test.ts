@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LU_AUDIO_LINES_SEGS,
   LU_IMAGE_PLUS_PATHS,
+  buildGeneratorEmptyIconSvg,
   generatorEmptyIconWorldSegs,
   paintGeneratorEmptyLucideIcon,
 } from '../../core/generatorEmptyIcons';
@@ -14,6 +15,18 @@ describe('generatorEmptyIcons', () => {
 
   it('exposes Lucide ImagePlus path list', () => {
     expect(LU_IMAGE_PLUS_PATHS.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('buildGeneratorEmptyIconSvg returns inline svg for each kind', () => {
+    for (const kind of ['audio', 'image', 'video'] as const) {
+      const html = buildGeneratorEmptyIconSvg(kind, 24);
+      expect(html).toContain('<svg');
+      expect(html).toContain('viewBox="0 0 24 24"');
+      expect(html).toContain('width="24"');
+    }
+    expect(buildGeneratorEmptyIconSvg('audio', 24)).toContain('<line ');
+    expect(buildGeneratorEmptyIconSvg('image', 24)).toContain('<path ');
+    expect(buildGeneratorEmptyIconSvg('video', 24)).toContain('<path ');
   });
 
   it('maps centered audio icon segs into plate world space', () => {

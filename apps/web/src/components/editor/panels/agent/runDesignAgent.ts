@@ -27,7 +27,7 @@ import {
 import { removeNodesFromDocument } from '@/components/rcb/scene/document/sceneDocument';
 import { scalePathData, translatePathData } from '@/components/rcb/scene/document/pathScale';
 import { maxRadius, radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
-import { renderExport } from '@/components/rcb/scene/paint/exportImage';
+import { renderExport } from '@/components/rcb/scene/export/exportImage';
 import {
   applyClientFrameHints,
   applyMemoryPatch,

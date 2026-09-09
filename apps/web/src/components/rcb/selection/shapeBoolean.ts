@@ -11,7 +11,6 @@ import {
   type Polygon,
   type Ring,
 } from 'polygon-clipping';
-import { booleanPolygonsWasm } from '@/components/rcb/render/vector/wasmGeom';
 import { getShapeBaselineD } from '@/components/rcb/core/geometry';
 import {
   clampCornerRadii,
@@ -30,6 +29,14 @@ import {
   starInnerRatioFromAttrs,
 } from '@/components/rcb/scene/document/sceneShapes';
 import { boolEffectAttr } from '@/components/rcb/scene/document/sceneEffects';
+
+/** Kit / WASM geom removed — fall through to polygon-clipping. */
+function booleanPolygonsWasm(
+  _op: string,
+  _polygons: unknown[]
+): MultiPolygon | null {
+  return null;
+}
 
 export type ShapeBox = {
   left: number;

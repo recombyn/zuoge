@@ -7,8 +7,20 @@
 /** Lucide default stroke in the 24×24 box. */
 export const LU_ICON_STROKE = 2;
 
-/** Muted stroke used on empty generator plates. */
+/**
+ * Empty-generator center glyph — soft cool gray (historical atlas idle ink).
+ * Keep lighter than `--muted` (#767676) so large plates don't read as ink blobs.
+ */
 export const GENERATOR_EMPTY_ICON_COLOR = '#9aa3b2';
+
+/**
+ * Idle generator plate hairline — same cool gray used by historical
+ * `paintGeneratorEmptyInk` / audio idle plates (`#c5c9d2`).
+ */
+export const GENERATOR_EMPTY_PLATE_STROKE = '#c5c9d2';
+
+/** Target hairline in CSS px (artboard idle edge is also 1 CSS px). */
+export const GENERATOR_EMPTY_PLATE_STROKE_WIDTH = 1;
 
 export type GeneratorEmptyIconKind = 'audio' | 'image' | 'video';
 
@@ -176,6 +188,35 @@ function strokePathList(
       ctx.stroke();
     }
   }
+}
+
+/**
+ * HTML/SVG markup for the empty-gen Lucide glyph (fallback DomHost overlay).
+ * Built from the same path constants as canvas strokes — not `svg?raw`.
+ */
+export function buildGeneratorEmptyIconSvg(
+  kind: GeneratorEmptyIconKind,
+  size: number,
+  color = GENERATOR_EMPTY_ICON_COLOR
+): string {
+  const side = Math.max(1, Math.round(Number(size) || 24));
+  const stroke = `stroke="${color}" stroke-width="${LU_ICON_STROKE}" stroke-linecap="round" stroke-linejoin="round" fill="none"`;
+  let body = '';
+  if (kind === 'audio') {
+    body = LU_AUDIO_LINES_SEGS.map(
+      ([x0, y0, x1, y1]) =>
+        `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" ${stroke}/>`
+    ).join('');
+  } else if (kind === 'image') {
+    body =
+      LU_IMAGE_PLUS_PATHS.map((d) => `<path d="${d}" ${stroke}/>`).join('') +
+      `<circle cx="${LU_IMAGE_PLUS_CIRCLE.cx}" cy="${LU_IMAGE_PLUS_CIRCLE.cy}" r="${LU_IMAGE_PLUS_CIRCLE.r}" ${stroke}/>`;
+  } else {
+    body =
+      LU_VIDEO_PATHS.map((d) => `<path d="${d}" ${stroke}/>`).join('') +
+      `<path d="${LU_VIDEO_RECT_PATH}" ${stroke}/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${side}" height="${side}" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 }
 
 /**

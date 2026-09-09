@@ -13,8 +13,8 @@ export const RCB_PRECOMP_CAMERA_RELEASE = 'rcb-precomp-camera-release';
 export const RCB_MOCKUP_BAKE_COMPOSITE = 'rcb-mockup-bake-composite';
 export const RCB_TIMELINE_CAMERA_FIT = 'rcb-timeline-camera-fit';
 export const RCB_TIMELINE_CAMERA_RELEASE = 'rcb-timeline-camera-release';
-/** AI transaction commit — sync SoA buffer + invalidate bake + idle paint. */
-export const RCB_SOA_AI_FLUSH = 'rcb-soa-ai-flush';
+/** AI transaction commit — reconcile Kit scene + DomHost mounts. */
+export const RCB_AI_FLUSH = 'rcb-ai-flush';
 /** Apply large host animationData after idle (Phase 4 bake sidecar). */
 export const RCB_IDLE_ANIMATION_HOST_JSON = 'rcb-idle-animation-host-json';
 
@@ -157,7 +157,7 @@ function sessionHasPostCommitMark(session: InteractionPerfSession): boolean {
 }
 
 /**
- * Wait for React layout / SoA sync (or timeout), then two rAFs so paint is included.
+ * Wait for React layout / Kit sync (or timeout), then two rAFs so paint is included.
  * Session lives on `window` so app marks and e2e begin/end share one graph.
  */
 function endInteractionPerfAfterPaint(returnMark: string): void {
@@ -373,7 +373,7 @@ export function requestTimelineCameraRelease() {
   defer(() => window.dispatchEvent(new CustomEvent(RCB_TIMELINE_CAMERA_RELEASE)));
 }
 
-/** After AI DesignTransaction commit — one SoA + Canvas flush (not per tool_op). */
-export function requestSoaAiFlush() {
-  defer(() => window.dispatchEvent(new CustomEvent(RCB_SOA_AI_FLUSH)));
+/** After AI DesignTransaction commit — one Kit + DomHost flush (not per tool_op). */
+export function requestAiFlush() {
+  defer(() => window.dispatchEvent(new CustomEvent(RCB_AI_FLUSH)));
 }

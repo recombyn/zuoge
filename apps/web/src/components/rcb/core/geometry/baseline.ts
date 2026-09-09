@@ -96,7 +96,7 @@ export function getShapeBaseline(
     key === 'lottie' ||
     key === 'audio'
   ) {
-    // Match sceneToSvg plate / clip path (generators are always sharp).
+    // Match DomHost plate / clip path (generators are always sharp).
     const gen =
       (key === 'image' &&
         (node.attrs?.imageGenerator === true ||

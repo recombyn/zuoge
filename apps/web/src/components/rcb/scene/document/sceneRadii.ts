@@ -700,7 +700,7 @@ export function filletPathD(
 }
 
 /**
- * Painted closed-path `d` (boolean / path nodes) — same fillet as sceneToSvg.
+ * Painted closed-path `d` (boolean / path nodes) — same fillet as pathPaintD.
  * Sharp base + radius* attrs → filleted silhouette for Canvas/WebGL idle ink.
  */
 export function pathPaintDFromAttrs(
@@ -905,7 +905,7 @@ export function getLiveCornerRadiusPreviewRadii(nodeId: string): CornerRadii | n
 }
 
 /**
- * Overlay live corner-radius preview onto attrs for baseline / Path2D paint.
+ * Overlay live corner-radius preview onto attrs for Kit / DomHost paint.
  * Document attrs stay idle mid-drag; paint callers merge here.
  */
 export function mergeLiveCornerRadiiIntoAttrs(

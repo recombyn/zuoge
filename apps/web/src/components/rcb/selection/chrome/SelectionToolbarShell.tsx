@@ -460,7 +460,7 @@ type ShellProps = {
   edgePadScene?: number;
   /** Control-box rotation — dock to visual AABB; toolbar stays screen-upright. */
   angle?: number;
-  /** Force dock side; default auto (toolbars). Composers use `below`. */
+  /** `auto` picks above/below from AABB; shape chrome prefers below like Kit. */
   dock?: 'auto' | 'below' | 'above';
   children: ReactNode;
   className?: string;

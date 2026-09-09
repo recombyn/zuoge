@@ -18,18 +18,8 @@ import VideoPlaybackBar, {
 } from '@/components/editor/nodes/VideoNode/VideoPlaybackBar';
 import { VideoFullscreenPreview } from '@/components/editor/nodes/VideoNode/VideoFullscreenPreviewButton';
 import { waitForVideoFrame } from '@/components/editor/nodes/VideoNode/waitForVideoFrame';
-import {
-  clearVideoIdlePaintFrame,
-  setVideoIdlePaintFrame,
-} from '@/components/rcb/render/videoIdlePaintFrame';
-import {
-  bumpSceneCanvasIdlePaint,
-  getFillImageReady,
-} from '@/components/rcb/render/sceneRenderer';
-import {
-  getSharedSceneRenderBuffer,
-  markSoaDirtyById,
-} from '@/components/rcb/render/sceneRenderBuffer';
+import { getFillImageReady } from '@/components/rcb/scene/media/fillImageCache';
+import { getCanvasEngine } from '@/components/rcb/canvas/KitCanvasHost';
 
 function pointInRect(x: number, y: number, r: DOMRect) {
   return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
@@ -365,7 +355,6 @@ function VideoHoverPlayback({
       url: posterUrl && !posterUrl.startsWith('blob:') ? posterUrl : '',
       at: posterUrl && !posterUrl.startsWith('blob:') ? 0 : -999,
     });
-    clearVideoIdlePaintFrame(String(nodeId));
     el.src = playSrc;
   }, [playSrc, posterUrl, videoEl, nodeId]);
 
@@ -444,10 +433,8 @@ function VideoHoverPlayback({
           const at = Number(el.currentTime) || target;
           setMediaTime(at);
           setFreeze({ url: shot, at });
-          setVideoIdlePaintFrame(id, shot, at);
           getFillImageReady(shot);
-          markSoaDirtyById(getSharedSceneRenderBuffer(), id);
-          bumpSceneCanvasIdlePaint();
+          getCanvasEngine()?.renderer.requestRender();
         } finally {
           capturingFreezeRef.current = false;
           if (wrap) {

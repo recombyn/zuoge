@@ -2,7 +2,7 @@
 
 Scene JSON is the document on the canvas. This spec matches the Web editor runtime and `packages/scene-schema`.
 
-Canvas paint / Path2D / viewport cull + SoA canvas ink: **[canvas-architecture.md](./canvas-architecture.md)**.
+Canvas paint / Path2D / viewport cull + Kit underlayer: **[canvas-architecture.md](./canvas-architecture.md)**.
 
 ```json
 {

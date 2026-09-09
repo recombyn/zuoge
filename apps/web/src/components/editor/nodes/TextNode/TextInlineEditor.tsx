@@ -18,7 +18,7 @@ import {
   measureTextEmBoxHeight,
 } from '@/components/rcb/scene/document/sceneText';
 import { isTextFrameNode } from '@/components/rcb/scene/document/nodeCapabilities';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { TEXT_FRAME_PADDING, TEXT_SELECTION_PAD, textFrameCornerRadii } from '@/components/rcb/scene/document/sceneEffects';
 import { resolveTextFramePlateFill } from '@/components/rcb/scene/document/nodeFactories';
 import { FRAME_PLATE_STROKE } from '@/components/rcb/frames/types';

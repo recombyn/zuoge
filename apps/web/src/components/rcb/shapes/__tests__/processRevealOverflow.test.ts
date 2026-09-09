@@ -158,7 +158,7 @@ describe('listSelectionRevealOverflowIds', () => {
         selectedFrameIds: [],
         document: doc,
         processingNodeIds: ['inside'],
-        editingPenId: 'world',
+        kitPathEditNodeId: 'world',
       })
     ).toEqual(['inside', 'world']);
   });

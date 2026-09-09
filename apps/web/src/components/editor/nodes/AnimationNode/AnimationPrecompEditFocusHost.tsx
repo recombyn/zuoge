@@ -6,7 +6,7 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useSelector } from '@/store';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   linkedLotNodeIdFromAsset,
   resolvePrecompAsset,

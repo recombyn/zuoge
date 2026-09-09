@@ -979,6 +979,7 @@ const zhTW = {
       frameTool: '切換到畫板工具',
       textTool: '切換到文字工具',
       penTool: '切換到鋼筆工具',
+      pencilTool: '切換到畫筆工具',
       bucketTool: '切換到油漆桶工具',
       nodeEdit: '節點編輯',
       copy: '複製選中的節點',

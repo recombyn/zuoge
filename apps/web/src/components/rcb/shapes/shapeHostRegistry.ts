@@ -1,20 +1,26 @@
-import { replaceSvgNode, dedupeSceneNode } from '@/components/rcb/scene/paint/sceneToSvg';
-import { invalidateNodePath2D } from '@/components/rcb/scene/document/sceneShapes';
+import {
+  remountDomHostAnchor,
+  dedupeSceneNode,
+} from '@/components/rcb/scene/dom/domHostBoard';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 
-/** Paint element for one scene node (SVG under the camera layer). */
-export type SceneHostEl = SVGElement;
+/** DomHost element for one scene node (anchor under the camera layer). */
+export type SceneHostEl = Element;
 
-/** One paint host per scene node (SVG mini-board under the camera layer). */
+/** One DomHost per scene node (under the HTML camera layer). */
 export type ShapeHostHandle = {
   nodeId: string;
+  /** Private SVG for FO / clipPath (not the stage-wide scene surface). Null for HTML-only hosts. */
   root: SVGSVGElement | null;
-  layer: SVGGElement | null;
+  /** Z-order host under shapes mount (HTML wrap). */
+  layer: HTMLElement | null;
+  /** SVG paint/anchor group inside private root. */
+  svgLayer: SVGGElement | null;
   el: SceneHostEl | null;
-  kind: 'svg';
+  kind: 'svg' | 'html';
   /**
    * Selected: host owns frame clip and keeps ink past the artboard edge.
-   * Preview / replaceSvgNode must read this instead of re-applying clip blindly.
+   * Preview / remountDomHostAnchor must read this instead of re-applying clip blindly.
    */
   revealOverflow?: boolean;
 };
@@ -25,7 +31,7 @@ const nodeHostListeners = new Map<string, Set<() => void>>();
 const nodeHostEpochs = new Map<string, number>();
 let hostEpoch = 0;
 
-/** Shared nodeId → paint element map used by preview/replace. */
+/** Shared nodeId ? paint element map used by preview/replace. */
 let sharedNodeEls: Map<string, SceneHostEl> | null = null;
 
 function notifyListeners(listeners: Iterable<() => void>) {
@@ -78,15 +84,13 @@ export function subscribeShapeHost(nodeId: string, fn: () => void) {
 }
 
 /**
- * Live DOM geometry preview (corner radius / star tip) changed `d` without remount.
- * Bump listeners so HostPathChrome re-reads the baseline path.
+ * Live DomHost geometry preview changed without remount ? bump host listeners.
  */
 export function notifyShapeHostGeometry(nodeId?: string) {
-  if (nodeId) invalidateNodePath2D(nodeId);
   bumpHostEpoch(nodeId);
 }
 
-/** Per-node epoch for media portals — unrelated host remounts must not tear WaveSurfer. */
+/** Per-node epoch for media portals ? unrelated host remounts must not tear WaveSurfer. */
 export function getShapeHostNodeEpoch(nodeId: string) {
   return nodeHostEpochs.get(String(nodeId || '')) || 0;
 }
@@ -104,9 +108,7 @@ export function registerShapeHost(handle: ShapeHostHandle) {
   if (sharedNodeEls && handle.el) {
     sharedNodeEls.set(handle.nodeId, handle.el);
   }
-  // createSvgBoard appends at mount end — re-sort immediately so a remounted
-  // frame plate cannot paint over existing shape layers (click-through still works
-  // because the world SVG is pointer-events: none).
+  // HTML camera mounts DomHost wraps — re-sort by data-z on the shapes mount.
   if (handle.layer && sceneShapesMount && handle.layer.parentNode === sceneShapesMount) {
     syncSharedMountPaintOrder(sceneShapesMount);
   }
@@ -120,8 +122,7 @@ export function updateShapeHostElement(nodeId: string, el: SceneHostEl | null) {
     if (el) sharedNodeEls.set(nodeId, el);
     else sharedNodeEls.delete(nodeId);
   }
-  // Paint remount → drop Path2D binding so the next hit rebuilds from current `d`.
-  invalidateNodePath2D(nodeId);
+  // Paint remount ? drop Path2D binding so the next hit rebuilds from current `d`.
   bumpHostEpoch(nodeId);
 }
 
@@ -140,7 +141,6 @@ export function shapeHostRevealsOverflow(nodeId: string): boolean {
 export function unregisterShapeHost(nodeId: string) {
   hosts.delete(nodeId);
   sharedNodeEls?.delete(nodeId);
-  invalidateNodePath2D(nodeId);
   bumpHostEpoch(nodeId);
 }
 
@@ -158,39 +158,33 @@ export function clearShapeHosts() {
   nodeHostListeners.clear();
 }
 
-/** One screen-surface SVG — shape layers share the canonical camera matrix. */
-let sceneWorldRoot: SVGSVGElement | null = null;
+/** One screen-surface SVG ? shape layers share the canonical camera matrix. */
+let sceneWorldRoot: HTMLElement | null = null;
 /**
- * Artboard plates + DOM hosts share `sceneShapesMount`, ordered by `data-z`
- * (`stackOrder`). SoA/WebGL ink sits under that SVG; nodes that must interleave
- * with plates paint as hosts on this mount.
+ * Artboard plates + DomHost wraps share `sceneShapesMount` (HTML), ordered by
+ * `data-z`. Kit paints ink underneath; private per-host SVGs live inside wraps.
  */
-let sceneFramesRoot: SVGSVGElement | null = null;
-let sceneShapesMount: SVGGElement | null = null;
-let sceneFramesMount: SVGGElement | null = null;
-let sceneDrawPreviewMount: SVGGElement | null = null;
-let sceneSmartGuidesMount: SVGGElement | null = null;
-let sceneSelectionChromeMount: SVGGElement | null = null;
+let sceneFramesRoot: HTMLElement | null = null;
+let sceneShapesMount: HTMLElement | null = null;
+let sceneFramesMount: HTMLElement | null = null;
+/** Nested HTML under the camera for idle inspect guides (optional). */
+let sceneSmartGuidesMount: HTMLElement | null = null;
 let sceneWorldEpoch = 0;
 
+/**
+ * HTML camera above Kit: DomHost / artboard wraps (`shapesMount`) + optional
+ * guides mount. No stage-wide scene SVG — Kit paints ink / selection / snap.
+ */
 export function setSceneWorldRoot(
-  root: SVGSVGElement | null,
-  shapesMount: SVGGElement | null,
-  drawPreviewMount: SVGGElement | null = null,
-  smartGuidesMount: SVGGElement | null = null,
-  selectionChromeMount: SVGGElement | null = null,
-  /** @deprecated Plates share the shapes SVG; ignored when null — aliased to root/mount. */
-  _framesRoot: SVGSVGElement | null = null,
-  _framesMount: SVGGElement | null = null
+  root: HTMLElement | null,
+  shapesMount: HTMLElement | null,
+  smartGuidesMount: HTMLElement | null = null
 ) {
   sceneWorldRoot = root;
   sceneShapesMount = shapesMount;
-  // Unified stack: plates + hosts on one mount (stackOrder / data-z).
   sceneFramesRoot = root;
   sceneFramesMount = shapesMount;
-  sceneDrawPreviewMount = drawPreviewMount;
   sceneSmartGuidesMount = smartGuidesMount;
-  sceneSelectionChromeMount = selectionChromeMount;
   sceneWorldEpoch += 1;
   bumpHostEpoch();
 }
@@ -199,7 +193,7 @@ export function getSceneWorldRoot() {
   return sceneWorldRoot;
 }
 
-/** Same SVG as the scene world root — plates share the host surface. */
+/** Same HTML camera root — plates share the host surface. */
 export function getSceneFramesRoot() {
   return sceneFramesRoot ?? sceneWorldRoot;
 }
@@ -217,7 +211,7 @@ export function getSceneFramesMount() {
  * Sort mount children by data-z (`stackOrder`).
  * Artboard plates and node hosts share this mount so stackOrder is physical.
  */
-export function syncSharedMountPaintOrder(mount?: SVGGElement | null) {
+export function syncSharedMountPaintOrder(mount?: HTMLElement | null) {
   const root = mount ?? sceneShapesMount;
   if (!root) return;
   const siblings: Element[] = [];
@@ -250,19 +244,9 @@ export function syncSharedMountPaintOrder(mount?: SVGGElement | null) {
   for (const g of siblings) root.appendChild(g);
 }
 
-/** In-progress draw ink — chrome SVG above SoA canvas ink. */
-export function getSceneDrawPreviewMount() {
-  return sceneDrawPreviewMount;
-}
-
-/** Align/gap guides — chrome SVG; same CameraTransform. */
+/** Align/gap guides chrome; same CameraTransform as DomHost plates. */
 export function getSceneSmartGuidesMount() {
   return sceneSmartGuidesMount;
-}
-
-/** Selection paint — chrome SVG; same CameraTransform as scene. */
-export function getSceneSelectionChromeMount() {
-  return sceneSelectionChromeMount;
 }
 
 export function getSceneWorldEpoch() {
@@ -283,11 +267,12 @@ function recoverShapeHost(nodeId: string): ShapeHostHandle | null {
   const handle: ShapeHostHandle = {
     nodeId,
     root,
-    layer,
+    layer: hostEl,
+    svgLayer: layer,
     el:
       (layer.querySelector(`[data-scene-node-id="${CSS.escape(nodeId)}"]`) as SVGElement | null) ||
       null,
-    kind: 'svg',
+    kind: 'html',
   };
   registerShapeHost(handle);
   return handle;
@@ -305,14 +290,12 @@ export async function replaceShapePaint(
   const host = hosts.get(nodeId) || recoverShapeHost(nodeId);
 
   if (host?.root && host.layer) {
-    await replaceSvgNode(
+    await remountDomHostAnchor(
       host.root,
       host.layer,
       document,
       nodeEls as Map<string, SVGElement>,
-      nodeId,
-      // Host owns frame clip via revealOverflow — do not re-clip here.
-      { applyFrameClip: false }
+      nodeId
     );
     const el = (nodeEls.get(nodeId) as SVGElement | undefined) ?? null;
     if (el) {
@@ -324,7 +307,7 @@ export async function replaceShapePaint(
     return;
   }
   if (mono?.root && mono?.layer) {
-    await replaceSvgNode(
+    await remountDomHostAnchor(
       mono.root,
       mono.layer,
       document,

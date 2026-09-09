@@ -1,9 +1,9 @@
 /**
  * Unified paint-order contract: visual stacking is `stackOrder` only.
  *
- * Physical surfaces may differ (SoA/WebGL ink vs SVG hosts), but anything that
+ * Physical surfaces may differ (Kit ink vs SVG hosts), but anything that
  * participates in cross-type occlusion (artboard plates, DOM hosts, world nodes
- * above plates) shares one SVG mount ordered by `data-z` = stack z. SoA ink sits
+ * above plates) shares one SVG mount ordered by `data-z` = stack z. Kit ink sits
  * under that mount and only paints nodes that do not need to interleave with
  * plates (world nodes below all frames). Selection raise is temporary max+1.
  *

@@ -17,8 +17,7 @@ import { sampleLayerTransformAtFrame } from '@/components/editor/nodes/Animation
 import {
   isFrameLocalCoordSpace,
   nodeLeftTop,
-} from '@/components/rcb/scene/paint/sceneToSvg';
-
+} from '@/components/rcb/scene/layout/nodeLayout';
 const LINK_KEY = 'ln';
 
 function asObj(v: unknown): Record<string, unknown> | null {

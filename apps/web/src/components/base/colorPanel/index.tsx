@@ -525,8 +525,8 @@ function ColorPanelPopover({
         </button>
       </Tooltip>
 
-      <FloatingPortal>
-        {open ? (
+      {open ? (
+        <FloatingPortal>
           <div
             ref={refs.setFloating}
             data-color-panel
@@ -547,8 +547,8 @@ function ColorPanelPopover({
               onClose={() => setOpen(false)}
             />
           </div>
-        ) : null}
-      </FloatingPortal>
+        </FloatingPortal>
+      ) : null}
     </>
   );
 }

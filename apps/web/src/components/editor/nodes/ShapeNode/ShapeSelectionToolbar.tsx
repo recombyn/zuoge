@@ -63,13 +63,11 @@ import {
   strokeEndpointsFromBox,
   strokeNodeFromEndpoints,
 } from '@/components/rcb/scene/document/sceneShapes';
-import {
-  nodeLeftTop,
-  previewSvgNodeGeometry,
-} from '@/components/rcb/scene/paint/sceneToSvg';
+import { getShapeBaselineD } from '@/components/rcb/core/geometry';
+import { pushParametricOutlineToKit } from '@/components/rcb/canvas/kitBridge';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { clearNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
-import { getSharedNodeEls } from '@/components/rcb/shapes/shapeHostRegistry';
+import { sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 import type { SceneDocument, SceneNode, SceneNodeInput } from '@/components/rcb/sceneNode';
 
 function readAspectLocked(attrs: Record<string, unknown> | undefined): boolean {
@@ -232,6 +230,31 @@ function ShapeSelectionToolbar({
       });
   };
 
+  /** Sides / IR / Ar — persist attrs + rebuild Kit path (reconcile may skip on Kit flush race). */
+  const patchParametricAttrs = (attrs: Record<string, unknown>) => {
+    const shapeType = node?.attrs?.shapeType;
+    const merged = {
+      ...(node?.attrs || {}),
+      ...(shapeType != null ? { shapeType } : {}),
+      ...attrs,
+    };
+    const previewNode = { ...node, attrs: merged } as SceneNodeInput;
+    const d = getShapeBaselineD(previewNode);
+    const nextAttrs = {
+      ...(shapeType != null ? { shapeType } : {}),
+      ...attrs,
+      ...(d ? { path: d } : {}),
+    };
+    patchDocumentNode({
+      nodeId,
+      patch: { attrs: nextAttrs },
+    });
+    pushParametricOutlineToKit(nodeId, {
+      ...node,
+      attrs: { ...(node?.attrs || {}), ...nextAttrs },
+    } as SceneNodeInput);
+  };
+
   const captureStrokeLengthAnchor = () => {
     if (!isOpenStroke) return;
     const { left, top } = nodeLeftTop(document, node);
@@ -282,22 +305,16 @@ function ShapeSelectionToolbar({
    * This keeps the visual top-left and persisted top-left identical.
    */
   const commitBoxGeometry = (
-    nextBox: SceneBox,
+    _nextBox: SceneBox,
     patch: Record<string, unknown>
   ) => {
-    const nodeEls = getSharedNodeEls();
-    const previewed = Boolean(
-      nodeEls &&
-        previewSvgNodeGeometry(nodeEls, nodeId, nextBox)
-    );
     patchDocumentNode({
         nodeId,
         patch,
-        // A live host already has the final geometry. Recreating it introduces a
-        // stale intermediate frame where SVG and selection chrome disagree.
-        skipHostReload: previewed,
+        // Noop preview always returned false — remount host from document.
+        skipHostReload: false,
       });
-    // Document is the commit fact — drop gesture overlay so SoA bake can resume.
+    // Document is the commit fact — drop gesture overlay so Kit bake can resume.
     clearNodeTransformPreviews([nodeId]);
   };
 
@@ -401,20 +418,20 @@ function ShapeSelectionToolbar({
   };
 
   const applySides = (n: number) => {
-    patchAttrs({ sides: clampShapeSides(n, DEFAULT_SHAPE_SIDES) });
+    patchParametricAttrs({ sides: clampShapeSides(n, DEFAULT_SHAPE_SIDES) });
   };
 
   const applyStarInnerRadius = (pct: number) => {
-    patchAttrs({ starInnerRatio: clampStarInnerRatio(pct / 100) });
+    patchParametricAttrs({ starInnerRatio: clampStarInnerRatio(pct / 100) });
   };
 
   const applyEllipseInnerRadius = (pct: number) => {
-    patchAttrs({ ellipseInnerRatio: clampEllipseInnerRatio(pct / 100) });
+    patchParametricAttrs({ ellipseInnerRatio: clampEllipseInnerRatio(pct / 100) });
   };
 
   const applyEllipseArc = (pct: number) => {
     const sign = ellipseArcPercent < 0 ? -1 : 1;
-    patchAttrs({ ellipseArcPercent: clampEllipseArcPercent(sign * pct) });
+    patchParametricAttrs({ ellipseArcPercent: clampEllipseArcPercent(sign * pct) });
   };
 
   const applyAspectPreset = (preset: (typeof ELEMENT_ASPECT_PRESETS)[number]) => {

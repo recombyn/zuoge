@@ -1,6 +1,6 @@
 import type { ArtboardFrame } from '@/components/rcb/frames/types';
 import { getLiveArtboardFrameGeometry } from '@/components/rcb/frames/HtmlArtboardFrame';
-import { ensureDefs, setAttrs, svgEl, urlRef } from '@/components/rcb/scene/paint/svgDom';
+import { ensureDefs, setAttrs, svgEl, urlRef } from '@/components/rcb/scene/dom/svgDom';
 
 function num(v: unknown, fallback = 0): number {
   const n = Number(v);
@@ -37,7 +37,7 @@ export function findClippingFrameForNode(
   const fw = Math.max(1, num(live?.width ?? ownedFrame.width, 1));
   const fh = Math.max(1, num(live?.height ?? ownedFrame.height, 1));
   // Always clip to the owning plate — even when the node AABB is fully outside
-  // (otherwise idle SoA / mid-drag ink "runs out" of the workbench).
+  // (otherwise Kit ink / mid-drag ink "runs out" of the workbench).
   if (!live) return ownedFrame;
   return {
     ...ownedFrame,

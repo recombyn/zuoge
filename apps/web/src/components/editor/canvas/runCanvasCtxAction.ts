@@ -1,3 +1,11 @@
+import {
+  groupKitSelection,
+  redoKit,
+  undoKit,
+  ungroupKitSelection,
+  rcbIdsAllKitMapped,
+} from '@/components/rcb/canvas/kitBridge';
+import { kitOwnsStagePointer } from '@/components/rcb/canvas/toolMap';
 import { message } from '@/components/base';
 import {
   groupNodesInDocument,
@@ -12,7 +20,7 @@ import {
 } from '@/components/rcb/scene/document/nodeCapabilities';
 import { resolveSelectionNodeIds } from '@/components/rcb/scene/document/sceneClipboard';
 import { updateNodeInDocument } from '@/components/rcb/scene/document/sceneDocument';
-import { exportFabricImage, exportCropSlots, type ExportImageFormat } from '@/components/rcb/scene/paint/exportImage';
+import { exportFabricImage, exportCropSlots, type ExportImageFormat } from '@/components/rcb/scene/export/exportImage';
 import { downloadVideoNodeAsset } from '@/components/editor/nodes/VideoNode/VideoDownloadButton';
 import { replaceImageNodeFromFile } from '@/components/editor/nodes/ImageNode/ImageReplaceUploadControl';
 import { replaceVideoNodeFromFile } from '@/components/editor/nodes/VideoNode/VideoReplaceCornerButton';
@@ -36,6 +44,7 @@ import {
   undo,
   redo,
 } from '@/store/modules/editor';
+import store from '@/store';
 import { layoutGeneratorPlateAtScene } from './canvasSession';
 import { MEDIA_PLACE_DEFAULT } from '@/components/rcb/scene/document/nodeFactories';
 import { warnIfAvBlockedByAnimationWorkbenchFocus } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
@@ -284,6 +293,14 @@ export function runCanvasCtxAction(action: CtxAction, deps: RunCanvasCtxActionDe
     const targetIds = resolveSelectionNodeIds(documentRef.current, ids, frameIdsForAction);
     const grouped = unlockedGroupableIds(documentRef.current, targetIds);
     if (grouped.length < 2) return;
+    const activeTool = String(store.getState?.().editor?.activeTool || 'select');
+    const shapeKind = String(store.getState?.().editor?.shapeKind || 'rect');
+    if (kitOwnsStagePointer(activeTool, shapeKind) && rcbIdsAllKitMapped(grouped)) {
+      if (groupKitSelection(grouped)) {
+        setMixedSelection({ nodeIds: grouped, frameIds: frameIdsForAction });
+        return;
+      }
+    }
     const next = groupNodesInDocument(documentRef.current, grouped);
     setDocument(next);
     setMixedSelection({ nodeIds: grouped, frameIds: frameIdsForAction });
@@ -293,16 +310,40 @@ export function runCanvasCtxAction(action: CtxAction, deps: RunCanvasCtxActionDe
     const targetIds = resolveSelectionNodeIds(documentRef.current, ids, frameIdsForAction);
     const unlocked = unlockedGroupableIds(documentRef.current, targetIds);
     if (!unlocked.length) return;
+    const activeTool = String(store.getState?.().editor?.activeTool || 'select');
+    const shapeKind = String(store.getState?.().editor?.shapeKind || 'rect');
+    if (kitOwnsStagePointer(activeTool, shapeKind) && rcbIdsAllKitMapped(unlocked)) {
+      if (ungroupKitSelection(unlocked)) {
+        setMixedSelection({ nodeIds: unlocked, frameIds: frameIdsForAction });
+        return;
+      }
+    }
     const next = ungroupNodesInDocument(documentRef.current, unlocked);
     setDocument(next);
     setMixedSelection({ nodeIds: unlocked, frameIds: frameIdsForAction });
     return;
   }
   if (action === 'undo') {
+    const activeTool = String(store.getState?.().editor?.activeTool || 'select');
+    const shapeKind = String(store.getState?.().editor?.shapeKind || 'rect');
+    if (kitOwnsStagePointer(activeTool, shapeKind)) {
+      if (!collabUndo()) {
+        if (!undoKit()) undo();
+      }
+      return;
+    }
     if (!collabUndo()) undo();
     return;
   }
   if (action === 'redo') {
+    const activeTool = String(store.getState?.().editor?.activeTool || 'select');
+    const shapeKind = String(store.getState?.().editor?.shapeKind || 'rect');
+    if (kitOwnsStagePointer(activeTool, shapeKind)) {
+      if (!collabRedo()) {
+        if (!redoKit()) redo();
+      }
+      return;
+    }
     if (!collabRedo()) redo();
     return;
   }

@@ -2,8 +2,8 @@
  * Client-side cover rasterization for list-card fallbacks (TemplateThumbnail / doc collage).
  */
 
-import { inlineSvgImages, rasterizeSvgString } from '@/components/rcb/scene/paint/exportImage';
-import { createSvgBoard, loadSceneOntoSvg } from '@/components/rcb/scene/paint/sceneToSvg';
+import { inlineSvgImages, rasterizeSvgString } from '@/components/rcb/scene/export/exportImage';
+import { createDomHostBoard, mountDomHostBoard } from '@/components/rcb/scene/dom/domHostBoard';
 import {
   isExportableSceneNode
 } from '@/components/rcb/scene/document/nodeCapabilities';
@@ -222,10 +222,8 @@ export async function renderDocumentThumbnail(
       backgroundColor: bg,
       backgroundFillType: 'solid',
     } as unknown as SceneDocument;
-    const { root, layer } = createSvgBoard(host, docW, docH);
-    await loadSceneOntoSvg(root, layer, previewDoc, 0, undefined, {
-      omitNonExportable: true,
-    });
+    const { root, layer } = createDomHostBoard(host, docW, docH);
+    await mountDomHostBoard(root, layer, previewDoc);
 
     const xml = new XMLSerializer().serializeToString(root);
     const inlined = await inlineSvgImages(xml, previewDoc, { failClosed: false });

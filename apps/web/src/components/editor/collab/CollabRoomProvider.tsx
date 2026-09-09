@@ -357,7 +357,16 @@ function CollabPeerPresenceOverlay({
       setCursors([]);
       return undefined;
     }
+    // No peers → no continuous rAF. Presence overlay must not burn a main-thread
+    // frame callback forever on solo/idle editors.
+    if (!peers.length) {
+      setBoxes([]);
+      setCursors([]);
+      return undefined;
+    }
     let raf = 0;
+    let lastBoxesKey = '';
+    let lastCursorsKey = '';
     const measure = () => {
       const stageRect = stageEl.getBoundingClientRect();
       const nextBoxes: typeof boxes = [];
@@ -384,8 +393,20 @@ function CollabPeerPresenceOverlay({
           });
         }
       }
-      setBoxes(nextBoxes);
-      setCursors(nextCursors);
+      const boxesKey = nextBoxes
+        .map((b) => `${b.key}:${b.left|0},${b.top|0},${b.width|0},${b.height|0}`)
+        .join('|');
+      const cursorsKey = nextCursors
+        .map((c) => `${c.key}:${c.left|0},${c.top|0}`)
+        .join('|');
+      if (boxesKey !== lastBoxesKey) {
+        lastBoxesKey = boxesKey;
+        setBoxes(nextBoxes);
+      }
+      if (cursorsKey !== lastCursorsKey) {
+        lastCursorsKey = cursorsKey;
+        setCursors(nextCursors);
+      }
       raf = window.requestAnimationFrame(measure);
     };
     raf = window.requestAnimationFrame(measure);

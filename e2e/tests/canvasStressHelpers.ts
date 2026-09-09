@@ -89,7 +89,7 @@ export async function openBlankEditor(page: Page, namePrefix = 'canvas-product')
     throw new Error('editor behind login');
   }
   await expect(
-    page.getByRole('button', { name: /Image generator|图像生成�?i }).first()
+    page.getByRole('button', { name: /Image generator|图像生成/i }).first()
   ).toBeVisible({ timeout: 45_000 });
   const stage = page.locator('[data-rcb-canvas="1"], [data-canvas-stage="1"]').first();
   await expect(stage).toBeVisible({ timeout: 45_000 });

@@ -3,7 +3,7 @@
  * - Surround pasteboard nodes (`animationWorkbenchSurround`) belong to a workbench
  *   but live outside its plate; saved with the project, shown only while that
  *   workbench's timeline is open. Attr is visibility/isolation only — ink uses
- *   the same SoA mesh path as closed-timeline unbound world (never DomHost via
+ *   the same Kit mesh path as closed-timeline unbound world (never DomHost via
  *   stack-above; see worldNodeStacksAboveAnyFrame).
  * - While the timeline is open, unrelated frames/nodes are paint/hit hidden.
  * - Bound children outside the playhead in/out range are visually hidden and

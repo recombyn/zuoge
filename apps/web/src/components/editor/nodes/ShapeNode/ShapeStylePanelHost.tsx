@@ -6,7 +6,9 @@ import {
   closeShapeStylePanel,
   patchDocumentNode,
 } from '@/store/modules/editor';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { pushParametricOutlineToKit } from '@/components/rcb/canvas/kitBridge';
+import { useKitSelectionDockAabb } from '@/components/rcb/selection/useKitSelectionDockAabb';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   RcbOverlayPortal,
   useRcbCamera,
@@ -250,7 +252,8 @@ function ShapeStylePanelHost({
   document: SceneDocument;
   /** Hide docked side panel while selection is transforming (drag/resize). */
   hidden?: boolean;
-}): ReactNode {  const { t } = useTranslation();
+}): ReactNode {
+  const { t } = useTranslation();
   const camera = useRcbCamera();
   const panel = useSelector(
     (s: any) =>
@@ -260,6 +263,7 @@ function ShapeStylePanelHost({
       }
   );
   const selectedNodeIds = useSelectedNodeIds();
+  const kitDockAabb = useKitSelectionDockAabb(selectedNodeIds);
   const [meshSelectedIndex, setMeshSelectedIndex] = useState(0);
   const [meshShowGuides, setMeshShowGuides] = useState(true);
   const [gradientStopIndex, setGradientStopIndex] = useState(0);
@@ -311,13 +315,15 @@ function ShapeStylePanelHost({
     return () => window.removeEventListener('keydown', onKey);
   }, [panel]);
 
-  const box = useMemo(() => {
+  const docBox = useMemo(() => {
     if (!panel) return null;
     const boxes = panel.nodeIds
       .map((id) => nodeVisualBox(document, document?.deltaSetLike?.[id]))
       .filter(Boolean) as SceneBox[];
     return unionBoxes(boxes);
   }, [document, panel]);
+  // Same SoT as selection toolbar — Kit control-box AABB (recomputed every frame).
+  const box = kitDockAabb ?? docBox;
 
   if (!panel || !box) return null;
 
@@ -505,6 +511,8 @@ function ShapeStylePanelHost({
             },
           },
         });
+      // Polygon / star corner radii rebuild Kit path (same bridge as sides / IR).
+      pushParametricOutlineToKit(id);
     }
   };
 

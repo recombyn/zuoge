@@ -3,7 +3,6 @@ import { useSelector } from '@/store';
 import { useEditorDocumentOnCommit } from '@/store/editorSelectors';
 import { useTranslation } from 'react-i18next';
 import {
-  LuArrowUpRight,
   LuCircle,
   LuFrame,
   LuHand,
@@ -15,8 +14,11 @@ import {
   LuFileJson,
   LuMusic2,
   LuMousePointer2,
+  LuPaintBucket,
   LuPenTool,
   LuPencil,
+  LuPipette,
+  LuGrid3X3,
   LuSquare,
   LuStar,
   LuTriangle,
@@ -64,7 +66,7 @@ import {
   serializeLottieAnimationData,
   MEDIA_PLACE_DEFAULT,
 } from '@/components/rcb/scene/document/nodeFactories';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
+import { sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 import {
   rcbLayoutGeneratorPlate,
   rcbScreenToScene,
@@ -91,18 +93,20 @@ const TOOL_SHORTCUT = {
   text: 'T',
   pen: 'P',
   pencil: 'Shift P',
+  bucket: 'B',
+  eyedropper: 'I',
+  mesh: 'U',
   rect: 'R',
   line: 'L',
-  arrow: 'Shift L',
   circle: 'O',
   polygon: 'G',
   star: 'S',
-  upload: 'I',
+  upload: 'Shift I',
   imageGenerator: 'A',
   videoGenerator: 'Shift A',
   lottieGenerator: 'M',
   animationBoard: 'M',
-  audioGenerator: 'U',
+  audioGenerator: 'Shift U',
 } as const;
 
 function toolTipWithShortcut(label: string, shortcut?: string) {
@@ -111,6 +115,8 @@ function toolTipWithShortcut(label: string, shortcut?: string) {
 
 function resolveToolbarShapeKind(shapeKind: string | null | undefined): string {
   if (!shapeKind || shapeKind === 'image') return 'rect';
+  // Arrow create tool retired — treat leftover store value as line.
+  if (shapeKind === 'arrow') return 'line';
   return layerIconByKind[shapeKind] ? shapeKind : 'rect';
 }
 
@@ -203,7 +209,6 @@ const layerIconByKind: Record<string, LayerIconComponent> = {
   image: LuImage,
   rect: LuSquare,
   line: LuMinus,
-  arrow: LuArrowUpRight,
   circle: LuCircle,
   triangle: LuTriangle,
   star: LuStar,
@@ -370,8 +375,8 @@ function SplitToolButton({
 }
 
 /**
- * Bottom-center tool dock:
- * Select · 形状 · 钢笔 · 画笔 · 文字 · 智能画板 · 图片
+ * Bottom-center tool dock (Kit rail order):
+ * Select · 画板 · 钢笔/画笔 · 形状 · 文字 · | · 油漆桶 · 吸管 · | · 动画 · 上传 · 生成器
  */
 function EditorToolStrip({
   className,
@@ -403,6 +408,11 @@ function EditorToolStrip({
   const audioInputRef = useRef<HTMLInputElement>(null);
   const lottieInputRef = useRef<HTMLInputElement>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  /** Last pen/pencil so the flyout icon stays useful when another tool is active. */
+  const [lastInkTool, setLastInkTool] = useState<'pen' | 'pencil'>('pen');
+  useEffect(() => {
+    if (activeTool === 'pen' || activeTool === 'pencil') setLastInkTool(activeTool);
+  }, [activeTool]);
   const [pluginButtons, setPluginButtons] = useState<CanvasToolbarButton[]>([]);
   const toolsLocked = Boolean(selectOnly);
   const newPlateLocked = toolsLocked || timelineOpen;
@@ -440,10 +450,12 @@ function EditorToolStrip({
       shape: t('editor.tools.shape'),
       pen: t('editor.tools.pen'),
       pencil: t('editor.tools.pencil'),
+      bucket: t('editor.tools.bucket'),
+      eyedropper: t('editor.tools.eyedropper', { defaultValue: '吸管' }),
+      mesh: t('editor.tools.mesh', { defaultValue: '网格' }),
       text: t('editor.tools.text'),
       rect: t('editor.tools.rect'),
       line: t('editor.tools.line'),
-      arrow: t('editor.tools.arrow'),
       circle: t('editor.tools.circle'),
       polygon: t('editor.tools.polygon'),
       star: t('editor.tools.star'),
@@ -502,17 +514,27 @@ function EditorToolStrip({
       { key: 'rect', label: <MenuLabel iconKey="rect" label={L.rect} shortcut={TOOL_SHORTCUT.rect} /> },
       { key: 'line', label: <MenuLabel iconKey="line" label={L.line} shortcut={TOOL_SHORTCUT.line} /> },
       {
-        key: 'arrow',
-        label: <MenuLabel iconKey="arrow" label={L.arrow} shortcut={TOOL_SHORTCUT.arrow} />,
-      },
-      {
         key: 'circle',
         label: <MenuLabel iconKey="circle" label={L.circle} shortcut={TOOL_SHORTCUT.circle} />,
       },
       { key: 'polygon', label: <MenuLabel iconKey="polygon" label={L.polygon} shortcut={TOOL_SHORTCUT.polygon} /> },
       { key: 'star', label: <MenuLabel iconKey="star" label={L.star} shortcut={TOOL_SHORTCUT.star} /> },
     ],
-    [L.arrow, L.circle, L.line, L.polygon, L.rect, L.star]
+    [L.circle, L.line, L.polygon, L.rect, L.star]
+  );
+
+  const inkItems: MenuItemType[] = useMemo(
+    () => [
+      {
+        key: 'pen',
+        label: <MenuLabel iconKey="pen" label={L.pen} shortcut={TOOL_SHORTCUT.pen} />,
+      },
+      {
+        key: 'pencil',
+        label: <MenuLabel iconKey="pencil" label={L.pencil} shortcut={TOOL_SHORTCUT.pencil} />,
+      },
+    ],
+    [L.pen, L.pencil]
   );
 
   const uploadItems: MenuItemType[] = useMemo(
@@ -608,10 +630,15 @@ function EditorToolStrip({
     [L.audioGenerator, L.imageGenerator, L.videoGenerator, timelineOpen]
   );
 
-  const spawnImageGeneratorAtView = () => {
+  const spawnPlateAtView = (opts: {
+    defaults: { width: number; height: number };
+    natural: { width: number; height: number };
+    fit?: { minRatio?: number; maxRatio?: number };
+    spawn: (box: { x: number; y: number; width: number; height: number; name: string }) => void;
+    name: string;
+  }) => {
     if (!document) return;
-    let width = 360;
-    let height = 360;
+    let { width, height } = opts.defaults;
     let x = 40;
     let y = 40;
     if (camera && stageEl) {
@@ -621,8 +648,8 @@ function EditorToolStrip({
           document,
           camera,
           stageEl,
-          natural: { width: 1024, height: 1024 },
-          fit: { minRatio: 0.28, maxRatio: 0.42 },
+          natural: opts.natural,
+          fit: opts.fit,
         });
         width = laid.width;
         height = laid.height;
@@ -630,111 +657,52 @@ function EditorToolStrip({
         y = laid.y;
       }
     }
-    spawnImageGenerator({
-        x,
-        y,
-        width,
-        height,
-        name: L.imageGenerator,
-      });
+    opts.spawn({ x, y, width, height, name: opts.name });
+  };
+
+  const spawnImageGeneratorAtView = () => {
+    spawnPlateAtView({
+      defaults: { width: 360, height: 360 },
+      natural: { width: 1024, height: 1024 },
+      fit: { minRatio: 0.28, maxRatio: 0.42 },
+      spawn: spawnImageGenerator,
+      name: L.imageGenerator,
+    });
   };
 
   const spawnVideoGeneratorAtView = () => {
-    if (!document) return;
     if (warnIfAvBlockedByAnimationWorkbenchFocus(message.warning, t)) return;
-    let width = 640;
-    let height = 360;
-    let x = 40;
-    let y = 40;
-    if (camera && stageEl) {
-      const view = stageEl.getBoundingClientRect();
-      if (view.width > 0 && view.height > 0) {
-        const laid = layoutGeneratorPlateInView({
-          document,
-          camera,
-          stageEl,
-          natural: { width: 1280, height: 720 },
-          fit: { minRatio: 0.28, maxRatio: 0.48 },
-        });
-        width = laid.width;
-        height = laid.height;
-        x = laid.x;
-        y = laid.y;
-      }
-    }
-    spawnVideoGenerator({
-        x,
-        y,
-        width,
-        height,
-        name: L.videoGenerator,
-      });
+    spawnPlateAtView({
+      defaults: { width: 640, height: 360 },
+      natural: { width: 1280, height: 720 },
+      fit: { minRatio: 0.28, maxRatio: 0.48 },
+      spawn: spawnVideoGenerator,
+      name: L.videoGenerator,
+    });
   };
 
   const spawnAnimationBoardAtView = () => {
-    if (!document) return;
     if (warnIfNewPlateBlockedByAnimationWorkbenchFocus(message.warning, t, 'animationBoard')) {
       return;
     }
-    let width = 364;
-    let height = 364;
-    let x = 40;
-    let y = 40;
-    if (camera && stageEl) {
-      const view = stageEl.getBoundingClientRect();
-      if (view.width > 0 && view.height > 0) {
-        const laid = layoutGeneratorPlateInView({
-          document,
-          camera,
-          stageEl,
-          natural: { width: 364, height: 364 },
-          fit: { minRatio: 0.22, maxRatio: 0.42 },
-        });
-        width = laid.width;
-        height = laid.height;
-        x = laid.x;
-        y = laid.y;
-      }
-    }
-    spawnAnimationBoard({
-        x,
-        y,
-        width,
-        height,
-        name: L.animationBoard,
-      });
+    spawnPlateAtView({
+      defaults: { width: 364, height: 364 },
+      natural: { width: 364, height: 364 },
+      fit: { minRatio: 0.22, maxRatio: 0.42 },
+      spawn: spawnAnimationBoard,
+      name: L.animationBoard,
+    });
   };
 
   const spawnAudioGeneratorAtView = () => {
-    if (!document) return;
     if (warnIfAvBlockedByAnimationWorkbenchFocus(message.warning, t)) return;
-    let width = 360;
-    let height = 200;
-    let x = 40;
-    let y = 40;
-    if (camera && stageEl) {
-      const view = stageEl.getBoundingClientRect();
-      if (view.width > 0 && view.height > 0) {
-        const laid = layoutGeneratorPlateInView({
-          document,
-          camera,
-          stageEl,
-          natural: { ...MEDIA_PLACE_DEFAULT },
-          fit: { minRatio: 0.22, maxRatio: 0.4 },
-        });
-        width = laid.width;
-        height = laid.height;
-        x = laid.x;
-        y = laid.y;
-      }
-    }
-    spawnAudioGenerator({
-        x,
-        y,
-        width,
-        height,
-        name: L.audioGenerator,
-      });
+    spawnPlateAtView({
+      defaults: { width: 360, height: 200 },
+      natural: { ...MEDIA_PLACE_DEFAULT },
+      fit: { minRatio: 0.22, maxRatio: 0.4 },
+      spawn: spawnAudioGenerator,
+      name: L.audioGenerator,
+    });
   };
 
   useEffect(() => {
@@ -774,14 +742,16 @@ function EditorToolStrip({
       if (key === 't' && !e.shiftKey) setActiveTool('text');
       if (key === 'r' && !e.shiftKey) setShapeKind('rect');
       if (key === 'l' && !e.shiftKey) setShapeKind('line');
-      if (key === 'l' && e.shiftKey) setShapeKind('arrow');
       if (key === 'o' && !e.shiftKey) setShapeKind('circle');
       if (key === 'g' && !e.shiftKey) setShapeKind('polygon');
       if (key === 's' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         setShapeKind('star');
       }
-      if (key === 'i' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (key === 'i' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         setOpenMenu('upload');
+      }
+      if (key === 'i' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        setActiveTool('eyedropper');
       }
       if (key === 'a' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         spawnImageGeneratorAtView();
@@ -794,12 +764,18 @@ function EditorToolStrip({
         if (newPlateLocked) return;
         spawnAnimationBoardAtView();
       }
-      if (key === 'u' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (key === 'u' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (timelineOpen) return;
         spawnAudioGeneratorAtView();
       }
+      if (key === 'u' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        setActiveTool('mesh');
+      }
       if (key === 'p' && !e.shiftKey) setActiveTool('pen');
       if (key === 'p' && e.shiftKey) setActiveTool('pencil');
+      if (key === 'b' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        setActiveTool('bucket');
+      }
       if (key === 'escape') {
         window.dispatchEvent(new Event('resume:exit-path-edit'));
         setActiveTool('select');
@@ -1066,19 +1042,27 @@ function EditorToolStrip({
     if (id === 'image') return;
     setShapeKind(id);
   };
+  const pickInk = (id: string) => {
+    if (id !== 'pen' && id !== 'pencil') return;
+    setLastInkTool(id);
+    setActiveTool(id);
+  };
 
   const shapeIconKind = resolveToolbarShapeKind(shapeKind);
   const ShapeIcon = layerIconByKind[shapeIconKind];
-  const PenIcon = layerIconByKind.pen;
-  const PencilIcon = layerIconByKind.pencil;
+  const inkKind =
+    activeTool === 'pen' || activeTool === 'pencil' ? activeTool : lastInkTool;
+  const InkIcon = layerIconByKind[inkKind] || layerIconByKind.pen;
   const TextIcon = layerIconByKind.text;
 
   const selectActive = activeTool === 'select' || activeTool === 'pan';
   const frameActive = activeTool === 'frame';
   const shapeActive = activeTool === 'shape';
   const imageActive = activeTool === 'image';
-  const penActive = activeTool === 'pen';
-  const pencilActive = activeTool === 'pencil';
+  const inkActive = activeTool === 'pen' || activeTool === 'pencil';
+  const bucketActive = activeTool === 'bucket';
+  const eyedropperActive = activeTool === 'eyedropper';
+  const meshActive = activeTool === 'mesh';
   const textActive = activeTool === 'text';
 
   return (
@@ -1119,6 +1103,49 @@ function EditorToolStrip({
         </ToolIcon>
       </SplitToolButton>
 
+      {/* 智能画板 — Kit artboard; toolbar appears on the frame after commit */}
+      {timelineOpen ? null : (
+        <ToolBtn
+          tip={toolTipWithShortcut(L.frame, TOOL_SHORTCUT.frame)}
+          active={frameActive}
+          disabled={toolsLocked}
+          onClick={() => {
+            if (warnIfNewPlateBlockedByAnimationWorkbenchFocus(message.warning, t, 'artboard')) {
+              return;
+            }
+            setActiveTool('frame');
+          }}
+        >
+          <ToolIcon className="h-3.5 w-3.5">
+            <LuFrame className="h-full w-full" strokeWidth={STROKE} />
+          </ToolIcon>
+        </ToolBtn>
+      )}
+
+      {/* 钢笔 / 画笔 — click activates last ink tool, hover to switch */}
+      {!compact ? (
+        <SplitToolButton
+          tip={`${L.pen} / ${L.pencil}`}
+          active={inkActive}
+          disabled={toolsLocked}
+          menuOpen={openMenu === 'ink'}
+          onMenuOpenChange={(open) => {
+            setOpenMenu(open ? 'ink' : null);
+          }}
+          items={inkItems}
+          selectedKeys={[inkKind]}
+          onMenuPick={pickInk}
+          onPrimaryClick={() => {
+            setLastInkTool(inkKind);
+            setActiveTool(inkKind);
+          }}
+        >
+          <ToolIcon>
+            <InkIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+          </ToolIcon>
+        </SplitToolButton>
+      ) : null}
+
       {/* 形状 — click draws current shape, hover to switch */}
       <SplitToolButton
         tip={L.shape}
@@ -1140,36 +1167,6 @@ function EditorToolStrip({
         </ToolIcon>
       </SplitToolButton>
 
-      {!compact ? (
-        <>
-          {/* 钢笔 — options dock at page top-center while active */}
-          <ToolBtn
-            tip={toolTipWithShortcut(L.pen, TOOL_SHORTCUT.pen)}
-            ariaLabel={L.pen}
-            active={penActive}
-            disabled={toolsLocked}
-            onClick={() => setActiveTool('pen')}
-          >
-            <ToolIcon>
-              <PenIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
-            </ToolIcon>
-          </ToolBtn>
-
-          {/* 画笔 — options dock at page top-center while active */}
-          <ToolBtn
-            tip={toolTipWithShortcut(L.pencil, TOOL_SHORTCUT.pencil)}
-            ariaLabel={L.pencil}
-            active={pencilActive}
-            disabled={toolsLocked}
-            onClick={() => setActiveTool('pencil')}
-          >
-            <ToolIcon>
-              <PencilIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
-            </ToolIcon>
-          </ToolBtn>
-        </>
-      ) : null}
-
       {/* 文字 */}
       <ToolBtn
         tip={toolTipWithShortcut(L.text, TOOL_SHORTCUT.text)}
@@ -1182,37 +1179,54 @@ function EditorToolStrip({
         </ToolIcon>
       </ToolBtn>
 
-      {/* 智能画板 — free-draw; toolbar appears on the frame after commit */}
-      {timelineOpen ? null : (
-        <ToolBtn
-          tip={toolTipWithShortcut(L.frame, TOOL_SHORTCUT.frame)}
-          active={frameActive}
-          disabled={toolsLocked}
-          onClick={() => {
-            if (warnIfNewPlateBlockedByAnimationWorkbenchFocus(message.warning, t, 'artboard')) {
-              return;
-            }
-            setActiveTool('frame');
-          }}
-        >
-          <ToolIcon className="h-3.5 w-3.5">
-            <LuFrame className="h-full w-full" strokeWidth={STROKE} />
-          </ToolIcon>
-        </ToolBtn>
+      {chrome === 'flat' ? null : (
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden />
       )}
 
-      {/* 动画工作台 — standalone after artboard (not inside generators menu). */}
-      {timelineOpen ? null : (
+      {/* 油漆桶 — Live Paint; fill dock while active */}
+      {!compact ? (
         <ToolBtn
-          tip={toolTipWithShortcut(L.animationBoard, TOOL_SHORTCUT.animationBoard)}
+          tip={toolTipWithShortcut(L.bucket, TOOL_SHORTCUT.bucket)}
+          ariaLabel={L.bucket}
+          active={bucketActive}
           disabled={toolsLocked}
-          onClick={spawnAnimationBoardAtView}
+          onClick={() => setActiveTool('bucket')}
         >
           <ToolIcon>
-            <AnimationOutlineIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+            <LuPaintBucket className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
           </ToolIcon>
         </ToolBtn>
-      )}
+      ) : null}
+
+      {/* 吸管 — Kit eyedropper (Kit I) */}
+      {!compact ? (
+        <ToolBtn
+          tip={toolTipWithShortcut(L.eyedropper, TOOL_SHORTCUT.eyedropper)}
+          ariaLabel={L.eyedropper}
+          active={eyedropperActive}
+          disabled={toolsLocked}
+          onClick={() => setActiveTool('eyedropper')}
+        >
+          <ToolIcon>
+            <LuPipette className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+          </ToolIcon>
+        </ToolBtn>
+      ) : null}
+
+      {/* 网格 — Kit mesh gradient tool (Kit U) */}
+      {!compact ? (
+        <ToolBtn
+          tip={toolTipWithShortcut(L.mesh, TOOL_SHORTCUT.mesh)}
+          ariaLabel={L.mesh}
+          active={meshActive}
+          disabled={toolsLocked}
+          onClick={() => setActiveTool('mesh')}
+        >
+          <ToolIcon>
+            <LuGrid3X3 className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+          </ToolIcon>
+        </ToolBtn>
+      ) : null}
 
       {chrome === 'flat' ? null : (
         <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden />
@@ -1229,6 +1243,19 @@ function EditorToolStrip({
             aria-hidden
           />
         ) : null}
+
+      {/* 动画工作台 — product plate (not in Kit rail; sits with media tools) */}
+      {timelineOpen ? null : (
+        <ToolBtn
+          tip={toolTipWithShortcut(L.animationBoard, TOOL_SHORTCUT.animationBoard)}
+          disabled={toolsLocked}
+          onClick={spawnAnimationBoardAtView}
+        >
+          <ToolIcon>
+            <AnimationOutlineIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+          </ToolIcon>
+        </ToolBtn>
+      )}
 
       {/* 图片/视频上传 — hover opens panel (同形状工具) */}
       <SplitToolButton

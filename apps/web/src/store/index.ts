@@ -5,6 +5,10 @@
  * - Mutators: `setDocument(doc)` from `@/store/modules/editor` (bound here).
  * - React subscriptions via `editorSelectors.ts` / `useSelector`.
  * - Playhead/playing: `animationTransport` + events.
+ *
+ * The Zustand instance is pinned on `globalThis` so Vite HMR cannot fork a
+ * second store while React still subscribes to the first — that desync made
+ * Kit multi-select (N ids) paint a single-node toolbar (1 id) with no boolean.
  */
 import { create } from 'zustand';
 import { useStoreWithEqualityFn } from 'zustand/traditional';
@@ -21,11 +25,24 @@ export type RootState = {
 
 type AppStoreState = RootState;
 
-export const useAppStore = create<AppStoreState>(() => ({
-  auth: authInitialState,
-  editor: editorInitialState,
-}));
+type AppStore = ReturnType<typeof create<AppStoreState>>;
 
+const g = globalThis as typeof globalThis & {
+  __RCB_USE_APP_STORE__?: AppStore;
+};
+
+function createAppStore(): AppStore {
+  return create<AppStoreState>(() => ({
+    auth: authInitialState,
+    editor: editorInitialState,
+  }));
+}
+
+export const useAppStore: AppStore =
+  g.__RCB_USE_APP_STORE__ ?? (g.__RCB_USE_APP_STORE__ = createAppStore());
+
+// Always (re)bind mutators to the singleton — HMR of this module or editorBind
+// must not leave runEditor pointing at a discarded store instance.
 bindEditorStore((fn) => {
   useAppStore.setState((prev) => ({
     ...prev,

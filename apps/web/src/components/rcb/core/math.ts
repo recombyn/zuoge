@@ -1,8 +1,8 @@
 import { readDevicePixelRatio, snapCssToDevicePixel, toDomPrecision } from './dpr';
 import type { RcbBox, RcbCamera, RcbVec } from './types';
 
-/** Camera zoom floor / ceiling (5% … 10000%). */
-export const RCB_MIN_ZOOM = 0.05;
+/** Camera zoom floor / ceiling (1% … 10000%). */
+export const RCB_MIN_ZOOM = 0.01;
 export const RCB_MAX_ZOOM = 100;
 
 export function rcbClampZoom(z: number) {
@@ -44,7 +44,7 @@ export function rcbSnapSceneSurfaceOrigin(
   dpr: number
 ): number {
   if (!rcbDprIsFractional(dpr)) return scene;
-  const z = Math.max(0.05, zoom || 1);
+  const z = Math.max(RCB_MIN_ZOOM, zoom || 1);
   const screen = scene * z + camSnapped;
   const screenSnapped = snapCssToDevicePixel(screen, dpr);
   return (screenSnapped - camSnapped) / z;
@@ -55,7 +55,7 @@ export function rcbSnapSceneSurfaceOrigin(
  * Stage overlays must multiply by this — raw `camera.zoom` drifts on large scene X/Y.
  */
 export function rcbCameraCssZoom(camera: RcbCamera): number {
-  return toDomPrecision(Math.max(0.05, camera.zoom || 1));
+  return toDomPrecision(Math.max(RCB_MIN_ZOOM, camera.zoom || 1));
 }
 
 export type RcbViewportMetrics = {
@@ -161,7 +161,7 @@ export function rcbClientDeltaToScene(
   scaleX = 1,
   scaleY = 1
 ): RcbVec {
-  const z = Math.max(0.05, zoom || 1);
+  const z = Math.max(RCB_MIN_ZOOM, zoom || 1);
   const sx = scaleX > 0 ? scaleX : 1;
   const sy = scaleY > 0 ? scaleY : 1;
   return { x: clientDx / sx / z, y: clientDy / sy / z };
@@ -169,7 +169,7 @@ export function rcbClientDeltaToScene(
 
 /** On-screen pixel gap -> scene units. */
 export function rcbScreenPxToScene(px: number, zoom: number) {
-  return px / Math.max(0.05, zoom || 1);
+  return px / Math.max(RCB_MIN_ZOOM, zoom || 1);
 }
 
 /**
@@ -305,9 +305,10 @@ export function rcbViewportSceneBounds(
  * Keeps cull stable across tiny wheel deltas; settled frames use true zoom.
  */
 export function rcbStepZoom(zoom: number, step = 0.05): number {
-  const z = Math.max(0.05, zoom || 1);
+  const z = Math.max(RCB_MIN_ZOOM, zoom || 1);
   const s = Math.max(0.01, step);
-  return Math.round(Math.round(z / s) * s * 1e4) / 1e4;
+  const stepped = Math.round(Math.round(z / s) * s * 1e4) / 1e4;
+  return Math.max(RCB_MIN_ZOOM, stepped);
 }
 
 /** Prefer a live, connected stage node (context beats a stale prop after resize). */

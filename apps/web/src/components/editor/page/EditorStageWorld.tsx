@@ -10,13 +10,8 @@ import {
 } from 'react';
 import { useSelector } from '@/store';
 import { useActiveFrameId } from '@/store/editorSelectors';
-import { useTranslation } from 'react-i18next';
-import { message } from '@/components/base';
 import {
   RcbCanvas,
-  RcbSvgDefs,
-  FrameDrawFeature,
-  FrameMoveFeature,
   HtmlArtboardFrame,
   type RcbCamera as CanvasCamera,
 } from '@/components/rcb';
@@ -48,6 +43,7 @@ import FrameContextToolbar from '@/components/editor/nodes/FrameNode/FrameContex
 import FrameMultiSelectionToolbar from '@/components/editor/nodes/FrameNode/FrameMultiSelectionToolbar';
 import type { ArtboardFrame } from '@/components/rcb/frames/types';
 import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
+import { useKitSelectionDockAabb } from '@/components/rcb/selection/useKitSelectionDockAabb';
 import type { FillPanelValue } from '@/components/editor/panels/FillPanel';
 import {
   selectionPaintZIndex,
@@ -62,19 +58,19 @@ import {
   smartGuideTargetsForDrag,
 } from '@/components/rcb/selection/selectionLogic';
 import { unionOfBoxes } from '@/components/rcb/selection/resizeGeometry';
-import { frameSelId } from '@/components/rcb/selection/frameSelectionIds';
+import { frameSelId } from '@/components/rcb/frames/frameSceneQuery';
 import SmartGuidesOverlay from '@/components/rcb/selection/chrome/SmartGuidesOverlay';
 import {
   getNodeBoxFromDoc,
   listNodeIdsFromDoc,
 } from '@/components/editor/canvas/canvasSession';
+import { paintIntentNeedsDomHost } from '@/components/rcb/shapes/paintIntent';
 import {
   parseFillGradient,
   serializeFillGradient,
   type FillGradient,
 } from '@/components/rcb/scene/document/sceneFill';
 import {
-  addArtboardFrame,
   renameArtboardFrame,
   setActiveFrameId,
   setFrameChromeMode,
@@ -90,9 +86,10 @@ import {
 import { nodeIdsBoundToFrames } from '@/components/rcb/scene/document/sceneClipboard';
 import { canvasFillToDocumentMeta } from './EditorBottomHud';
 import type { RootState } from '@/store';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { rcbCameraCssZoom } from '@/components/rcb/core/math';
 import { clearNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
+import { syncKitArtboardBoundsLive } from '@/components/rcb/canvas/kitBridge';
 import { bindUnownedNodesToFrames } from '@/components/rcb/frames/frameNodeBinding';
 import {
   framePlateClearsIdleStroke,
@@ -102,7 +99,6 @@ import {
 import {
   isArtboardVisibleInDocument,
   setAnimationWorkbenchGeometryPreview,
-  warnIfNewPlateBlockedByAnimationWorkbenchFocus,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 
 const EDITOR_PAN_BLOCK_SELECTOR = [
@@ -389,7 +385,6 @@ function EditorStageWorld({
   onOpenAgent,
   onAddToChat,
 }: Props) {
-  const { t } = useTranslation();
   const aiOperationState = useSelector(
     (state: RootState) => state.editor.aiOperationState
   );
@@ -437,21 +432,6 @@ function EditorStageWorld({
   const showWorkbenchFrame = useCallback(
     (frame: ArtboardFrame) => isArtboardVisibleInDocument(frame),
     []
-  );
-
-  const onCommitFrame = useCallback(
-    (rect: { x: number; y: number; width: number; height: number }) => {
-      if (
-        warnIfNewPlateBlockedByAnimationWorkbenchFocus(message.warning, t, 'artboard')
-      ) {
-        setActiveTool('select');
-        return;
-      }
-      addArtboardFrame(rect);
-      setActiveTool('select');
-      setSelectedNodeIds([]);
-    },
-    [t]
   );
 
   const onMoveFrame = useCallback(
@@ -572,6 +552,16 @@ function EditorStageWorld({
           height: moved.height,
         }));
         geometryPreviewRef.current?.(geomPatches);
+        // Kit: artboard drag updates engine bounds every frame (set_artboard_bounds).
+        for (const moved of movedFrames) {
+          syncKitArtboardBoundsLive({
+            id: moved.id,
+            x: moved.startX + dx,
+            y: moved.startY + dy,
+            width: moved.width,
+            height: moved.height,
+          });
+        }
       }
       const nextDocument = {
         ...document,
@@ -709,9 +699,12 @@ function EditorStageWorld({
     [canvasFillValue]
   );
 
-  const selectedFrameBox = useMemo(() => frameUnionBox(selectedFrames), [selectedFrames]);
+  const selectedFrameBoxDoc = useMemo(() => frameUnionBox(selectedFrames), [selectedFrames]);
+  const kitDockAabb = useKitSelectionDockAabb(selectedNodeIds, selectedFrameIds);
+  // Same Kit AABB as node toolbars — keeps frame chrome aligned after select/reconcile.
+  const selectedFrameBox = kitDockAabb ?? selectedFrameBoxDoc;
 
-  /** Plates whose bound children own SelectionChrome — clear competing soft edge. */
+  /** Plates whose bound children own selection chrome — idle hairline kept; soft edge via activeFrameId. */
   const framesWithBoundChildSelection = useMemo(() => {
     const set = new Set<string>();
     const map = document?.deltaSetLike || {};
@@ -722,10 +715,21 @@ function EditorStageWorld({
     return set;
   }, [document, selectedNodeIds]);
 
+  // HTML camera only for DomHost / artboard plates / selection guides — not Kit ink alone.
+  const needsHostSurface = useMemo(() => {
+    if (!document) return false;
+    if (frames.some((frame) => showWorkbenchFrame(frame))) return true;
+    if (selectedNodeIds.length > 0 || selectedFrameIds.length > 0) return true;
+    const map = document.deltaSetLike || {};
+    for (const id of listNodeIdsFromDoc(document)) {
+      if (paintIntentNeedsDomHost(document, id, map[id])) return true;
+    }
+    return false;
+  }, [document, frames, selectedFrameIds.length, selectedNodeIds.length, showWorkbenchFrame]);
+
   if (isMobileViewport || !document) return null;
 
-  const showCanvasDiffuseMesh =
-    canvasBgOpen && canvasFillValue.fillType === 'diffuse';
+  const showCanvasDiffuseMesh =  canvasBgOpen && canvasFillValue.fillType === 'diffuse';
   const showFrameToolbar =
     !isDevMode &&
     canvasApplyLock <= 0 &&
@@ -738,9 +742,7 @@ function EditorStageWorld({
     !selectedFrames.some((frame) => movingFrameIdSet.has(frame.id)) &&
     !selectionTransforming;
   const showMultiFrameToolbar = showFrameToolbar && selectedFrames.length > 1;
-  const aiNodeBox = aiOperationState?.active
-    ? aiNodeWorldBox(document, aiOperationState.nodeId)
-    : null;
+  const aiNodeBox = aiOperationState?.active ? aiNodeWorldBox(document, aiOperationState.nodeId)  : null;
   const aiNodeCaption = aiOperationState?.label || undefined;
 
   return (
@@ -759,8 +761,8 @@ function EditorStageWorld({
         stageRef={stageRef}
         onViewportEl={onViewportEl}
         cursor={canvasCursor}
-        defs={<RcbSvgDefs />}
         gridSize={gridSize}
+        hostSurface={needsHostSurface}
       >
         {frames.map((frame) =>
           !showWorkbenchFrame(frame) ? null : (
@@ -931,16 +933,8 @@ function EditorStageWorld({
                   boundChildSelected: framesWithBoundChildSelection.has(frame.id),
                 })
               }
-              hideTitle={
-                isDevMode ||
-                movingFrameIdSet.has(frame.id) ||
-                (selectionTransforming &&
-                  frameChromeMode === 'full' &&
-                  selectedFrameIds.includes(frame.id)) ||
-                (isAnimationArtboardKind(frame.kind) &&
-                  !selectedFrameIds.includes(frame.id) &&
-                  activeFrameId !== frame.id)
-              }
+              // Kit drawArtboards owns label + hit for every artboard (incl. 动画工作台).
+              hideTitle
               {...frameLabelInteractionProps(
                 frame.id,
                 isDevMode,
@@ -969,25 +963,6 @@ function EditorStageWorld({
             <FrameContextToolbar frame={activeFrame} box={selectedFrameBox} />
           )
         ) : null}
-
-        <FrameMoveFeature
-          enabled={!isDevMode && activeTool === 'select' && !panMode}
-          frames={frames}
-          camera={camera}
-          stageEl={stageEl}
-          onSelectFrame={onSelectFrame}
-          onMove={onMoveFrame}
-          onMoveStart={onFrameMoveStart}
-          onMoveEnd={onFrameMoveEnd}
-        />
-
-        <FrameDrawFeature
-          enabled={!isDevMode && frameMode}
-          stageEl={stageEl}
-          onCommit={onCommitFrame}
-          gridSnap
-          gridSize={gridSize}
-        />
       </RcbCanvas>
     </div>
   );

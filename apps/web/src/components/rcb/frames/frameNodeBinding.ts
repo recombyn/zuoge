@@ -7,8 +7,7 @@ import {
   WORKBENCH_SURROUND_ATTR,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { isGeneratorNode } from '@/components/rcb/scene/document/nodeCapabilities';
-import { isFrameLocalCoordSpace } from '@/components/rcb/scene/paint/sceneToSvg';
-
+import { isFrameLocalCoordSpace } from '@/components/rcb/scene/layout/nodeLayout';
 export type BBox = {
   left: number;
   top: number;

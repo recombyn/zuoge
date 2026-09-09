@@ -214,24 +214,20 @@ const Dropdown: FC<DropdownProps> = ({
       >
         {children}
       </div>
-      <FloatingPortal root={getPopupContainer?.()}>
-        <div
-          ref={refs.setFloating}
-          style={{
-            ...floatingStyles,
-            visibility: open ? 'visible' : 'hidden',
-            pointerEvents: open ? 'auto' : 'none',
-          }}
-          className={cn('z-[500]', floatingClassName)}
-          {...getFloatingProps()}
-        >
+      {open ? (
+        <FloatingPortal root={getPopupContainer?.()}>
           <div
-            className={cn(open ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0')}
+            ref={refs.setFloating}
+            style={floatingStyles}
+            className={cn('z-[500]', floatingClassName)}
+            {...getFloatingProps()}
           >
-            {popupRender ? popupRender(menuContent) : menuContent}
+            <div className="translate-y-0 opacity-100">
+              {popupRender ? popupRender(menuContent) : menuContent}
+            </div>
           </div>
-        </div>
-      </FloatingPortal>
+        </FloatingPortal>
+      ) : null}
     </>
   );
 };

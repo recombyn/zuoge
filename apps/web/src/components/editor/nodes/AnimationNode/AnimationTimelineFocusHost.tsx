@@ -6,7 +6,7 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useSelector } from '@/store';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { resolveAnimationFrameId } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
 import { RCB_MAX_ZOOM } from '@/components/rcb/core/math';
 import {
@@ -19,12 +19,7 @@ import {
 import {
   setAnimationWorkbenchTimelineFocus,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
-import {
-  getSharedSceneRenderBuffer,
-  isSoaCanvasShapesEnabled,
-  refreshSoaOverlayVisibilityFromDocument,
-} from '@/components/rcb/render/sceneRenderBuffer';
-import { requestIdleCanvasFullRepaint } from '@/components/rcb/render/sceneRenderer';
+import { getCanvasEngine } from '@/components/rcb/canvas/KitCanvasHost';
 import {
   RCB_TIMELINE_CAMERA_FIT,
   RCB_TIMELINE_CAMERA_RELEASE,
@@ -151,15 +146,10 @@ function AnimationTimelineFocusHost({
       : null;
 
   // Focus only — do not depend on `document`. Open/ensure/playhead all swap the
-  // document ref; re-running SOA visibility + full idle repaint on each swap
-  // froze Keyframes open for large LOT plates.
+  // document ref; re-running on each swap froze Keyframes open for large LOT plates.
   useLayoutEffect(() => {
     setAnimationWorkbenchTimelineFocus(focusFrameId);
-    const doc = documentRef.current;
-    if (doc && isSoaCanvasShapesEnabled()) {
-      refreshSoaOverlayVisibilityFromDocument(getSharedSceneRenderBuffer(), doc);
-    }
-    requestIdleCanvasFullRepaint();
+    getCanvasEngine()?.renderer.requestRender();
     return () => {
       // Always clear module focus when leaving an open focus (not only when
       // the next focusFrameId is already null — that skipped cleanup before).

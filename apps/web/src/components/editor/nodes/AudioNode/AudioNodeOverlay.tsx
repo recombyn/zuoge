@@ -432,7 +432,7 @@ function AudioPlate({
  * Active audio player: one HTML plate portaled into the SVG foreignObject.
  * Idle (unselected) audio paints as canvas plates — no ShapeHost / FO.
  * Stays mounted during move — FO is inside the SVG group that
- * `previewSvgNodeGeometry` transforms (same as video).
+ * Kit / DomHost geometry preview drives (same as video).
  */
 function AudioNodeOverlay({
   document,

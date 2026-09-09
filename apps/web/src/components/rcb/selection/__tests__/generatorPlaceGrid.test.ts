@@ -77,6 +77,12 @@ describe('generator plate place size + grid', () => {
     expect(oldFloor).toBeGreaterThan(box);
   });
 
+  it('caps empty-gen Lucide size so large plates keep title-like stroke weight', () => {
+    // 360×0.28 = 100.8 would stroke at ~8 CSS px — too dark / chunky.
+    expect(generatorEmptyIconSize(360, 360, 1)).toBeCloseTo(48, 5);
+    expect(generatorEmptyIconSize(360, 360, 2)).toBeCloseTo(24, 5);
+  });
+
   it('tiny high-zoom plates (5×5) still paint a visible glyph', () => {
     const icon = generatorEmptyIconSize(5, 5);
     expect(icon).toBeCloseTo(1.4, 5);

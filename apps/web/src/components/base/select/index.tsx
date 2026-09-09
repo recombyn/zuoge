@@ -194,59 +194,54 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
           </span>
         </div>
 
-        <FloatingPortal root={getPopupContainer?.()}>
-          <div
-            ref={refs.setFloating}
-            data-select-dropdown
-            style={{
-              ...floatingStyles,
-              visibility: open ? 'visible' : 'hidden',
-              pointerEvents: open ? 'auto' : 'none',
-            }}
-            className={cn('z-[9500]', floatingClassName)}
-            {...getFloatingProps()}
-          >
+        {open ? (
+          <FloatingPortal root={getPopupContainer?.()}>
             <div
-              className={cn(
-                'max-h-60 w-full overflow-auto rounded',
-                'bg-[var(--color-background-default-base)]',
-                'border border-[var(--color-border-default-base)]',
-                'shadow-lg focus:outline-none focus-visible:outline-none',
-                'p-1 text-sm',
-                open
-                  ? 'opacity-100 translate-y-0'
-                  : 'opacity-0 -translate-y-2'
-              )}
-              style={{ marginTop: '4px' }}
-              onWheel={(e) => {
-                e.stopPropagation();
-              }}
-              onTouchMove={(e) => {
-                e.stopPropagation();
-              }}
+              ref={refs.setFloating}
+              data-select-dropdown
+              style={floatingStyles}
+              className={cn('z-[9500]', floatingClassName)}
+              {...getFloatingProps()}
             >
-              {options.map((option) => {
-                const selected = option.value === value;
-                return (
-                  <div
-                    key={option.value}
-                    onClick={() => handleOptionClick(option)}
-                    className={cn(
-                      'relative cursor-pointer select-none rounded px-4 py-2 transition-colors',
-                      'hover:bg-[var(--accent-soft)]',
-                      selected && 'bg-[var(--accent-soft)] font-medium',
-                      option.disabled && 'cursor-not-allowed opacity-50'
-                    )}
-                  >
-                    {optionRender
-                      ? optionRender(option, selected)
-                      : defaultOptionRender(option, selected)}
-                  </div>
-                );
-              })}
+              <div
+                className={cn(
+                  'max-h-60 w-full overflow-auto rounded',
+                  'bg-[var(--color-background-default-base)]',
+                  'border border-[var(--color-border-default-base)]',
+                  'shadow-lg focus:outline-none focus-visible:outline-none',
+                  'p-1 text-sm opacity-100 translate-y-0'
+                )}
+                style={{ marginTop: '4px' }}
+                onWheel={(e) => {
+                  e.stopPropagation();
+                }}
+                onTouchMove={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                {options.map((option) => {
+                  const selected = option.value === value;
+                  return (
+                    <div
+                      key={option.value}
+                      onClick={() => handleOptionClick(option)}
+                      className={cn(
+                        'relative cursor-pointer select-none rounded px-4 py-2 transition-colors',
+                        'hover:bg-[var(--accent-soft)]',
+                        selected && 'bg-[var(--accent-soft)] font-medium',
+                        option.disabled && 'cursor-not-allowed opacity-50'
+                      )}
+                    >
+                      {optionRender
+                        ? optionRender(option, selected)
+                        : defaultOptionRender(option, selected)}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        </FloatingPortal>
+          </FloatingPortal>
+        ) : null}
       </div>
     );
   }

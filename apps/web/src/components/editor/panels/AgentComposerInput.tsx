@@ -4,13 +4,13 @@ import { cn } from '@/utils/classnames';
 import { parseMarkChipKey, isMarkContextKey } from '@/components/editor/nodes/ImageNode/mark/markChipSync';
 import { setHoveredMarkPin } from '@/store/modules/editor';
 import { parseNodeText } from '@/components/rcb/scene/document/sceneText';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   frameIdContainingNode,
   buildSceneNodesForEdit,
   buildSceneNodesForIds,
 } from '@/components/editor/panels/agent/runDesignAgent';
-import { renderComposerChipThumb, renderExport } from '@/components/rcb/scene/paint/exportImage';
+import { renderComposerChipThumb, renderExport } from '@/components/rcb/scene/export/exportImage';
 import { imageSrcToFile } from '@/utils/uploadImage';
 import { sanitizeSvg } from '@/utils/sanitizeHtml';
 import type { SceneDocument, SceneNode, SceneNodeInput } from '@/components/rcb/sceneNode';

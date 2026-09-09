@@ -292,7 +292,7 @@ function MockupDesignLayer({
               onPointerDown={(e) => startDrag(e, c.id)}
             />
           ))}
-          {/* Rotate hotzone — above top edge, SelectionChrome-style */}
+          {/* Rotate hotzone — above top edge, selection-chrome-style */}
           <span
             className="pointer-events-auto absolute z-[2] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-[var(--accent)] shadow"
             style={{ left: left + width / 2, top: top - 18, cursor: 'grab' }}

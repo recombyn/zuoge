@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { buildMarkdownTextAttrs, measurePlainTextSize } from './sceneText';
+import { buildMarkdownTextAttrs, measurePlainTextSize, type TextStyle } from './sceneText';
 import {
   clampShapeSides,
   DEFAULT_SHAPE_SIDES,
@@ -18,6 +18,7 @@ export function createTextNode({
   height,
   autoSize = true,
   fontSize,
+  fontFamily,
 }: {
   x?: number;
   y?: number;
@@ -28,13 +29,15 @@ export function createTextNode({
   autoSize?: boolean;
   /** Scene-px font size (T-tool passes zoom-fitted size so high zoom is not huge). */
   fontSize?: number;
+  fontFamily?: string;
 } = {}): CreatedSceneNode {
   const id = nanoid(10);
   const content = String(text ?? '');
-  const style =
-    fontSize != null && Number.isFinite(fontSize) && fontSize > 0
-      ? { fontSize: Math.max(1, Number(fontSize)) }
-      : {};
+  const style: Partial<TextStyle> = {};
+  if (fontSize != null && Number.isFinite(fontSize) && fontSize > 0) {
+    style.fontSize = Math.max(1, Number(fontSize));
+  }
+  if (fontFamily) style.fontFamily = String(fontFamily);
   const measured = measurePlainTextSize(content || 'M', style);
   // Empty autoSize = caret only (tiny width). Fixed-width keeps the dragged box.
   const w = width ?? (content ? measured.width : autoSize ? 2 : 160);

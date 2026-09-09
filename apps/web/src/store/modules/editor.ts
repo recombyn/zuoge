@@ -56,7 +56,7 @@ import { frameIsEmpty } from '@/components/rcb/frames/framePlatePointer';
 import type { SceneDocument, SceneNode } from '@/components/rcb/sceneNode';
 import { coerceSceneDocumentInput } from '@/components/rcb/sceneNode';
 import { nodeIdsBoundToFrames } from '@/components/rcb/scene/document/sceneClipboard';
-import { isFrameLocalCoordSpace } from '@/components/rcb/scene/paint/sceneToSvg';
+import { isFrameLocalCoordSpace } from '@/components/rcb/scene/layout/nodeLayout';
 import { createBlankLottieAnimation } from '@/components/editor/nodes/AnimationNode/animationComposeLayers';
 import { syncArtboardChildrenIntoAnimation } from '@/components/editor/nodes/AnimationNode/animationFrameSync';
 import { materializeRootShapeLayers } from '@/components/editor/nodes/AnimationNode/animationLottieMaterialize';
@@ -98,7 +98,7 @@ import {
   queueIdleAnimationHostJson,
   requestPrecompCameraFit,
   requestPrecompCameraRelease,
-  requestSoaAiFlush,
+  requestAiFlush,
   requestSyncNestedLotHosts,
   requestTimelineCameraFit,
   requestTimelineCameraRelease,
@@ -313,7 +313,7 @@ const GEOMETRY_NODE_KEYS = new Set(['x', 'y', 'width', 'height', 'attrs']);
 const GEOMETRY_ATTR_KEYS = new Set(['angle', 'flipX', 'flipY']);
 
 /**
- * Pure geometry / transform commit — SoA + previewSvgNodeTransform only.
+ * Pure geometry / transform commit — Kit TransformPreview + DomHost noop only.
  * Must not bump sceneReloadToken or remount RcbShapeHost.
  */
 function isGeometryOnlyNodePatch(patch: unknown): boolean {
@@ -388,6 +388,22 @@ function listMovedArtboardFrameIds(
   return out;
 }
 
+/**
+ * While Kit flushes WasmScene → SceneDocument, do not bump `sceneReloadToken`.
+ * Bumping it re-hydrates Kit from the document (destroy + rebuild) — the opposite
+ * of the engine-as-SoT contract and the root cause of draw/marquee/position bugs.
+ */
+let kitCanvasDocFlushDepth = 0;
+
+export function withKitCanvasDocumentFlush<T>(fn: () => T): T {
+  kitCanvasDocFlushDepth += 1;
+  try {
+    return fn();
+  } finally {
+    kitCanvasDocFlushDepth -= 1;
+  }
+}
+
 function applyCanvasDocPatchTokens(
   state: typeof initialState,
   prevDoc: SceneDocument | null | undefined
@@ -396,6 +412,32 @@ function applyCanvasDocPatchTokens(
   const nextKids = rootChildrenIds(state.document);
   const membershipChanged =
     prevKids.length !== nextKids.length || prevKids.some((id, i) => id !== nextKids[i]);
+  const fromKit = kitCanvasDocFlushDepth > 0;
+
+  if (fromKit) {
+    // Kit already holds ink. Document is a mirror for panels / DomHost / persist.
+    // DomHost mounts via documentPatchToken + child list — not a full Kit hydrate.
+    if (membershipChanged) {
+      state.lastPatchedNodeIds = [];
+      state.lastPatchTransformOnly = false;
+    } else {
+      let patched = listChangedChildIds(prevDoc, state.document, nextKids);
+      if (isFrameLocalCoordSpace(state.document)) {
+        const movedFrames = listMovedArtboardFrameIds(prevDoc, state.document);
+        if (movedFrames.length) {
+          const bound = nodeIdsBoundToFrames(state.document, movedFrames);
+          if (bound.length) patched = [...new Set([...patched, ...bound])];
+        }
+      }
+      state.lastPatchedNodeIds = patched;
+      // Must stay false so KitCanvasHost does not push RCB→Kit geometry.
+      state.lastPatchTransformOnly = false;
+    }
+    state.lastPatchFromKitCanvas = true;
+    return;
+  }
+
+  state.lastPatchFromKitCanvas = false;
   if (membershipChanged) {
     state.sceneReloadToken += 1;
     state.lastPatchedNodeIds = [];
@@ -404,7 +446,7 @@ function applyCanvasDocPatchTokens(
   }
   let patched = listChangedChildIds(prevDoc, state.document, nextKids);
   // Plate-only commits leave child node identity unchanged, but frameLocal
-  // world paint boxes move — refresh those SoA slots or QT culls stale ink.
+  // world paint boxes move — refresh those Kit slots or cull stale ink.
   if (isFrameLocalCoordSpace(state.document)) {
     const movedFrames = listMovedArtboardFrameIds(prevDoc, state.document);
     if (movedFrames.length) {
@@ -564,6 +606,11 @@ const initialState = {
   lastPatchedNodeIds: [] as string[],
   /** Latest patch only changed angle / flip — SvgCanvas updates transform, not path `d`. */
   lastPatchTransformOnly: false,
+  /**
+   * Document patch originated from Kit→SceneDocument mirror flush.
+   * KitCanvasHost must not push geometry/style back into Kit (engine is SoT).
+   */
+  lastPatchFromKitCanvas: false,
   historyPast: [] as HistoryEntry[],
   historyFuture: [] as HistoryEntry[],
   activeTool: 'select' as string,
@@ -615,8 +662,8 @@ const initialState = {
   /** Fill / stroke panel docked to the right of the selection (hides top chrome while open). */
   shapeStylePanel: null as null | { kind: 'fill' | 'stroke' | 'radius'; nodeIds: string[] },
   /** Shared stroke settings for pen / pencil tools. */
-  penStrokeColor: '#333333' as string,
-  penFillColor: 'transparent' as string,
+  penStrokeColor: '#000000' as string,
+  penFillColor: '#CCCCCC' as string,
   penStrokeWidth: 1 as number,
   /** Brush / stroke opacity while painting (0–100). */
   penStrokeOpacity: 100 as number,
@@ -873,7 +920,7 @@ function pushAddHistory(
   snapshotAddHistory(state, opts);
   // Do not bump sceneRevision / documentRevision here. Both wake
   // useEditorDocumentOnCommit (LayerPanel / AgentDock / timeline). Rebuilding
-  // docks in the same turn as SoA paste dominated paste #2+ at 2k+.
+  // docks in the same turn as Kit paste dominated paste #2+ at 2k+.
   // Callers schedule touchDocumentRevision after paint.
 }
 
@@ -903,6 +950,9 @@ function commitSpawnedGenerator(
   state.documentPatchToken += 1;
   state.lastPatchedNodeIds = [id];
   state.lastPatchTransformOnly = false;
+  // Must clear sticky Kit→doc flag — otherwise KitCanvasHost skips reconcile and
+  // the new plate never maps (blank selection outline only, no gray wash / icon).
+  state.lastPatchFromKitCanvas = false;
   state.selectedNodeId = id;
   state.selectedNodeIds = [id];
   // Generator chrome requires single-node selection (frame chrome otherwise wins).
@@ -1012,7 +1062,7 @@ export const editorReducers = {
       );
       state.dirty = true;
       // Full doc replace (boolean / paste / import) — do not reuse stale patch
-      // ids; SoA incremental sync would keep deleted operands as paint ghosts.
+      // ids; Kit incremental sync would keep deleted operands as paint ghosts.
       state.lastPatchedNodeIds = [];
       state.documentPatchToken += 1;
       bumpSceneReloadIfUnlocked(state);
@@ -1036,7 +1086,7 @@ export const editorReducers = {
     },
     /**
      * Paste / duplicate commit: membership grew with known new ids.
-     * Sets `lastPatchedNodeIds` so SoA can bulk-insert instead of full remount,
+     * Sets `lastPatchedNodeIds` so Kit can bulk-insert instead of full remount,
      * and skips `sceneReloadToken` (same idea as generator spawn).
      * History stores only inserted nodes (not a full-doc snap).
      */
@@ -1328,6 +1378,7 @@ export const editorReducers = {
       const skipHost = shouldSkipPatchHostReload(skipHostReload, patch);
       state.lastPatchedNodeIds = skipHost ? [] : [id];
       state.lastPatchTransformOnly = !skipHost && patchSkipsHostRemount(patch);
+      state.lastPatchFromKitCanvas = false;
       // Playhead bake uses skipHistory — must not persist/autoKey or LOT tab freezes
       // (pose patch → JSON rewrite → pose differs → infinite layout loop).
       if (!skipHistory && !transientOnly) persistActivePrecompSession(state);
@@ -1527,12 +1578,22 @@ export const editorReducers = {
       // Timeline focus: only the current 动画工作台 is visible — a new world
       // artboard would steal activeFrameId and vanish under focus.
       if (isNewPlateBlockedByAnimationWorkbenchFocus()) return;
-      pushHistory(state);
       const next = normalizeDocument(state.document);
       const frames = Array.isArray(next.frames) ? [...next.frames] : [];
       const payload = action.payload || {};
       const { activate, ...framePartial } = payload;
       const frame = createFrame(framePartial);
+      // Same id must not appear twice (Kit bridge used to re-push `kit1`).
+      if (frames.some((f) => String(f?.id) === String(frame.id))) {
+        if (activate !== false) {
+          state.selectedFrameIds = [frame.id];
+          state.selectedNodeId = null;
+          state.selectedNodeIds = [];
+          state.frameChromeMode = 'full';
+        }
+        return;
+      }
+      pushHistory(state);
       frames.push(frame);
       next.frames = frames;
       const key = `frame:${frame.id}`;
@@ -1561,7 +1622,7 @@ export const editorReducers = {
       if (!state.document) return;
       const id = action.payload ? String(action.payload) : null;
       // Selection-only: do not normalizeDocument — that minted a new document
-      // identity every click and re-ran SoA sync / idle full-clear (paste freeze).
+      // identity every click and re-ran Kit sync / idle full-clear (paste freeze).
       const cur =
         state.document.activeFrameId == null
           ? null
@@ -1578,6 +1639,37 @@ export const editorReducers = {
     },
     setFrameChromeMode(state, action: PayloadAction<'soft' | 'full'>) {
       state.frameChromeMode = action.payload === 'full' ? 'full' : 'soft';
+    },
+    /**
+     * Soft context focus for an occupied artboard while nodes stay selected
+     * (or after an interior plate click). Does not change selectedNodeIds /
+     * selectedFrameIds — SelectionChrome stays on nodes; plate edge uses
+     * activeFrameId + frameChromeMode soft.
+     */
+    setSoftFrameContext(state, action: PayloadAction<string | null | undefined>) {
+      if (!state.document) return;
+      const id = action.payload ? String(action.payload) : null;
+      if (!id) {
+        if (
+          state.frameChromeMode === 'soft' &&
+          !state.selectedFrameIds.length &&
+          state.document.activeFrameId
+        ) {
+          state.document.activeFrameId = null;
+        }
+        return;
+      }
+      const valid = (Array.isArray(state.document.frames) ? state.document.frames : []).some(
+        (f) => String(f?.id || '') === id
+      );
+      if (!valid) return;
+      const cur =
+        state.document.activeFrameId == null
+          ? null
+          : String(state.document.activeFrameId);
+      if (cur !== id) state.document.activeFrameId = id;
+      state.frameChromeMode = 'soft';
+      state.dirty = true;
     },
     setSelectedFrameIds(state, action: PayloadAction<string[]>) {
       if (!state.document) return;
@@ -1883,7 +1975,7 @@ export const editorReducers = {
       if (!skipHistory && hasUndoablePatch) bumpDocumentRevision(state);
       if (needsReload) state.sceneReloadToken += 1;
       // skipHistory plate drag: child nodes are unchanged but world paint boxes
-      // move under frameLocal — mark bound ids so SoA / QT refresh.
+      // move under frameLocal — mark bound ids so Kit refresh.
       if (geomMovedIds.length && isFrameLocalCoordSpace(next)) {
         const bound = nodeIdsBoundToFrames(next, geomMovedIds);
         if (bound.length) {
@@ -1914,7 +2006,7 @@ export const editorReducers = {
         // One remount + SoA flush after the whole transaction (not per tool_op).
         state.sceneReloadToken = (Number(state.sceneReloadToken) || 0) + 1;
         bumpDocumentRevision(state);
-        requestSoaAiFlush();
+        requestAiFlush();
       }
     },
     beginCanvasApplyLock(state) {
@@ -4096,7 +4188,7 @@ export const editorReducers = {
     },
     setPenFillColor(state, action) {
       const hex = String(action.payload ?? '').trim();
-      state.penFillColor = hex || 'transparent';
+      state.penFillColor = hex || '#CCCCCC';
     },
     setPenStrokeWidth(state, action) {
       const n = Number(action.payload);
@@ -4111,15 +4203,18 @@ export const editorReducers = {
     setBucketFill(state, action) {
       const next = action.payload;
       if (!next || typeof next !== 'object') return;
+      const fillColorRaw =
+        next.fillColor != null ? String(next.fillColor) : String(state.bucketFill.fillColor || '');
+      const opRaw = next.fillOpacity ?? state.bucketFill.fillOpacity;
+      const op = Number(opRaw);
       state.bucketFill = {
         ...state.bucketFill,
         ...next,
         fillType: next.fillType || state.bucketFill.fillType || 'solid',
-        fillColor: String(next.fillColor || state.bucketFill.fillColor || '#333333'),
-        fillOpacity: Math.max(
-          0,
-          Math.min(100, Math.round(Number(next.fillOpacity ?? state.bucketFill.fillOpacity) || 100))
-        )};
+        // Keep explicit `transparent` / `none` (|| would fall back to previous solid).
+        fillColor: fillColorRaw || '#333333',
+        fillOpacity: Math.max(0, Math.min(100, Math.round(Number.isFinite(op) ? op : 100))),
+      };
     },
     setPencilBrushId(state, action) {
       const id = String(action.payload || '').trim();
@@ -4287,6 +4382,7 @@ export const setSelectedNodeIds = bindEditorMutator(editorReducers.setSelectedNo
 export const addArtboardFrame = bindEditorMutator(editorReducers.addArtboardFrame);
 export const setActiveFrameId = bindEditorMutator(editorReducers.setActiveFrameId);
 export const setFrameChromeMode = bindEditorMutator(editorReducers.setFrameChromeMode);
+export const setSoftFrameContext = bindEditorMutator(editorReducers.setSoftFrameContext);
 export const setSelectedFrameIds = bindEditorMutator(editorReducers.setSelectedFrameIds);
 export const setMixedSelection = bindEditorMutator(editorReducers.setMixedSelection);
 export const removeArtboardFrames = bindEditorMutator(editorReducers.removeArtboardFrames);

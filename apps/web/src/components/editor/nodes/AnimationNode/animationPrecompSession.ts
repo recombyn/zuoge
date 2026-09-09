@@ -8,7 +8,10 @@ import {
 } from '@/components/rcb/scene/document/nodeFactories';
 import { removeNodesFromDocument } from '@/components/rcb/scene/document/sceneDocument';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
-import { nodeLeftTop, isFrameLocalCoordSpace } from '@/components/rcb/scene/paint/sceneToSvg';
+import {
+  nodeLeftTop,
+  isFrameLocalCoordSpace,
+} from '@/components/rcb/scene/layout/nodeLayout';
 import { materializeRootShapeLayers, sessionCoversLotInk } from '@/components/editor/nodes/AnimationNode/animationLottieMaterialize';
 import {
   extractPrecompAssetJson,

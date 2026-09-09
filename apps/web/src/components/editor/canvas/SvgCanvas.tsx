@@ -19,8 +19,6 @@ import {
   updateNodeInDocument,
 } from '@/components/rcb/scene/document/sceneDocument';
 import {
-  createImageNode,
-  createShapeNode,
   measureImageNaturalSize,
   parseLottieAnimationData,
   serializeLottieAnimationData,
@@ -38,13 +36,9 @@ import {
   canvasBulkItemCount,
   runCanvasBulkOp,
 } from '@/components/editor/canvas/canvasBulkOpLoading';
-import {
-  loadSceneOntoSvg,
-  nodeLeftTop,
-} from '@/components/rcb/scene/paint/sceneToSvg';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
-import { strokeCenterlineToFilledOutline } from '@/components/rcb/scene/paint/outlineToPath';
-import { computeShapeBoolean, type ShapeBox } from '@/components/rcb/selection/shapeBoolean';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
+import { mountDomHostBoard } from '@/components/rcb/scene/dom/domHostBoard';
+import { sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 import { createDragWriteCoalescer } from './dragWriteCoalescer';
 import {
   bindCreatedNodeToFrame,
@@ -53,26 +47,15 @@ import {
   layoutGeneratorPlateAtScene,
 } from './canvasSession';
 import { runCanvasCtxAction } from './runCanvasCtxAction';
-import {
-  setSceneHitTestBridge,
-} from '@/components/rcb/scene/document/sceneHitBridge';
-import {
-  SceneSpatialRuntime,
-  getSharedSceneSpatialRuntime,
-  setSharedSceneSpatialRuntime,
-} from '@/components/rcb/core/spatialIndex';
-import {
-  createSvgSceneRenderer,
-  type SceneRenderer,
-} from '@/components/rcb/render/sceneRenderer';
-import { useSvgBoard } from '@/components/rcb/canvas/useSvgBoard';
+import { hitTestRcbIdFromKit } from '@/components/rcb/canvas/kitBridge';
+import { useDomHostBoard } from '@/components/rcb/canvas/useDomHostBoard';
 import {
   RcbShapesLayer,
   replaceShapePaint,
   setSharedNodeEls,
   listShapeHosts,
   rcbScreenToScene,
-  type SvgBoardHandle,
+  type DomHostBoardHandle,
 } from '@/components/rcb';
 import {
   getSceneWorldRoot,
@@ -83,7 +66,6 @@ import {
   previewArtboardFrameGeometry,
 } from '@/components/rcb/frames/HtmlArtboardFrame';
 import { listSelectionRevealOverflowIds } from '@/components/rcb/selection/selectionPaintRaise';
-import { previewSvgNodeTransform } from '@/components/rcb/scene/paint/sceneToSvg';
 import {
   abortNodeUpload,
   formatUploadErrorMessage,
@@ -100,8 +82,6 @@ import {
   cssPreviewForGradient,
   parseFillGradient,
   parseFillType,
-  parseFillImageAdjust,
-  serializeFillImageAttrs,
 } from '@/components/rcb/scene/document/sceneFill';
 import { cssSolidWithOpacity } from '@/components/base/colorPanel';
 import {
@@ -152,6 +132,13 @@ import {
   subscribeCollabUndo,
   subscribeCollabView,
 } from '@/components/editor/collab/collabRuntime';
+import {
+  kitCanRedo,
+  kitCanUndo,
+  deleteKitSelection,
+  isDomHostOnlyRcbNode,
+} from '@/components/rcb/canvas/kitBridge';
+import { kitOwnsStagePointer } from '@/components/rcb/canvas/toolMap';
 import SvgPaper from './SvgPaper';
 import { pointerToWorld, type ArtboardRect } from './pointerToWorld';
 import {
@@ -162,10 +149,9 @@ import {
   frameForFullBleedPlate,
   resolveAttachPickPayload,
 } from './attachPick';
-import { parseFrameSelId } from '@/components/rcb/selection/frameSelectionIds';
+import { parseFrameSelId } from '@/components/rcb/frames/frameSceneQuery';
 import { ctxMenuTargetHasProcessing, resolveCtxMenuTargets } from './ctxMenuGuards';
 import { buildCanvasContextMenuProps } from './buildCanvasContextMenuProps';
-import { closedPenFillAttrs, pathNodeHasSolidFill } from './penFillAttrs';
 import {
   resolveAnimationFrameId,
 } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
@@ -185,19 +171,18 @@ import { useChatImageDrop } from './drop/useChatImageDrop';
 import { useCanvasHotkeys } from './keyboard/useCanvasHotkeys';
 import {
   SelectionFeature,
-  ShapeDrawFeature,
-  TextPlaceFeature,
-  ImagePlaceFeature,
-  PencilDrawFeature,
-  PenDrawFeature,
-  PenPathEditFeature,
-  BucketFillFeature,
-  DEFAULT_PENCIL_BRUSH_ID,
-  findPencilBrush,
   rcbCenterOnPoint,
   getDocumentGridSize,
   snapCoordToGrid,
+  setEngineToolFromRcb,
 } from '@/components/rcb';
+import {
+  enterKitPathEditForRcbId,
+  exitKitPathEdit,
+  kitRcbIdBeingPathEdited,
+  placeKitImageFromUrl,
+} from '@/components/rcb/canvas/kitBridge';
+import { useRcbScreenToScene } from '@/components/rcb/camera/context';
 import AudioNodeOverlay, {
   resolveActiveAudioPlayerId,
   type AudioGeomOverride,
@@ -236,7 +221,7 @@ type SvgCanvasProps = {
   selectedNodeId?: string | null;
   selectedNodeIds?: string[];
   documentPatchToken?: number;
-  /** Nodes patched via the editor store — refresh SVG even when selection is empty (e.g. agent busy). */
+  /** Nodes patched via the editor store ? refresh SVG even when selection is empty (e.g. agent busy). */
   lastPatchedNodeIds?: string[];
   lastPatchTransformOnly?: boolean;
   onZoomIn?: () => void;
@@ -245,7 +230,7 @@ type SvgCanvasProps = {
   onReady?: () => void;
   /** Notify the parent world while selection move / resize / rotate is active. */
   onTransformingChange?: (transforming: boolean) => void;
-  /** Artboard drag — same handlers as title label move (hide title, co-move children). */
+  /** Artboard drag ? same handlers as title label move (hide title, co-move children). */
   onFrameMoveStart?: (frameId: string) => void;
   onFrameMoveEnd?: () => void;
   onFrameMove?: (
@@ -256,23 +241,23 @@ type SvgCanvasProps = {
   ) => void;
   /**
    * Hide selection control box while an artboard/workbench is title-dragged
-   * (SelectionFeature transforming is not set for that path — same UX as shapes).
+   * (SelectionFeature transforming is not set for that path ? same UX as shapes).
    */
   suppressChromeWhileFrameMoving?: boolean;
   /** Open the editor AI agent dock (selection contextual bar). */
   onOpenAgent?: (opts?: { prompt?: string }) => void;
-  /** Right-click 銆屾坊鍔犲埌 Chat銆嶁€?one node id, `frame:id`, or multiple selected ids as one group. */
+  /** Right-click ?????? Chat????one node id, `frame:id`, or multiple selected ids as one group. */
   onAddToChat?: (target: string | string[]) => void;
   /** When true, paper has no outer shadow (hosted inside HtmlArtboardFrame). */
   embedded?: boolean;
-  /** Full viewport stage — pencil/pen hit-test beyond the finite SVG paper. */
+  /** Full viewport stage ? pencil/pen hit-test beyond the finite SVG paper. */
   stageEl?: HTMLElement | null;
   /**
    * Drawable paper in world units. Prefer origin at (0,0) and grow width/height
-   * to cover the camera frustum — do not slide the origin with pan/zoom.
+   * to cover the camera frustum ? do not slide the origin with pan/zoom.
    */
   viewRect?: { x: number; y: number; width: number; height: number } | null;
-  /** Parent frame-drag — same preview path as shape move (updates documentRef). */
+  /** Parent frame-drag ? same preview path as shape move (updates documentRef). */
   geometryPreviewRef?: RefObject<CanvasSession['onGeometryPreview'] | null>;
   getPreviewDocumentRef?: RefObject<() => SceneDocument | null>;
   /**
@@ -287,7 +272,7 @@ type SvgCanvasProps = {
 };
 
 /**
- * SVG.js editor shell — mounts the board and composes feature components.
+ * SVG.js editor shell ? mounts the board and composes feature components.
  */
 function SvgCanvas({
   document,
@@ -331,28 +316,16 @@ function SvgCanvas({
   const applyLocked = canvasApplyLock > 0;
   const activeTool = useSelector((s: RootState) => s.editor.activeTool);
   const shapeKind = useSelector((s: RootState) => s.editor.shapeKind);
+  const kitOwns = kitOwnsStagePointer(activeTool, shapeKind);
   const pendingImageSrc = useSelector((s: RootState) => s.editor.pendingImageSrc);
-  const penStrokeColor = useSelector((s: RootState) => String(s.editor.penStrokeColor || '#333333'));
+  const penStrokeColor = useSelector((s: RootState) => String(s.editor.penStrokeColor || '#000000'));
   const penFillColor = useSelector((s: RootState) =>
-    String(s.editor.penFillColor ?? 'transparent')
+    String(s.editor.penFillColor ?? '#CCCCCC')
   );
   const penStrokeWidth = useSelector((s: RootState) => {
     const n = Number(s.editor.penStrokeWidth);
     return Number.isFinite(n) && n > 0 ? n : 1;
   });
-  const pencilBrushId = useSelector((s: RootState) =>
-    String(s.editor.pencilBrushId || DEFAULT_PENCIL_BRUSH_ID)
-  );
-  const pencilPressureEnabled = useSelector((s: RootState) =>
-    s.editor.pencilPressureEnabled !== false
-  );
-  const penStrokeOpacity = useSelector((s: RootState) => {
-    const n = Number(s.editor.penStrokeOpacity);
-    return Number.isFinite(n) ? Math.max(1, Math.min(100, n)) : 100;
-  });
-  const bucketFill = useSelector((s: RootState) => s.editor.bucketFill);
-  const bucketFillRef = useRef(bucketFill);
-  bucketFillRef.current = bucketFill;
   const workspaceMode = useSelector(
     (s: RootState) => (s.editor.workspaceMode || 'design') as 'design' | 'dev'
   );
@@ -377,8 +350,16 @@ function SvgCanvas({
   // back to the editor store so the menu and Ctrl+Z stay usable. View-only never undoes.
   const viewOnly = isCollabViewOnly();
   const collabActive = isCollabActive();
-  const canUndo = !viewOnly && (collabActive ? canCollabUndo() || storeCanUndo : storeCanUndo);
-  const canRedo = !viewOnly && (collabActive ? canCollabRedo() || storeCanRedo : storeCanRedo);
+  const canUndo =
+    !viewOnly &&
+    (collabActive
+      ? canCollabUndo() || storeCanUndo || (kitOwns && kitCanUndo())
+      : storeCanUndo || (kitOwns && kitCanUndo()));
+  const canRedo =
+    !viewOnly &&
+    (collabActive
+      ? canCollabRedo() || storeCanRedo || (kitOwns && kitCanRedo())
+      : storeCanRedo || (kitOwns && kitCanRedo()));
   const imageToolPanel = useSelector(
     (s: RootState) => s.editor.imageToolPanel as null | { nodeId: string; kind: string }
   );
@@ -416,7 +397,7 @@ function SvgCanvas({
 
   const paperRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
-  // Scene / selection refs (declared once — do not duplicate in this component).
+  // Scene / selection refs (declared once ? do not duplicate in this component).
   const documentRef = useRef(document);
   const selectedIdsRef = useRef<string[]>([]);
   const activeFrameIdRef = useRef<string | null>(null);
@@ -436,9 +417,8 @@ function SvgCanvas({
     at: 0,
   });
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  /** Double-click pen path → anchor / handle edit. */
-  const [editingPenId, setEditingPenId] = useState<string | null>(null);
-  const [pathEditSubtool, setPathEditSubtool] = useState<'select' | 'pen' | 'add-anchor' | 'curve'>('select');
+  /** Double-click / toolbar path-edit ? Kit InputManager owns anchors (not RCB Feature). */
+  const [kitPathEditNodeId, setKitPathEditNodeId] = useState<string | null>(null);
   /** After inline text commit, blank-canvas pointerup must not clear selection. */
   const keepSelectAfterTextEditRef = useRef<string | null>(null);
   /** Frames painted directly during a mixed transform; restored on cancellation. */
@@ -446,7 +426,7 @@ function SvgCanvas({
   const resetFrameMoveOwnersRef = useRef<() => void>(() => undefined);
   const [geometryTransforming, setGeometryTransforming] = useState(false);
   const geometryTransformingRef = useRef(false);
-  /** Live video plate boxes while dragging — editor store only commits on gesture end. */
+  /** Live video plate boxes while dragging ? editor store only commits on gesture end. */
   const [videoLiveGeom, setVideoLiveGeom] = useState<Record<string, VideoGeomOverride> | null>(
     null
   );
@@ -468,13 +448,13 @@ function SvgCanvas({
   const clearFrameGeometryPreview = useCallback((frameIds?: readonly string[]) => {
     // Prefer the editor store after setDocumentFromCanvas. documentRef can still
     // hold a mid-gesture snapshot, or get overwritten by a one-frame-stale
-    // props.document when preserveLiveDocumentRef flips false on pointer-up —
+    // props.document when preserveLiveDocumentRef flips false on pointer-up ?
     // baking hosts from that stale doc desyncs the white plate from the blue box.
     const storeDoc = (store.getState() as RootState).editor?.document ?? null;
     const liveDoc = documentRef.current;
     const framesSource = storeDoc || liveDoc;
     const frames = Array.isArray(framesSource?.frames) ? framesSource.frames : [];
-    // Prefer explicit commit ids — multi-frame mode:move can cancel the last
+    // Prefer explicit commit ids ? multi-frame mode:move can cancel the last
     // preview rAF so the tracked preview set is empty while hosts are still stale.
     const fromArg = (frameIds || []).map(String).filter(Boolean);
     const fromPreview = [...frameGeometryPreviewIdsRef.current];
@@ -528,7 +508,7 @@ function SvgCanvas({
   activeFrameIdRef.current = activeFrameId;
   selectedFrameIdsRef.current = selectedFrameIds;
 
-  // Content bounds (export / guides). Infinite embedded mode has no DOM paper size —
+  // Content bounds (export / guides). Infinite embedded mode has no DOM paper size ?
   // camera CSS on RcbCanvas world layer owns pan/zoom.
   const paperW = viewRect?.width || document?.width || 794;
   const paperH = viewRect?.height || document?.height || 1123;
@@ -539,12 +519,12 @@ function SvgCanvas({
   );
   const modLabel = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '?' : 'Ctrl';
   // Embedded infinite canvas: per-shape hosts (RcbShapesLayer). Finite paper keeps mono board.
-  const { boardRef: monoBoardRef, boardEpoch } = useSvgBoard(hostRef, paperW, paperH, {
+  const { boardRef: monoBoardRef, boardEpoch } = useDomHostBoard(hostRef, paperW, paperH, {
     infinite,
     enabled: !infinite,
   });
   const nodeElsRef = useRef(new Map<string, SVGElement>());
-  const perShapeBoardRef = useRef<SvgBoardHandle>({
+  const perShapeBoardRef = useRef<DomHostBoardHandle>({
     root: null as unknown as SVGSVGElement,
     layer: null as unknown as SVGGElement,
     nodeEls: nodeElsRef.current,
@@ -567,7 +547,7 @@ function SvgCanvas({
     return () => setSharedNodeEls(null);
   }, [infinite]);
 
-  // Scene world SVG mounts after first layout — keep board.root wired for clip sync.
+  // Scene world SVG mounts after first layout ? keep board.root wired for clip sync.
   useEffect(() => {
     if (!infinite) return undefined;
     function syncWorldRoot() {
@@ -617,10 +597,7 @@ function SvgCanvas({
     // Drop stale wrappers immediately so in-place preview cannot re-attach detached ghosts.
     board.nodeEls = new Map();
     async function loadScene() {
-      const map = await loadSceneOntoSvg(board.root, board.layer, document, seq, board, {
-        infinite,
-        omitNonExportable,
-      });
+      const map = await mountDomHostBoard(board.root, board.layer, document);
       if (loadSeqRef.current !== seq) return;
       board.nodeEls = map || new Map();
       onReadyRef.current?.();
@@ -633,19 +610,14 @@ function SvgCanvas({
     const board = boardRef.current;
     const doc = documentRef.current;
     if (!board || !doc) return;
-    // Only nodes touched by the latest document patch — never repaint on selection
+    // Only nodes touched by the latest document patch ? never repaint on selection
     // alone (re-setting a video poster flashes the first frame under the live <video>).
     lastPatchedNodeIds.forEach((id) => {
       if (!id) return;
-      if (lastPatchTransformOnly) {
-        const node = doc.deltaSetLike?.[id];
-        if (previewSvgNodeTransform(board.nodeEls, id, node)) return;
-      }
       void replaceShapePaint(doc, board.nodeEls, id, board.root ? board : null);
     });
   }, [
     documentPatchToken,
-    lastPatchTransformOnly,
     lastPatchedNodeIds,
     geometryTransforming,
     frameGestureActive,
@@ -660,25 +632,12 @@ function SvgCanvas({
   overlayRootRef.current = overlayRoot;
   const paperElRef = useRef(paperEl);
   paperElRef.current = paperEl;
-  // boardRef identity flips with infinite mode — hold the live ref object.
+  // boardRef identity flips with infinite mode ? hold the live ref object.
   const boardRefHolder = useRef(boardRef);
   boardRefHolder.current = boardRef;
 
-  /**
-   * Spatial index — owned by SceneSpatialRuntime (reload / membership / patch).
-   * Never rebuild every AABB because size drifted by 1.
-   * Published via setSharedSceneSpatialRuntime for stage underlay consumers.
-   */
-  const spatialRuntimeRef = useRef(new SceneSpatialRuntime(256));
-  useEffect(() => {
-    setSharedSceneSpatialRuntime(spatialRuntimeRef.current);
-    return () => {
-      if (getSharedSceneSpatialRuntime() === spatialRuntimeRef.current) {
-        setSharedSceneSpatialRuntime(null);
-      }
-    };
-  }, []);
-  const session = useMemo(
+  // Kit owns ink hit / select / marquee ? no RCB SceneSpatialRuntime or Path2D bridge.
+    const session = useMemo(
     () =>
       createCanvasSession({
         getDocument: () => documentRef.current,
@@ -697,7 +656,7 @@ function SvgCanvas({
         },
         getZoom: () => cameraZoomRef.current,
         isReadOnly: () => readOnlyRef.current,
-        spatial: spatialRuntimeRef.current,
+
         setEditingTextId,
         measureViewport: () =>
           overlayRootRef.current?.getBoundingClientRect() ||
@@ -725,13 +684,8 @@ function SvgCanvas({
   const {
     listNodeIds,
     getNodeBox,
-    hitTestFrame,
-    queryNodeIdsInRect,
     finishToSelect,
-    onCreateShape,
-    onPlaceText,
     imageSizeForViewport,
-    placeImageAt,
     onGeometryCommit,
     onGeometryPreview,
     onAngleCommit,
@@ -755,67 +709,12 @@ function SvgCanvas({
     };
   }, [geometryPreviewRef, getPreviewDocumentRef, resetFrameGestureRef, onGeometryPreview]);
 
-  /**
-   * ADR 0027 SceneRenderer — svg adapter owns hit; paint still via shape hosts.
-   * Precise hit is Path2D / AABB only (no live SVG DOM lattice).
-   * canvasSession.hitTest uses the same spatial helper for non-UI callers.
-   */
-  const sceneRenderer = useMemo(
-    (): SceneRenderer =>
-      createSvgSceneRenderer({
-        getDocument: () => documentRef.current,
-        getSpatial: () => spatialRuntimeRef.current,
-        getZoom: () => cameraZoomRef.current,
-        listNodeIds,
-        getNodeBox,
-      }),
-    [listNodeIds, getNodeBox]
-  );
-  useEffect(() => () => sceneRenderer.dispose(), [sceneRenderer]);
-
+  /** Kit owns product hit (attach-pick / context-menu). Scene coords already. */
   const hitTest = useCallback(
-    (x: number, y: number, screen?: { clientX: number; clientY: number }) =>
-      sceneRenderer.hitTest({ x, y }, screen),
-    [sceneRenderer]
+    (x: number, y: number, _screen?: { clientX: number; clientY: number }) =>
+      hitTestRcbIdFromKit(x, y),
+    []
   );
-
-  const nodeSpatialIndex = useMemo(() => {
-    const tMemo0 = performance.now();
-    const runtime = spatialRuntimeRef.current;
-    const doc = preserveLiveDocumentRef() ? documentRef.current : document;
-    if (!doc) {
-      runtime.clear();
-      return runtime.index;
-    }
-    const page: ScenePage | undefined =
-      doc?.pages?.find((p) => p.id === doc?.activePageId) || doc?.pages?.[0];
-    const fromPage = page?.children;
-    let childrenSrc: string[] = [];
-    if (Array.isArray(fromPage) && fromPage.length) {
-      childrenSrc = fromPage;
-    } else if (Array.isArray(doc?.deltaSetLike?.ROOT?.children)) {
-      childrenSrc = doc.deltaSetLike.ROOT.children;
-    }
-    const index = runtime.sync({
-      document: doc,
-      childrenIds: childrenSrc,
-      reloadToken,
-      patchedNodeIds: lastPatchedNodeIds,
-      aabbPad: 32,
-    });
-    markInteractionPerf('spatial-sync-memo', {
-      ms: Number((performance.now() - tMemo0).toFixed(2)),
-      children: childrenSrc.length,
-      patched: lastPatchedNodeIds.length,
-      indexSize: index.size,
-    });
-    return index;
-  }, [document, reloadToken, lastPatchedNodeIds, geometryTransforming, frameGestureActive]);
-
-  useEffect(() => {
-    setSceneHitTestBridge(hitTest);
-    return () => setSceneHitTestBridge(null);
-  }, [hitTest]);
 
   hitTestRef.current = hitTest;
 
@@ -825,7 +724,7 @@ function SvgCanvas({
       if (pickTarget === 'agent') {
         onAddToChatRef.current?.(payload);
       } else {
-        // Pending attach keeps the node composer open via the payload — do not
+        // Pending attach keeps the node composer open via the payload ? do not
         // steal selection onto the host plate (that feels like exiting pick).
         setPendingCanvasAttach({ target: pickTarget, payload });
       }
@@ -877,7 +776,7 @@ function SvgCanvas({
       }
       const seed = expandSelectionWithGroups(doc, [rawHit]);
       const attachable = filterChatAttachNodeIds(doc, seed, opts);
-      // Full-bleed plate → click promotes to frame; mirror that for the cursor.
+      // Full-bleed plate ? click promotes to frame; mirror that for the cursor.
       const plate = frameForFullBleedPlate(doc, rawHit);
       if (plate && attachable.length === 0) {
         setCanvasAttachPickBlocked(!canAttachFrameToPick(doc, plate.id, opts));
@@ -985,7 +884,7 @@ function SvgCanvas({
       }
       const liveN = Object.keys(documentRef.current?.deltaSetLike || {}).length;
       beginSelectPerf(
-        `mixed nodes=${nextNodes.length} frames=${nextFrames.length} live≈${liveN}`
+        `mixed nodes=${nextNodes.length} frames=${nextFrames.length} live?${liveN}`
       );
       setMixedSelection({ nodeIds: nextNodes, frameIds: nextFrames });
       markSelectPerf('setMixedSelection', {
@@ -1005,7 +904,7 @@ function SvgCanvas({
       const doc = documentRef.current;
       const pick = canvasAttachPickRef.current;
 
-      // Composer pick mode — attach hit (group-expanded); blocked nodes keep pick active.
+      // Composer pick mode ? attach hit (group-expanded); blocked nodes keep pick active.
       if (pick?.target && !opts?.additive) {
         if (!ids.length) {
           clearCanvasAttachPick();
@@ -1033,13 +932,13 @@ function SvgCanvas({
         return;
       }
 
-      // Soft-click a near-full-bleed background plate → select the artboard instead
+      // Soft-click a near-full-bleed background plate ? select the artboard instead
       // (avoids a white+stroke rect looking like a UI overlay on the poster).
       if (!opts?.additive && ids.length === 1) {
         const plateFrame = frameForFullBleedPlate(doc, ids[0]);
         if (plateFrame) {
           const liveN = Object.keys(doc?.deltaSetLike || {}).length;
-          beginSelectPerf(`plate-frame live≈${liveN}`);
+          beginSelectPerf(`plate-frame live?${liveN}`);
           setSelectedNodeIds([]);
           setActiveFrameId(plateFrame.id);
           setFrameChromeMode('soft');
@@ -1059,15 +958,15 @@ function SvgCanvas({
           else cur.add(id);
         });
         next = [...cur];
-        beginSelectPerf(`additive n=${next.length} live≈${liveN}`);
+        beginSelectPerf(`additive n=${next.length} live?${liveN}`);
         // Keep frames when shift-adding nodes.
         setSelectedNodeIds(next);
         markSelectPerf('setSelectedNodeIds', { selectedNodes: next.length });
         endSelectPerfAfterPaint();
         return;
       }
-      beginSelectPerf(`select n=${next.length} live≈${liveN}`);
-      // Prefer setSelectedNodeIds only — setSelectedNodeId clears multi-select to [id].
+      beginSelectPerf(`select n=${next.length} live?${liveN}`);
+      // Prefer setSelectedNodeIds only ? setSelectedNodeId clears multi-select to [id].
       setMixedSelection({ nodeIds: next, frameIds: [] });
       markSelectPerf('setMixedSelection', { selectedNodes: next.length });
       endSelectPerfAfterPaint();
@@ -1150,7 +1049,7 @@ function SvgCanvas({
   }, [ editingTextId]);
 
   // Text edit: canvas ink is skipped via hiddenNodeId (listSceneCanvasIdlePaintIds).
-  // No ShapeHost opacity toggle — static text no longer mounts RcbShapeHost.
+  // No ShapeHost opacity toggle ? static text no longer mounts RcbShapeHost.
 
   /**
    * Size an incoming image against what is actually on screen, so the same file
@@ -1178,7 +1077,23 @@ function SvgCanvas({
           view.top + view.height / 2
         )
       : { x: paperW / 2, y: paperH / 2 };
-    placeImageAt(pendingImageSrc, center.x, center.y);
+    void (async () => {
+      try {
+        const natural = await measureImageNaturalSize(pendingImageSrc);
+        const sized = imageSizeForViewport(natural);
+        const id = await placeKitImageFromUrl(
+          pendingImageSrc,
+          center.x,
+          center.y,
+          sized.width,
+          sized.height
+        );
+        if (id) finishToSelect();
+      } catch {
+        setPendingImageSrc(null);
+        finishToSelect();
+      }
+    })();
   }, [
     pendingImageSrc,
     paperW,
@@ -1189,340 +1104,56 @@ function SvgCanvas({
     camera,
     overlayRoot,
     artboard,
-    placeImageAt,
+    finishToSelect,
+    imageSizeForViewport,
     readOnly,
   ]);
 
-  const onPencilCommit = useCallback(
-    (
-      pathD: string,
-      box: { left: number; top: number; width: number; height: number },
-      meta?: {
-        pathPressure?: string;
-        brushCategory?: string;
-        frameId?: string | null;
-        pencilOutlinePath?: string;
-      }
-    ) => {
-      const doc = documentRef.current;
-      if (!doc || readOnly) return;
-      const origin = sceneToDocumentCoords(doc, box.left, box.top);
-      const { id, node } = createShapeNode({
-        x: origin.x,
-        y: origin.y,
-        width: box.width,
-        height: box.height,
-        shapeType: 'pencil',
-        fill: 'transparent',
-        stroke: penStrokeColor,
-        borderWidth: penStrokeWidth,
-        path: pathD,
-        closed: false,
-        brushStyle: pencilBrushId || DEFAULT_PENCIL_BRUSH_ID,
-        opacity: penStrokeOpacity / 100,
-      });
-      if (meta?.pathPressure) {
-        (node.attrs as Record<string, unknown>).pathPressure = meta.pathPressure;
-      }
-      if (meta?.brushCategory) {
-        (node.attrs as Record<string, unknown>).brushCategory = meta.brushCategory;
-      }
-      if (meta?.pencilOutlinePath) {
-        (node.attrs as Record<string, unknown>).pencilOutlinePath = meta.pencilOutlinePath;
-      }
-      (node.attrs as Record<string, unknown>).pressureEnabled = pencilPressureEnabled;
-      const inkBrush = findPencilBrush(pencilBrushId || DEFAULT_PENCIL_BRUSH_ID);
-      (node.attrs as Record<string, unknown>).pencilFill = inkBrush.fillEnabled !== false;
-      (node.attrs as Record<string, unknown>).pencilOutlineWidth =
-        Number(inkBrush.outlineStrokeWidth) || 0;
-      (node.attrs as Record<string, unknown>).pencilOutlineColor =
-        inkBrush.outlineStrokeColor || penStrokeColor;
-      const next = bindCreatedNodeToFrame(
-        addNodeToDocument(doc, id, node),
-        id,
-        { left: origin.x, top: origin.y, width: box.width, height: box.height },
-        meta?.frameId
-      );
-      documentRef.current = next;
-      pushEditorHistory();
-      setDocumentFromCanvas(next);
-      // Stay in pencil mode for continuous strokes; do not auto-select.
-      setSelectedNodeIds([]);
-      setSelectedNodeId(null);
-      return id;
-    },
-    [ readOnly, penStrokeColor, penStrokeWidth, pencilBrushId, penStrokeOpacity, pencilPressureEnabled]
-  );
-
-  const onBucketFill = useCallback(
-    (nodeId: string) => {
-      if (readOnly || !nodeId) return;
-      const fill = bucketFillRef.current;
-      const fillType = String(fill.fillType || 'solid');
-      const attrs: Record<string, unknown> = {
-        'fill-color': String(fill.fillColor || '#333333'),
-        'fill-type': fillType,
-        'fill-opacity': Math.max(0, Math.min(100, Number(fill.fillOpacity) || 100)),
-        'fill-enabled': 'true',
-        'fill-visible': 'true',
-      };
-      if (fillType !== 'solid' && fillType !== 'image' && fill.fillGradient) {
-        attrs['fill-gradient'] = String(fill.fillGradient);
-      } else {
-        attrs['fill-gradient'] = undefined;
-      }
-      if (fillType === 'image') {
-        Object.assign(
-          attrs,
-          serializeFillImageAttrs({
-            fillImageSrc: fill.fillImageSrc,
-            fillImageFit: fill.fillImageFit,
-            fillImageRotate: fill.fillImageRotate,
-            fillImageScale: fill.fillImageScale,
-            fillImageOffsetX: fill.fillImageOffsetX,
-            fillImageOffsetY: fill.fillImageOffsetY,
-            ...(fill.fillImageAdjust != null
-              ? { fillImageAdjust: parseFillImageAdjust(fill.fillImageAdjust) }
-              : {}),
-          })
-        );
-      }
-      patchDocumentNode({
-          nodeId,
-          patch: { attrs },
-        });
-    },
-    [ readOnly]
-  );
-
-  const onPenCommit = useCallback(
-    (
-      pathD: string,
-      box: { left: number; top: number; width: number; height: number },
-      closed: boolean,
-      opts?: { replaceNodeId?: string; frameId?: string | null }
-    ) => {
-      const doc = documentRef.current;
-      if (!doc || readOnly) return;
-      const origin = sceneToDocumentCoords(doc, box.left, box.top);
-      const replaceId = opts?.replaceNodeId;
-      if (replaceId && doc.deltaSetLike?.[replaceId]) {
-        const prev = doc.deltaSetLike[replaceId];
-        const prevType = String(prev?.attrs?.shapeType || 'pen');
-        const shapeType = prevType === 'path' ? 'path' : 'pen';
-        pushEditorHistory();
-        patchDocumentNode({
-            nodeId: replaceId,
-            patch: {
-              x: origin.x,
-              y: origin.y,
-              width: Math.max(1, box.width),
-              height: Math.max(1, box.height),
-              attrs: {
-                shapeType,
-                path: pathD,
-                closed: closed ? 'true' : 'false',
-                'border-color': penStrokeColor,
-                'border-width': penStrokeWidth,
-                'fill-color': penFillColor,
-                ...(closed ? closedPenFillAttrs(penFillColor) : {}),
-              },
-            },
-          });
-        setSelectedNodeIds([replaceId]);
-        return;
-      }
-      const { id, node } = createShapeNode({
-        x: origin.x,
-        y: origin.y,
-        width: box.width,
-        height: box.height,
-        shapeType: 'pen',
-        fill: penFillColor,
-        stroke: penStrokeColor,
-        borderWidth: penStrokeWidth,
-        path: pathD,
-        closed,
-      });
-      if (closed) {
-        Object.assign(node.attrs, closedPenFillAttrs(penFillColor));
-      }
-      const next = bindCreatedNodeToFrame(
-        addNodeToDocument(doc, id, node),
-        id,
-        { left: origin.x, top: origin.y, width: box.width, height: box.height },
-        opts?.frameId
-      );
-      documentRef.current = next;
-      pushEditorHistory();
-      setDocumentFromCanvas(next);
-      // Close / Enter finish — keep pen tool so the next click starts a new path.
-      setSelectedNodeIds([id]);
-    },
-    [ readOnly, penStrokeColor, penFillColor, penStrokeWidth]
-  );
-
-  const onPenPathEditCommit = useCallback(
-    (payload: {
-      nodeId: string;
-      pathD: string;
-      box: { left: number; top: number; width: number; height: number };
-      closed: boolean;
-      clearAngle?: boolean;
-      clearFlip?: boolean;
-    }) => {
-      const doc = documentRef.current;
-      if (!doc || readOnly) return;
-      const origin = sceneToDocumentCoords(doc, payload.box.left, payload.box.top);
-      const prev = doc.deltaSetLike?.[payload.nodeId];
-      const prevType = String(prev?.attrs?.shapeType || 'path');
-      const shapeType = prevType === 'pen' ? 'pen' : 'path';
-      pushEditorHistory();
-      patchDocumentNode({
-          nodeId: payload.nodeId,
-          patch: {
-            x: origin.x,
-            y: origin.y,
-            width: Math.max(1, payload.box.width),
-            height: Math.max(1, payload.box.height),
-            attrs: {
-              shapeType,
-              path: payload.pathD,
-              closed: payload.closed ? 'true' : 'false',
-              ...(payload.closed && pathNodeHasSolidFill(prev?.attrs)
-                ? {
-                    'fill-enabled': 'true',
-                    'fill-visible': 'true',
-                  }
-                : {}),
-              // Baked world path — leaving angle/flip would double-transform the silhouette.
-              ...(payload.clearAngle ? { angle: 0 } : {}),
-              ...(payload.clearFlip ? { flipX: 'false', flipY: 'false' } : {}),
-            },
-          },
-        });
-    },
-    [ readOnly]
-  );
-
-  const onPathEditUnionNewShape = useCallback(
-    (
-      editingId: string,
-      addition: {
-        pathD: string;
-        box: { left: number; top: number; width: number; height: number };
-        closed: boolean;
-      },
-      strokeWidth: number
-    ) => {
-      const doc = documentRef.current;
-      if (!doc || readOnly || !editingId) return;
-      const baseNode = doc.deltaSetLike?.[editingId];
-      if (!baseNode) return;
-
-      const ink = String(
-        baseNode.attrs?.['border-color'] || penStrokeColor || '#333333'
-      );
-      const sw = Math.max(1, Number(strokeWidth) || penStrokeWidth || 2);
-      const baseType = String(baseNode.attrs?.shapeType || 'path');
-      const basePath = String(baseNode.attrs?.path || '').trim();
-      const baseClosed =
-        baseNode.attrs?.closed === true ||
-        baseNode.attrs?.closed === 'true' ||
-        /\sZ\s*$/i.test(basePath);
-      // Open stroke pens must stay stroked siblings — boolean-union turns them into
-      // fill-only silhouettes (stroke-enabled=false) and they disappear if fill is clear.
-      const baseIsOpenStroke =
-        baseType === 'pen' || baseType === 'pencil' || !baseClosed;
-
-      if (!addition.closed || baseIsOpenStroke) {
-        const origin = sceneToDocumentCoords(doc, addition.box.left, addition.box.top);
-        const { id, node } = createShapeNode({
-          x: origin.x,
-          y: origin.y,
-          width: Math.max(1, addition.box.width),
-          height: Math.max(1, addition.box.height),
-          shapeType: 'pen',
-          fill: 'transparent',
-          stroke: ink,
-          borderWidth: sw,
-          path: addition.pathD,
-          closed: addition.closed,
-        });
-        const next = addNodeToDocument(doc, id, node);
-        documentRef.current = next;
-        pushEditorHistory();
-        setDocument(next);
-        setSelectedNodeIds([id]);
-        setSelectedNodeId(id);
-        return;
-      }
-
-      const { left: bx, top: by } = nodeLeftTop(doc, baseNode);
-      if (!basePath) return;
-
-      const baseBox: ShapeBox = {
-        left: bx,
-        top: by,
-        width: Math.max(1, Number(baseNode.width) || 1),
-        height: Math.max(1, Number(baseNode.height) || 1),
-        shapeType: 'path',
-        path: basePath,
-        angle: Number(baseNode.attrs?.angle) || 0,
-      };
-
-      const addBox: ShapeBox = {
-        left: addition.box.left,
-        top: addition.box.top,
-        width: addition.box.width,
-        height: addition.box.height,
-        shapeType: 'path',
-        path: addition.pathD,
-        angle: 0,
-      };
-
-      const { result } = computeShapeBoolean([baseBox, addBox], 'union');
-      if (!result?.path) return;
-
-      const fillKeep = String(baseNode.attrs?.['fill-color'] || ink);
-      const origin = sceneToDocumentCoords(doc, result.x, result.y);
-      pushEditorHistory();
-      patchDocumentNode({
-          nodeId: editingId,
-          patch: {
-            x: origin.x,
-            y: origin.y,
-            width: Math.max(1, result.width),
-            height: Math.max(1, result.height),
-            attrs: {
-              shapeType: 'path',
-              path: result.path,
-              closed: 'true',
-              outlined: 'true',
-              // Boolean result is world-baked — drop host angle or the silhouette spins.
-              angle: 0,
-              'fill-rule': result.fillRule,
-              'fill-enabled': 'true',
-              'fill-visible': 'true',
-              'fill-color': fillKeep === 'transparent' ? ink : fillKeep,
-              'fill-type': 'solid',
-              'stroke-enabled': 'false',
-              'border-width': 0,
-            },
-          },
-        });
-      setSelectedNodeIds([editingId]);
-      setSelectedNodeId(editingId);
-    },
-    [ readOnly, penStrokeColor, penStrokeWidth]
-  );
+  // Image click-place: thin stage listener -> Kit placeImage (no RCB Feature).
+  const toScene = useRcbScreenToScene();
+  useEffect(() => {
+    const hitEl = stageEl || paperEl;
+    if (readOnly || activeTool !== 'image' || !pendingImageSrc || !hitEl) return undefined;
+    const onClick = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const p = toScene(e.clientX, e.clientY);
+      void (async () => {
+        try {
+          const natural = await measureImageNaturalSize(pendingImageSrc);
+          const sized = imageSizeForViewport(natural);
+          const id = await placeKitImageFromUrl(
+            pendingImageSrc,
+            p.x,
+            p.y,
+            sized.width,
+            sized.height
+          );
+          if (id) finishToSelect();
+        } catch {
+          setPendingImageSrc(null);
+          finishToSelect();
+        }
+      })();
+    };
+    hitEl.addEventListener('click', onClick, false);
+    return () => hitEl.removeEventListener('click', onClick, false);
+  }, [
+    readOnly,
+    activeTool,
+    pendingImageSrc,
+    stageEl,
+    paperEl,
+    toScene,
+    finishToSelect,
+    imageSizeForViewport,
+  ]);
 
   const reorderLayer = useCallback(
     (action: 'front' | 'back' | 'forward' | 'backward', ids: string[]) => {
       const doc = documentRef.current;
       if (!doc || !ids.length) return;
       const next = reorderNodesInDocument(doc, ids, action);
-      // Reorder only changes z-order — do not bump sceneReloadToken (full remount).
+      // Reorder only changes z-order ? do not bump sceneReloadToken (full remount).
       // Hosts keep their SVG; CSS z-index + DOM order update instead.
       documentRef.current = next;
       pushEditorHistory();
@@ -1537,7 +1168,7 @@ function SvgCanvas({
       // Abort in-flight placeholder uploads so finishImageProcess cannot resurrect them.
       ids.forEach((id) => abortNodeUpload(id));
       removeDocumentNodes({ nodeIds: ids });
-      // Persist ASAP — refresh must not restore deleted nodes from a stale cloud doc.
+      // Persist ASAP ? refresh must not restore deleted nodes from a stale cloud doc.
       requestProjectFlush();
     },
     []
@@ -1545,7 +1176,7 @@ function SvgCanvas({
 
   /**
    * Delete selected nodes and/or artboards in one history step so Undo restores
-   * frame + content together (Ctrl+A → Delete must not split into two undos).
+   * frame + content together (Ctrl+A ? Delete must not split into two undos).
    * Upload placeholders are scrubbed from history (not restorable via Undo).
    */
   const deleteCanvasSelection = useCallback(
@@ -1566,6 +1197,22 @@ function SvgCanvas({
       const count = canvasBulkItemCount(allNodes.length, frameIds.length);
       const apply = () => {
         allNodes.forEach((id) => abortNodeUpload(id));
+        // Kit: InputManager.deleteSelection / deleteSelectedArtboard is SoT.
+        // DomHost-only (lottie/group) stay on the document path.
+        const kitNodes = allNodes.filter(
+          (id) => !isDomHostOnlyRcbNode(doc0.deltaSetLike?.[id])
+        );
+        const domOnly = allNodes.filter((id) =>
+          isDomHostOnlyRcbNode(doc0.deltaSetLike?.[id])
+        );
+        const kitDeleted = deleteKitSelection(kitNodes, frameIds);
+        if (kitDeleted) {
+          if (domOnly.length) {
+            removeDocumentNodes({ nodeIds: domOnly });
+          }
+          requestProjectFlush();
+          return true;
+        }
         removeDocumentNodes({ nodeIds: allNodes, frameIds });
         requestProjectFlush();
         return true;
@@ -1573,7 +1220,7 @@ function SvgCanvas({
       if (opts?.skipLoading) return apply();
       runCanvasBulkOp({
         count,
-        label: t('editor.bulkOp.deleting', { defaultValue: '正在删除…' }),
+        label: t('editor.bulkOp.deleting', { defaultValue: '?????' }),
         run: () => {
           apply();
         },
@@ -1705,7 +1352,7 @@ function SvgCanvas({
           height,
           x: origin?.x,
           y: origin?.y,
-          label: '上传中',
+          label: '???',
           name: file.name?.replace(/\.[^.]+$/, '') || 'Image',
         });
       finishToSelect();
@@ -1715,7 +1362,7 @@ function SvgCanvas({
       if (isUploadAbortError(err)) return;
       revokeNodePreviewSrc(store.getState().editor?.document, spawnedId || undefined);
       failImageProcess({ nodeId: spawnedId || undefined });
-      message.error(formatUploadErrorMessage(err, t, '图片上传失败'));
+      message.error(formatUploadErrorMessage(err, t, '??????'));
     }
   };
 
@@ -1738,7 +1385,7 @@ function SvgCanvas({
           height,
           x: origin?.x,
           y: origin?.y,
-          label: '上传中',
+          label: '???',
           name: prepared.name,
           duration: prepared.duration,
         });
@@ -1760,7 +1407,7 @@ function SvgCanvas({
       const failedId = String(store.getState().editor?.pendingImageProcessId || '');
       revokeNodePreviewSrc(store.getState().editor?.document, failedId || undefined);
       failImageProcess({ nodeId: failedId || undefined });
-      message.error(formatUploadErrorMessage(err, t, '视频上传失败'));
+      message.error(formatUploadErrorMessage(err, t, '??????'));
     }
   };
 
@@ -1784,7 +1431,7 @@ function SvgCanvas({
           height,
           x: origin?.x,
           y: origin?.y,
-          label: '上传中',
+          label: '???',
           name:
             file.name?.replace(/\.[^.]+$/, '') ||
             t('editor.tools.audio', { defaultValue: 'Audio' }),
@@ -1805,7 +1452,7 @@ function SvgCanvas({
       const failedId = String(store.getState().editor?.pendingImageProcessId || '');
       revokeNodePreviewSrc(store.getState().editor?.document, failedId || undefined);
       failImageProcess({ nodeId: failedId || undefined });
-      message.error(formatUploadErrorMessage(err, t, '音频上传失败'));
+      message.error(formatUploadErrorMessage(err, t, '??????'));
     }
   };
 
@@ -1849,7 +1496,7 @@ function SvgCanvas({
     const natH = Math.max(1, Math.round(Number(data.h) || 200));
     const { width, height } = imageSizeForViewport({ width: natW, height: natH });
     const origin = placeOriginForSize({ width, height }, anchor);
-    // Always independent preview plate — open 「关键帧」 to promote into a workbench.
+    // Always independent preview plate ? open ????? to promote into a workbench.
     spawnLottie({
         width,
         height,
@@ -1898,7 +1545,7 @@ function SvgCanvas({
     if (/\.lottie$/i.test(name)) {
       message.error(
         t('editor.tools.lottieGenNeedJson', {
-          defaultValue: '请上传 Bodymovin JSON（.json / .lot），暂不支持 .lottie 压缩包',
+          defaultValue: '??? Bodymovin JSON?.json / .lot?????? .lottie ???',
         })
       );
       return;
@@ -1933,6 +1580,7 @@ function SvgCanvas({
   useCanvasHotkeys({
     readOnly,
     activeTool,
+    shapeKind,
     documentRef,
     selectedIdsRef,
     selectedFrameIdsRef,
@@ -2016,9 +1664,9 @@ function SvgCanvas({
   const keepVisibleIds = useMemo(() => {
     const out = [...ids, ...processingNodeIds];
     if (editingTextId) out.push(editingTextId);
-    if (editingPenId) out.push(editingPenId);
+    if (kitPathEditNodeId) out.push(kitPathEditNodeId);
     // Keep single-selected frame children mounted/cull-safe with the plate.
-    // Reveal/unclip is separate — selecting the frame must not show overflow.
+    // Reveal/unclip is separate ? selecting the frame must not show overflow.
     if (document && selectedFrameIds.length === 1 && ids.length === 0) {
       const frameId = String(selectedFrameIds[0] || '');
       const pageKids = document.pages?.[0]?.children;
@@ -2036,7 +1684,7 @@ function SvgCanvas({
       }
     }
     return out;
-  }, [ids, editingTextId, editingPenId, processingNodeIds, document, selectedFrameIds]);
+  }, [ids, editingTextId, kitPathEditNodeId, processingNodeIds, document, selectedFrameIds]);
 
   /** SoftGlow / editors may unclip; plain selection keeps artboard clipContent. */
   const revealOverflowIds = useMemo(
@@ -2047,9 +1695,9 @@ function SvgCanvas({
         document,
         processingNodeIds,
         editingTextId,
-        editingPenId,
+        kitPathEditNodeId,
       }),
-    [ids, selectedFrameIds, document, processingNodeIds, editingTextId, editingPenId]
+    [ids, selectedFrameIds, document, processingNodeIds, editingTextId, kitPathEditNodeId]
   );
 
   const paintRaiseIds = useMemo(
@@ -2057,17 +1705,17 @@ function SvgCanvas({
     [document, ids, selectedFrameIds]
   );
 
-  /** Single-selected artboard — temporary front over world SoA ink (plate under ink CSS). */
+  /** Single-selected artboard ? temporary front over world Kit ink (plate under ink CSS). */
   const paintRaiseFrameIds = useMemo(() => {
     if (selectedFrameIds.length !== 1 || ids.length > 0) return [] as string[];
     return [String(selectedFrameIds[0] || '')].filter(Boolean);
   }, [ids.length, selectedFrameIds]);
 
-  /** DOM hosts: SoftGlow process + pen path-edit + active video/audio FO (≤1 each).
-   * Text edit → TextInlineEditor overlay. Idle image/video/audio → canvas ink / plate. */
+  /** DOM hosts: SoftGlow process + pen path-edit + active video/audio FO (?1 each).
+   * Text edit ? TextInlineEditor overlay. Idle image/video/audio ? canvas ink / plate. */
   const forceFullIds = useMemo(() => {
     const out = [...processingNodeIds];
-    if (editingPenId) out.push(editingPenId);
+    if (kitPathEditNodeId) out.push(kitPathEditNodeId);
     const decoderId = resolveActiveVideoDecoderId({
       document,
       selectedNodeIds: ids,
@@ -2081,73 +1729,73 @@ function SvgCanvas({
     });
     if (audioPlayerId) out.push(audioPlayerId);
     return out;
-  }, [editingPenId, processingNodeIds, ids, document, videoToolPanel, audioToolPanel]);
+  }, [kitPathEditNodeId, processingNodeIds, ids, document, videoToolPanel, audioToolPanel]);
 
   // Path-edit stays open on empty selection (blank click must not dismiss).
   // Only leave when the user selects a *different* node.
   useEffect(() => {
-    if (!editingPenId) return;
+    if (!kitPathEditNodeId) return;
     if (!ids.length) return;
-    if (!ids.includes(editingPenId)) setEditingPenId(null);
-  }, [editingPenId, ids]);
+    if (!ids.includes(kitPathEditNodeId)) setKitPathEditNodeId(null);
+  }, [kitPathEditNodeId, ids]);
 
-  // Outline / toolbar: enter path-edit chrome for a node.
+  // Outline / toolbar / Kit double-click: enter path-edit via InputManager.
   useEffect(() => {
     const onEnter = (e: Event) => {
       const nodeId = String((e as CustomEvent).detail?.nodeId || '');
       if (!nodeId || readOnly) return;
       setEditingTextId(null);
-      setEditingPenId(nodeId);
-      setSelectedNodeIds([nodeId]);
-      setActiveTool('select');
-      // Outline / enter path-edit: default to Select (edit anchors), not Pen (draw).
-      setPathEditSubtool('select');
+      if (!enterKitPathEditForRcbId(nodeId)) return;
+      setKitPathEditNodeId(nodeId);
       window.dispatchEvent(
         new CustomEvent('resume:path-edit-subtool', { detail: { subtool: 'select' } })
       );
     };
-    window.addEventListener('resume:enter-path-edit', onEnter);
-    return () => window.removeEventListener('resume:enter-path-edit', onEnter);
-  }, [ readOnly]);
-
-  useEffect(() => {
-    const onSub = (e: Event) => {
-      const s = (e as CustomEvent).detail?.subtool;
-      if (s === 'pen') setPathEditSubtool('pen');
-      else if (s === 'add-anchor') setPathEditSubtool('add-anchor');
-      else if (s === 'curve') setPathEditSubtool('curve');
-      else setPathEditSubtool('select');
+    const onExit = () => {
+      exitKitPathEdit();
+      setKitPathEditNodeId(null);
+      setActiveTool('select');
+      setEngineToolFromRcb('select');
     };
-    window.addEventListener('resume:path-edit-subtool', onSub);
-    return () => window.removeEventListener('resume:path-edit-subtool', onSub);
-  }, []);
-
-  useEffect(() => {
-    window.dispatchEvent(
-      new CustomEvent('resume:path-edit', { detail: { active: Boolean(editingPenId) } })
-    );
-    return () => {
-      if (editingPenId) {
-        window.dispatchEvent(new CustomEvent('resume:path-edit', { detail: { active: false } }));
+    const onChrome = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      if (d.active) {
+        setKitPathEditNodeId(String(d.nodeId || kitRcbIdBeingPathEdited() || '') || null);
+      } else {
+        setKitPathEditNodeId(null);
       }
     };
-  }, [editingPenId]);
+    const onSub = (e: Event) => {
+      const s = (e as CustomEvent).detail?.subtool;
+      // Kit NODE_EDIT_TOOLS: direct | pen | scissors while editing.
+      if (s === 'pen') setEngineToolFromRcb('pen');
+      else if (s === 'add-anchor') setEngineToolFromRcb('scissors');
+      else if (s === 'curve') setEngineToolFromRcb('direct');
+      else setEngineToolFromRcb('direct');
+    };
+    window.addEventListener('resume:enter-path-edit', onEnter);
+    window.addEventListener('resume:exit-path-edit', onExit);
+    window.addEventListener('resume:path-edit', onChrome);
+    window.addEventListener('resume:path-edit-subtool', onSub);
+    return () => {
+      window.removeEventListener('resume:enter-path-edit', onEnter);
+      window.removeEventListener('resume:exit-path-edit', onExit);
+      window.removeEventListener('resume:path-edit', onChrome);
+      window.removeEventListener('resume:path-edit-subtool', onSub);
+    };
+  }, [readOnly]);
 
   // Path-edit ink is painted on the overlay canvas; host is forceHidden via
   // RcbShapesLayer (same gate as inline text edit) so the committed SVG does
   // not ghost under the live path.
 
-  // Select / inspect: share preview is readOnly — always allow hit-test + chrome
+  // Select / inspect: share preview is readOnly ? always allow hit-test + chrome
   // (workspaceMode may briefly lag behind 'dev'). Path-edit owns the pointer
-  // (anchors / draft pen) — do not let SelectionFeature clear selection on empty
-  // click (that unmounts path-edit and looks like “auto exit”).
+  // (anchors / draft pen) ? do not let SelectionFeature clear selection on empty
+  // click (that unmounts path-edit and looks like ?auto exit?).
   const selectToolActive = activeTool === 'select' || activeTool === 'scale';
-  const selectMode = selectToolActive && !editingPenId;
-  const shapeMode = !readOnly && activeTool === 'shape';
-  const textMode = !readOnly && activeTool === 'text';
-  const imageMode = !readOnly && activeTool === 'image';
-  const pencilMode = !readOnly && activeTool === 'pencil';
-  const penMode = !readOnly && activeTool === 'pen';
+  // Path-edit keeps SelectionFeature on so PathEditToolbar docks like rect chrome.
+  const selectMode = selectToolActive || Boolean(kitPathEditNodeId);
 
   return (
     <div className={embedded ? 'contents' : 'relative rcb-canvas-stage'}>
@@ -2174,17 +1822,17 @@ function SvgCanvas({
             documentPatchToken={documentPatchToken}
             lastPatchedNodeIds={lastPatchedNodeIds}
             lastPatchTransformOnly={lastPatchTransformOnly}
-            hiddenNodeId={editingTextId || editingPenId}
+            hiddenNodeId={editingTextId || kitPathEditNodeId}
             keepVisibleIds={keepVisibleIds}
             revealOverflowIds={revealOverflowIds}
             paintRaiseIds={paintRaiseIds}
             paintRaiseFrameIds={paintRaiseFrameIds}
             forceFullIds={forceFullIds}
-            spatialIndex={nodeSpatialIndex}
+
           />
         ) : null}
-        {/* HTML <video>/Lottie live in SVG foreignObject — keep visible during
-            transform (same as audio). FO rides previewSvgNodeGeometry with the
+        {/* HTML <video>/Lottie live in SVG foreignObject ? keep visible during
+            transform (same as audio). FO rides DomHost geometry with the
             node; hiding globally made unrelated image drags blank every video. */}
         {infinite ? (
           <VideoNodeOverlay
@@ -2201,7 +1849,7 @@ function SvgCanvas({
         {infinite ? (
           <AudioNodeOverlay
             document={document}
-            // Keep HTML waveform during drag — SVG underlay is plate-only (no poster).
+            // Keep HTML waveform during drag ? SVG underlay is plate-only (no poster).
             geometryOverrides={videoLiveGeom as Record<string, AudioGeomOverride> | null}
           />
         ) : null}
@@ -2216,49 +1864,20 @@ function SvgCanvas({
         {/* Scene-space HTML overlays (selection / draw previews). Origin matches SVG. */}
         {/* Above frame/node stackOrder so preview select/hover strokes aren't covered. */}
         {/* Above HostPathChrome (z=1e6) so poly/star/radius knobs receive hits
-            over resize hotzones; wrapper is 0×0 + overflow visible, empty areas
+            over resize hotzones; wrapper is 0?0 + overflow visible, empty areas
             still pass through to chrome / shapes. */}
         <div className="absolute left-0 top-0 z-[1000001] h-0 w-0 overflow-visible">
           <SelectionFeature
             enabled={selectMode && !applyLocked}
             readOnly={readOnly}
-            attachPickActive={Boolean(canvasAttachPick)}
-            imageToolSessionNodeId={imageToolSessionNodeId}
             document={document}
             selectedNodeIds={ids}
             selectedFrameIds={selectedFrameIds}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            artboard={artboard}
-            onSelect={onSelect}
-            onGeometryCommit={onGeometryCommit}
-            onGeometryPreview={onGeometryPreview}
-            onAngleCommit={onAngleCommit}
-            onAnglePreview={onAnglePreview}
-            hitTest={hitTest}
-            hitTestFrame={hitTestFrame}
-            onSelectFrame={onSelectFrame}
-            onSelectFrames={onSelectFrames}
-            onSelectMixed={onSelectMixed}
             getNodeBox={getNodeBox}
-            listNodeIds={listNodeIds}
-            queryNodeIdsInRect={queryNodeIdsInRect}
+            pathEditNodeId={kitPathEditNodeId}
             onOpenAgent={onOpenAgent}
-            onEditText={(id) => {
-              setEditingPenId(null);
-              setEditingTextId(id);
-            }}
-            onEditPenPath={(id) => {
-              setEditingTextId(null);
-              setEditingPenId(id);
-              setPathEditSubtool('select');
-              window.dispatchEvent(
-                new CustomEvent('resume:path-edit-subtool', { detail: { subtool: 'select' } })
-              );
-            }}
             suppressChrome={
               Boolean(editingTextId) ||
-              Boolean(editingPenId) ||
               cropExpandOpen ||
               imageToolSidePanelOpen ||
               videoToolOpen ||
@@ -2267,108 +1886,7 @@ function SvgCanvas({
               // Keep chrome while editing radius so the outline can follow rounded corners.
               (shapeStylePanelOpen && shapeStylePanel?.kind !== 'radius')
             }
-            onTransformingChange={onGeometryTransformingChange}
-            onFrameMoveStart={onFrameMoveStart}
-            onFrameMoveEnd={onFrameMoveEnd}
-            onFrameMove={onFrameMove}
           />
-          <ShapeDrawFeature
-            enabled={shapeMode}
-            shapeKind={shapeKind || 'rect'}
-            artboard={artboard}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            onCreate={onCreateShape}
-            hitTestFrame={hitTestFrame}
-            // Draw always snaps to the document grid; overlay visibility is separate.
-            gridSnap
-            gridSize={getDocumentGridSize(document)}
-          />
-          <TextPlaceFeature
-            enabled={textMode}
-            artboard={artboard}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            onPlace={onPlaceText}
-          />
-          <ImagePlaceFeature
-            enabled={imageMode}
-            artboard={artboard}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            pendingSrc={pendingImageSrc}
-            onPlace={placeImageAt}
-          />
-          <PencilDrawFeature
-            enabled={pencilMode}
-            artboard={artboard}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            strokeColor={penStrokeColor}
-            strokeWidth={penStrokeWidth}
-            strokeOpacity={penStrokeOpacity / 100}
-            brushId={pencilBrushId}
-            pressureEnabled={pencilPressureEnabled}
-            onCommit={onPencilCommit}
-            hitTestFrame={hitTestFrame}
-          />
-          <BucketFillFeature
-            enabled={!readOnly && activeTool === 'bucket'}
-            artboard={artboard}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            fillColor={String(bucketFill.fillColor || '#333333')}
-            hitTest={hitTest}
-            onFill={onBucketFill}
-          />
-          <PenDrawFeature
-            enabled={penMode && !editingPenId}
-            artboard={artboard}
-            paperEl={paperEl}
-            stageEl={stageEl}
-            strokeColor={penStrokeColor}
-            strokeWidth={penStrokeWidth}
-            gridSnap
-            gridSize={getDocumentGridSize(document)}
-            onCommit={onPenCommit}
-            hitTestFrame={hitTestFrame}
-            onCancel={finishToSelect}
-            hitTest={hitTest}
-            document={document}
-            onEditExistingPath={(id) => {
-              setEditingTextId(null);
-              setEditingPenId(id);
-              setPathEditSubtool('select');
-              window.dispatchEvent(
-                new CustomEvent('resume:path-edit-subtool', { detail: { subtool: 'select' } })
-              );
-              setActiveTool('select');
-            }}
-          />
-          {editingPenId ? (
-            <PenPathEditFeature
-              enabled={!readOnly}
-              nodeId={editingPenId}
-              document={document}
-              paperEl={paperEl}
-              stageEl={stageEl}
-              drawNewShapeMode={pathEditSubtool === 'pen'}
-              insertAnchorMode={pathEditSubtool === 'add-anchor'}
-              convertPointMode={pathEditSubtool === 'curve'}
-              newStrokeColor={penStrokeColor}
-              // Path-edit Pen adds geometry to the existing path; it is not
-              // the freehand drawing tool and must not inherit its width.
-              newStrokeWidth={2}
-              gridSnap
-              gridSize={getDocumentGridSize(document)}
-              onCommitNewShape={({ pathD, box, closed }) => {
-                if (!editingPenId) return;
-                onPathEditUnionNewShape(editingPenId, { pathD, box, closed }, 2);
-              }}
-              onCommit={onPenPathEditCommit}
-              onExit={() => setEditingPenId(null)}
-            />
-          ) : null}
         </div>
       </SvgPaper>
 

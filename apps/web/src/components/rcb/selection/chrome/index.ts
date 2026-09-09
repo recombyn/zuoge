@@ -25,8 +25,3 @@ export {
   SEL_TOOL_BTN,
 } from './ToolbarValueSlider';
 export { FillColorSwatch, StrokeColorSwatch, IconCornerRadius } from './StyleToolbarIcons';
-export { default as BrushOverlay } from './BrushOverlay';
-export { default as CornerRadiusHandlesOverlay } from './CornerRadiusHandlesOverlay';
-export { default as PolygonShapeHandlesOverlay } from './PolygonShapeHandlesOverlay';
-export { default as StarShapeHandlesOverlay } from './StarShapeHandlesOverlay';
-export { default as CircleShapeHandlesOverlay } from './CircleShapeHandlesOverlay';

@@ -7,7 +7,7 @@ import {
   fitMediaIntoViewport,
   type MediaPlaceKind,
 } from '@/components/rcb/scene/document/nodeFactories';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
+import { sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 import { rcbCenterOnPoint, type RcbCamera } from '@/components/rcb';
 import {
   isUploadAbortError,

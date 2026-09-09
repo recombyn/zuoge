@@ -14,7 +14,6 @@ import {
   nodeTitleLabelWorldPlacement,
   nodeTitleScreenGapPx,
 } from '../chrome/NodeTitleLabel';
-import { cursorForResize } from '../SelectionChrome';
 import { rcbScreenPxToScene } from '../../core/math';
 
 const CANVAS_ZOOMS = [0.5, 1, 2.247, 10, 71.61, 80, 100] as const;
@@ -49,7 +48,7 @@ describe('nodeTitleLabelWorldPlacement — title layout contract', () => {
     });
   });
 
-  it('uses scene = screenPx/zoom like SelectionChrome handles (no CSS counter-scale)', () => {
+  it('uses scene = screenPx/zoom like selection handles (no CSS counter-scale)', () => {
     const box = { left: 2, top: 4, width: 11, height: 15 };
     const zoom = 80;
     const place = nodeTitleLabelWorldPlacement(box, zoom);
@@ -178,12 +177,4 @@ describe('toolbar 20px outside node @ canvas + browser zoom', () => {
       expect(visual).toBeCloseTo(expected, 6);
     }
   );
-});
-
-describe('cursorForResize still direction-correct', () => {
-  it('edge handles stay axis cursors at angle 0', () => {
-    expect(cursorForResize('n', 0)).toBe('n-resize');
-    expect(cursorForResize('e', 0)).toBe('e-resize');
-    expect(cursorForResize('se', 0)).toBe('se-resize');
-  });
 });

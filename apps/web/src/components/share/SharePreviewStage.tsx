@@ -1,7 +1,6 @@
 import { memo, type RefObject } from 'react';
 import {
   RcbCanvas,
-  RcbSvgDefs,
   type RcbCamera as CanvasCamera,
 } from '@/components/rcb';
 import SvgCanvas from '@/components/editor/canvas/SvgCanvas';
@@ -75,7 +74,6 @@ function SharePreviewStage({
         background={stageBackground}
         stageRef={stageRef}
         onViewportEl={onViewportEl}
-        defs={<RcbSvgDefs />}
       >
         {frames.map((frame) =>
           frame.hidden ? null : (

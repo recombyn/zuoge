@@ -1,71 +1,55 @@
 import { memo, type ReactNode } from 'react';
+import { useSelector } from '@/store';
 
-import PathEditToolbar, {
-  type PathEditSubtool,
-} from '@/components/editor/chrome/PathEditToolbar';
 import PenStrokeToolbar from '@/components/editor/chrome/PenStrokeToolbar';
 import BucketFillToolbar from '@/components/editor/chrome/BucketFillToolbar';
-import { setActiveTool } from '@/store/modules/editor';
-
-const FLOAT_CLASS =
-  'pointer-events-none absolute left-1/2 top-3 z-[70] -translate-x-1/2 hidden md:block';
 
 type Props = {
   isDevMode: boolean;
-  pathEditOpen: boolean;
-  pathEditSubtool: PathEditSubtool;
-  onPathEditSubtool: (s: PathEditSubtool) => void;
-  onPathEditExit: () => void;
   activeTool: string;
   zoom?: number;
   viewportWidth?: number;
   docWidth?: number;
   /**
-   * `float` — top-center overlay (default).
-   * `inline` — bare body for embedding in the timeline top rail (one div, centered by parent).
+   * `float` — content only; parent places at page top-center (create options bar).
+   * `inline` — bare body for embedding in the timeline top rail.
    */
   placement?: 'float' | 'inline';
 };
 
-/** Path edit / pen / bucket docks — float or inline in the timeline tool rail. */
+function resolveCreateStrokeMode(
+  activeTool: string,
+  shapeKind: string
+): 'pen' | 'pencil' | null {
+  if (activeTool === 'pen') return 'pen';
+  if (activeTool === 'pencil') return 'pencil';
+  // Line / arrow share the stroke options bar (stroke-only = pencil chrome).
+  if (activeTool === 'shape' && (shapeKind === 'line' || shapeKind === 'arrow')) {
+    return 'pencil';
+  }
+  return null;
+}
+
+/** Pen / pencil / line / arrow / bucket create docks — top center or inline in rail. */
 function EditorToolDocks({
   isDevMode,
-  pathEditOpen,
-  pathEditSubtool,
-  onPathEditSubtool,
-  onPathEditExit,
   activeTool,
   zoom = 1,
   viewportWidth,
   docWidth,
   placement = 'float',
-}: Props) {  if (isDevMode) return null;
+}: Props) {
+  const shapeKind = useSelector((s: any) => String(s.editor.shapeKind || 'rect'));
+  if (isDevMode) return null;
 
   const chrome = placement === 'inline' ? 'flat' : 'pill';
+  const strokeMode = resolveCreateStrokeMode(activeTool, shapeKind);
 
   let body: ReactNode = null;
-  if (pathEditOpen) {
-    body = (
-      <PathEditToolbar
-        chrome={chrome}
-        subtool={pathEditSubtool}
-        onSubtoolChange={(s) => {
-          onPathEditSubtool(s);
-          window.dispatchEvent(
-            new CustomEvent('resume:path-edit-subtool', { detail: { subtool: s } })
-          );
-          setActiveTool('select');
-        }}
-        onExit={() => {
-          window.dispatchEvent(new Event('resume:exit-path-edit'));
-          onPathEditExit();
-        }}
-      />
-    );
-  } else if (activeTool === 'pen' || activeTool === 'pencil') {
+  if (strokeMode) {
     body = (
       <PenStrokeToolbar
-        mode={activeTool === 'pencil' ? 'pencil' : 'pen'}
+        mode={strokeMode}
         placement="dock"
         chrome={chrome}
         zoom={zoom}
@@ -79,15 +63,14 @@ function EditorToolDocks({
 
   if (!body) return null;
 
-  if (placement === 'inline') {
-    return (
-      <div className="pointer-events-auto flex items-center" data-editor-tool-dock-inline="">
-        {body}
-      </div>
-    );
-  }
-
-  return <div className={FLOAT_CLASS}>{body}</div>;
+  return (
+    <div
+      className="pointer-events-auto flex items-center"
+      data-editor-tool-dock={placement === 'inline' ? 'inline' : ''}
+    >
+      {body}
+    </div>
+  );
 }
 
 export default memo(EditorToolDocks);

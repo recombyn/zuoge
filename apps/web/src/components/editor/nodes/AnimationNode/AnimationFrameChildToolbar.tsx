@@ -94,7 +94,7 @@ import {
 import {
   documentPointToNodeLocal,
   isFrameLocalCoordSpace,
-} from '@/components/rcb/scene/paint/sceneToSvg';
+} from '@/components/rcb/scene/layout/nodeLayout';
 import store from '@/store';
 import { cn } from '@/utils/classnames';
 import type { SceneDocument, SceneNode } from '@/components/rcb/sceneNode';

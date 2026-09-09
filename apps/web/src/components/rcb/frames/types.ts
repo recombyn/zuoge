@@ -24,7 +24,7 @@ export function framePlateStrokeSceneWidth(zoom: number): number {
 
 /**
  * Crisp axis-aligned hairline on a Canvas2D context that already has a scene
- * transform — same miter closed-path recipe as stroked SoA rects (not strokeRect AA).
+ * transform — same miter closed-path recipe as stroked Kit rects (not strokeRect AA).
  *
  * Prefer {@link applyArtboardPlateEdgeStroke} for live plate chrome: artboard ink
  * canvas backing is edge-capped (`ARTBOARD_INK_MAX_EDGE`), so canvas hairlines vanish
@@ -99,8 +99,9 @@ export type ArtboardFrame = {
   /** Artboard fill alpha, stored as a percentage from 0 to 100. */
   backgroundOpacity?: number;
   /**
-   * Plate role. `animation` = 动画工作台 (same HtmlArtboardFrame + clip,
-   * different selection toolbar). Default / omitted = normal artboard.
+   * Plate role. `animation` = 动画工作台 — same Kit artboard chrome
+   * (fill / border / label / handles) as `artboard`; selection toolbar differs.
+   * Default / omitted = normal artboard.
    */
   kind?: 'artboard' | 'animation';
   /** 动画工作台 composition length (seconds). */

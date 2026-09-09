@@ -19,7 +19,7 @@ import {
 import { SELECTION_TOOLBAR_BELOW_BOX_GAP_PX } from '@/components/rcb/selection/chrome/SelectionToolbarShell';
 import { FloatingToolbar } from '@/components/editor/chrome/FloatingToolbar';
 import { imageToolBtn } from '@/components/editor/nodes/ImageNode/imageToolbarShared';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   cloneAudioNodeSibling
 } from '@/components/rcb/scene/document/mediaLifecycle';

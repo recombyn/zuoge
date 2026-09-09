@@ -5,7 +5,7 @@ import {
   expandSelectionWithGroups,
   readNodeGroupId
 } from '@/components/rcb/scene/document/sceneGroups';
-import { frameForFullBleedPlate as frameForFullBleedPlateId } from '@/components/rcb/scene/document/sceneHitBridge';
+import { frameForFullBleedPlate as frameForFullBleedPlateId } from '@/components/rcb/frames/frameSceneQuery';
 import { nodeIdsBoundToFrames } from '@/components/rcb/scene/document/sceneClipboard';
 import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
 import type { SceneDocument } from '@/components/rcb/sceneNode';

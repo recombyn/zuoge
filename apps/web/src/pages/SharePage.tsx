@@ -40,7 +40,7 @@ import {
 import {
   isExportableSceneNode
 } from '@/components/rcb/scene/document/nodeCapabilities';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   setActiveTool,
   setDocument,
