@@ -159,6 +159,8 @@ export class Renderer {
      * Cleared / absent ⇒ hug content (auto-width).
      */
     private _textLayoutWidths = new Map<number, number>();
+    /** CanvasKit TextDecoration bitflags per node (product / toolbar). */
+    private _textDecorations = new Map<number, number>();
 
     /** Fixed wrap width for a text node, or `undefined` when auto-width. */
     getTextLayoutWidth(id: number): number | undefined {
@@ -180,6 +182,30 @@ export class Renderer {
     /** Drop wrap width when a Kit node is removed. */
     clearTextLayoutWidth(id: number): void {
         if (this._textLayoutWidths.delete(id)) {
+            this._textWidthMemo.clear();
+            this.invalidateScenePicture();
+        }
+    }
+
+    /** Paragraph decoration flags (Underline | Overline | LineThrough), or 0. */
+    getTextDecoration(id: number): number {
+        return this._textDecorations.get(id) ?? 0;
+    }
+
+    /** Set / clear text decoration bitflags (pass 0 / null to clear). */
+    setTextDecoration(id: number, flags: number | null | undefined): void {
+        const n = Number(flags) || 0;
+        if (n <= 0) {
+            if (!this._textDecorations.delete(id)) return;
+        } else {
+            this._textDecorations.set(id, n);
+        }
+        this._textWidthMemo.clear();
+        this.invalidateScenePicture();
+    }
+
+    clearTextDecoration(id: number): void {
+        if (this._textDecorations.delete(id)) {
             this._textWidthMemo.clear();
             this.invalidateScenePicture();
         }
@@ -212,6 +238,7 @@ export class Renderer {
 
         // JSON, not a delimiter join: the content can contain anything,
         // including whatever separator seemed safe.
+        // text_align must be in the key: center/right change hug layout + AABB.
         const key = JSON.stringify([
             geo.content,
             fontSize,
@@ -221,6 +248,7 @@ export class Renderer {
             geo.italic ?? false,
             geo.letter_spacing ?? 0,
             layoutWidth ?? 0,
+            geo.text_align ?? 0,
         ]);
         let measured = this._textWidthMemo.get(key);
         if (!measured) {
@@ -254,13 +282,13 @@ export class Renderer {
             baseline = fontSize * 0.8;
         }
         // Fixed wrap box: frame width is the layout width (Paragraph aligns
-        // inside it). Auto-width: hug the measured run and shift for align.
+        // inside it). Auto-width: hug the measured run — drawParagraph also
+        // re-layouts at getLongestLine so Center/Right stay inside 0…w (do not
+        // shift AABB; that left an empty selection while glyphs flew to x≈5e4).
         if (layoutWidth != null) {
             width = layoutWidth;
-            return { x: 0, y: -baseline, w: width, h: height };
         }
-        const offsetX = geo.text_align === 1 ? -width / 2 : geo.text_align === 2 ? -width : 0;
-        return { x: offsetX, y: -baseline, w: width, h: height };
+        return { x: 0, y: -baseline, w: width, h: height };
     }
 
     ck: CanvasKit;
@@ -4395,20 +4423,27 @@ export class Renderer {
             const fontFamilies = fontFamily ? [fontFamily, 'sans-serif'] : ['sans-serif'];
 
             try {
+                const decoFlags = this.getTextDecoration(nodeId);
+                const textStyle: Record<string, unknown> = {
+                    color: this.ck.Color4f(
+                        paintColor[0],
+                        paintColor[1],
+                        paintColor[2],
+                        paintColor[3],
+                    ),
+                    fontSize: fontSize,
+                    fontFamilies: fontFamilies,
+                    heightMultiplier: lineHeight,
+                    fontStyle: { weight: ckWeight, slant: ckSlant },
+                    letterSpacing: letterSpacing,
+                };
+                // Skia TextDecoration bitflags: Underline=1, Overline=2, LineThrough=4.
+                if (decoFlags > 0) {
+                    textStyle.decoration = decoFlags;
+                    textStyle.decorationColor = textStyle.color;
+                }
                 const paraStyle = new this.ck.ParagraphStyle({
-                    textStyle: {
-                        color: this.ck.Color4f(
-                            paintColor[0],
-                            paintColor[1],
-                            paintColor[2],
-                            paintColor[3],
-                        ),
-                        fontSize: fontSize,
-                        fontFamilies: fontFamilies,
-                        heightMultiplier: lineHeight,
-                        fontStyle: { weight: ckWeight, slant: ckSlant },
-                        letterSpacing: letterSpacing,
-                    },
+                    textStyle,
                     textAlign: ckTextAlign,
                 });
 
@@ -4428,15 +4463,17 @@ export class Renderer {
                 builder.addText(content);
                 const para = builder.build();
                 // Wrap-mode nodes layout at their fixed box width; auto-width
-                // uses a generous max so soft wraps never fire (hard `\n` only).
+                // first lays out unconstrained, then hugs getLongestLine so
+                // Center/Right align inside the run (not a 1e5-wide slab that
+                // parks glyphs off-screen while the selection AABB stays put).
                 const fixedW = this.getTextLayoutWidth(nodeId);
-                const layoutWidth =
-                    fixedW != null && fixedW > 0
-                        ? fixedW
-                        : content.includes('\n')
-                          ? content.length * fontSize * 0.6
-                          : 1e5;
-                para.layout(layoutWidth);
+                if (fixedW != null && fixedW > 0) {
+                    para.layout(fixedW);
+                } else {
+                    para.layout(1e5);
+                    const hug = Math.max(1, para.getLongestLine());
+                    if (hug < 1e5 - 0.5) para.layout(hug);
+                }
 
                 // A text node's origin IS its baseline (SVG `y`, and what the
                 // engine's hit-test assumes: local y spans -font_size…0).
@@ -5527,7 +5564,8 @@ export class Renderer {
     private drawArtboardLabel(canvas: Canvas, ab: Artboard, selected: boolean) {
         const px = 11;
         const size = px / this.zoom;
-        const font = new this.ck.Font(null, size);
+        // Prefer a CJK-capable face when registered — Font(null) tofu's Han titles.
+        const font = new this.ck.Font(this.getTypeface('Alibaba PuHuiTi') ?? this.getTypeface('Noto Sans SC'), size);
         const paint = new this.ck.Paint();
         paint.setColor(
             selected ? this.ck.Color(0, 162, 255, 1.0) : this.ck.Color(150, 150, 150, 1.0),

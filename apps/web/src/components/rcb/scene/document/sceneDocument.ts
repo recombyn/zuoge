@@ -692,6 +692,14 @@ export function normalizeDocument(doc: unknown): SceneDocument {
             radiusBL: 0,
           };
         }
+        // Drop removed fixed-text-frame attrs (legacy docs).
+        const tf = attrs.textFrame;
+        if (tf === true || tf === 'true' || tf === 1 || tf === '1') {
+          nextAttrs = { ...(nextAttrs || attrs) };
+          delete nextAttrs.textFrame;
+          delete nextAttrs.lockAspect;
+          nextAttrs.autoSize = 'false';
+        }
       }
       if (nextAttrs) {
         patched = { ...patched, attrs: nextAttrs };

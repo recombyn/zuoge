@@ -16,7 +16,6 @@ import {
   isAudioNode,
   isLottieNode,
   isNodeMarqueeSkippable,
-  isTextFrameNode,
   isVideoNode,
 } from '@/components/rcb/scene/document/nodeCapabilities';
 import {
@@ -256,7 +255,6 @@ export function getNodeBoxFromDoc(doc: SceneDocument | null | undefined, nodeId:
   // when stored height is still the old 1em hug.
   if (
     node.key === 'text' &&
-    !isTextFrameNode(node) &&
     String(node.attrs?.autoSize ?? 'true') !== 'false'
   ) {
     const style = parseNodeTextStyle(node.attrs || {});
@@ -702,7 +700,7 @@ export type CanvasSession = {
   ) => void;
   onGeometryPreview: (
     patches: GeomPatch[],
-    options?: { textResizeMode?: 'scale' | 'wrap' | 'frame' }
+    options?: { textResizeMode?: 'scale' | 'wrap' }
   ) => void;
   resetFrameMoveOwners: () => void;
   onAngleCommit: (nodeId: string, angleDeg: number, options?: { skipHistory?: boolean }) => void;
@@ -970,7 +968,7 @@ export function createCanvasSession(deps: CanvasSessionDeps): CanvasSession {
 
   const onGeometryPreview = (
     patches: GeomPatch[],
-    options?: { textResizeMode?: 'scale' | 'wrap' | 'frame' }
+    options?: { textResizeMode?: 'scale' | 'wrap' }
   ) => {
     const doc = deps.getDocument();
     const board = deps.getBoard();

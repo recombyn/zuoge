@@ -52,12 +52,20 @@ export default defineConfig(({ mode }) => {
     },
     envPrefix: ['VITE_', 'TAURI_ENV_*'],
     resolve: {
-      alias: {
-        '@': path.join(root, 'src'),
-        '@canvas-plugins': path.join(repoRoot, 'plugins/canvas'),
-        // Local MIT vector-editor reference (engine + CanvasKit sources).
-        '@rcb-vector': path.join(repoRoot, 'vendor/vector-editor-ref/packages/editor/src'),
-      },
+      alias: [
+        { find: '@', replacement: path.join(root, 'src') },
+        { find: '@canvas-plugins', replacement: path.join(repoRoot, 'plugins/canvas') },
+        // Prefix form so `@rcb-vector/types` → `…/src/types.ts` (Vite 8 string
+        // aliases without `/` are exact-match only in some resolve paths).
+        {
+          find: /^@rcb-vector\/(.*)/,
+          replacement: path.join(repoRoot, 'vendor/vector-editor-ref/packages/editor/src/$1'),
+        },
+        {
+          find: '@rcb-vector',
+          replacement: path.join(repoRoot, 'vendor/vector-editor-ref/packages/editor/src'),
+        },
+      ],
       extensionAlias: {
         '.js': ['.ts', '.tsx', '.js', '.jsx'],
         '.jsx': ['.tsx', '.jsx'],

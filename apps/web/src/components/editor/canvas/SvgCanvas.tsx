@@ -136,6 +136,7 @@ import {
   kitCanRedo,
   kitCanUndo,
   deleteKitSelection,
+  getKitPointerScenePos,
   isDomHostOnlyRcbNode,
   reconcileKitWithDocument,
 } from '@/components/rcb/canvas/kitBridge';
@@ -200,7 +201,6 @@ import AnimationNodeOverlay, {
 } from '@/components/editor/nodes/AnimationNode/AnimationNodeOverlay';
 import type { SceneDocument, ScenePage } from '@/components/rcb/sceneNode';
 import TextInlineEditor from '@/components/editor/nodes/TextNode/TextInlineEditor';
-import TextFrameOverlay from '@/components/editor/nodes/TextNode/TextFrameOverlay';
 import CanvasContextMenu, {
   type ContextMenuState,
   type CtxAction,
@@ -1338,6 +1338,9 @@ function SvgCanvas({
   );
 
   const getPasteAnchor = useCallback(() => {
+    // Kit canvas owns stage pointer — prefer its last scene sample for paste.
+    const kitPos = getKitPointerScenePos();
+    if (kitPos) return kitPos;
     const point = lastPointerClientRef.current;
     if (!point.x && !point.y) return null;
     return pointerToWorld(
@@ -1903,13 +1906,6 @@ function SvgCanvas({
             document={document}
             // Keep HTML waveform during drag ? SVG underlay is plate-only (no poster).
             geometryOverrides={videoLiveGeom as Record<string, AudioGeomOverride> | null}
-          />
-        ) : null}
-        {infinite ? (
-          <TextFrameOverlay
-            document={document}
-            hiddenNodeId={editingTextId}
-            selectedNodeIds={ids}
           />
         ) : null}
         {/* Process SoftGlow is owned by RcbShapeHost (node attrs.processStatus). */}

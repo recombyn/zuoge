@@ -1,6 +1,6 @@
 /**
  * Live editor: selection chrome vs shape ink + visual-outer vs grid at high zoom.
- * Stays on ADR 0027 (overlay CameraTransform) ?measures product alignment bugs.
+ * Stays on ADR 0027 (overlay CameraTransform) Ã¢â‚¬?measures product alignment bugs.
  */
 import path from 'node:path';
 import { test, expect, type Page, type Locator } from '@playwright/test';
@@ -98,7 +98,7 @@ async function focusStage(page: Page, stage: Locator) {
   return box;
 }
 
-test.describe('canvas chrome ?ink align (high zoom)', () => {
+test.describe('canvas chrome ï¿½?ink align (high zoom)', () => {
   test.skip(!TOKEN, E2E_TOKEN_SKIP_REASON);
 
   test.beforeEach(async ({ page }) => {
@@ -117,7 +117,7 @@ test.describe('canvas chrome ?ink align (high zoom)', () => {
     await sleep(500);
     await expectShapeInk(page, 1);
 
-    // Draw commit auto-selects ?chrome should mount before we leave select.
+    // Draw commit auto-selects ï¿½?chrome should mount before we leave select.
     await expect
       .poll(async () => selectionChromeCount(page), {
         timeout: 12_000,
@@ -240,7 +240,7 @@ test.describe('canvas chrome ?ink align (high zoom)', () => {
       const panX = panM ? Number(panM[1]) : 0;
       const panY = panM ? Number(panM[2]) : 0;
       const z = cssZoom > 0 ? cssZoom : 1;
-      const outset = 0.5; // center stroke 1 ?matches strokeChromeOutset
+      const outset = 0.5; // center stroke 1 ï¿½?matches strokeChromeOutset
       const chromeGeom = {
         left: geom.left - outset,
         top: geom.top - outset,

@@ -9,7 +9,8 @@ import { WasmScene } from '@rcb-vector/wasm_scene';
 import { store } from '@/store';
 import { setActiveTool as setEditorActiveTool } from '@/store/modules/editor';
 import { KIT_CHROME_MINIMAL } from './kitChromeMinimal';
-import { ensureKitAppTextFonts } from './kitTextFonts';
+import { ensureKitAppTextFonts, KIT_APP_TEXT_FONT } from './kitTextFonts';
+import { getFontData } from '@rcb-vector/fonts';
 import {
   BUCKET_CURSOR,
   isPersistentDrawSessionTool,
@@ -311,12 +312,32 @@ export async function createCanvasEngine(
     return text.length * fallbackSize * 0.55;
   };
 
+  // Default Font(null) is Latin-only — 动画 / 画板 names become tofu. Prefer the
+  // product CJK face already registered by ensureKitAppTextFonts().
+  let artboardLabelTypeface:
+    | ReturnType<CanvasKit['Typeface']['MakeFreeTypeFaceFromData']>
+    | null
+    | undefined;
+  const resolveArtboardLabelTypeface = () => {
+    if (artboardLabelTypeface !== undefined) return artboardLabelTypeface;
+    artboardLabelTypeface = null;
+    const data = getFontData(KIT_APP_TEXT_FONT);
+    if (data) {
+      try {
+        artboardLabelTypeface = canvasKit.Typeface.MakeFreeTypeFaceFromData(data);
+      } catch {
+        artboardLabelTypeface = null;
+      }
+    }
+    return artboardLabelTypeface;
+  };
+
   // Name left / size right across the plate (NodeTitleLabel justify-between).
   anyAbRenderer.drawArtboardLabel = (canvas, ab, selected) => {
     const zoom = Math.max(0.05, Number(anyAbRenderer.zoom) || 1);
     const px = 11;
     const size = px / zoom;
-    const font = new canvasKit.Font(null, size);
+    const font = new canvasKit.Font(resolveArtboardLabelTypeface(), size);
     const paint = new canvasKit.Paint();
     paint.setColor(
       selected

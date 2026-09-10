@@ -74,27 +74,7 @@ export type MediaTitleIcon =
   | 'video-generator'
   | 'lottie'
   | 'lottie-generator'
-  | 'audio'
-  | 'text';
-
-export function textFrameTitleChrome(opts: {
-  name?: unknown;
-  plainText?: string;
-}): { name: string; icon: 'text'; renameAriaLabel: string } {
-  const existing = String(opts.name || '').trim();
-  if (existing) {
-    return { name: existing, icon: 'text', renameAriaLabel: 'Text name' };
-  }
-  const snippet = String(opts.plainText || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 48);
-  return {
-    name: snippet || 'Text',
-    icon: 'text',
-    renameAriaLabel: 'Text name',
-  };
-}
+  | 'audio';
 
 export function mediaTitleChrome(opts: {
   key: string | undefined;

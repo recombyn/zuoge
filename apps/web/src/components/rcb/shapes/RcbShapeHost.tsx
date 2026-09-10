@@ -192,7 +192,6 @@ function RcbShapeHost({
     node?.attrs?.fontSize,
     node?.attrs?.fontFamily,
     node?.attrs?.autoSize,
-    node?.attrs?.textFrame,
     node?.attrs?.path,
     node?.attrs?.shapeType,
     // Angle / flip: no paint remount (boolean / outlined compounds). Kit gets

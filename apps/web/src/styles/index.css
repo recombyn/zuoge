@@ -298,18 +298,6 @@ html[data-theme='dark'] .rcb-home-hero-canvas {
   background-color: color-mix(in srgb, var(--ink) 24%, var(--surface));
 }
 
-/* Text-frame FO scroll — beat global * track margin so the thumb hugs the plate. */
-[data-text-frame-scroll].rcb-edge-scroll::-webkit-scrollbar-track,
-[data-text-frame-scroll].rcb-edge-scroll::-webkit-scrollbar {
-  margin-block: 0;
-  margin-inline: 0;
-}
-
-[data-text-frame-scroll].rcb-edge-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
 .rcb-panel-tip {
   color: var(--muted);
   font-size: 12px;

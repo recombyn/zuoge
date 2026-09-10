@@ -14,9 +14,7 @@ import {
   isAnimationFrameHostNode,
   isVideoGeneratorNode,
   isNodeHiddenInDocument,
-  isTextFrameNode,
 } from '@/components/rcb/scene/document/nodeCapabilities';
-import { parseNodeText } from '@/components/rcb/scene/document/sceneText';
 import { liveShapeGeomBox } from './hostGeom';
 import {
   deflateSelectionBox,
@@ -28,7 +26,6 @@ import { resolveControlChrome, getSelectionSharedRotation } from './resizeGeomet
 import type { SceneBox } from './alignGuides';
 import {
   mediaTitleChrome,
-  textFrameTitleChrome,
   readNodeAngle,
   resolveChromeUnion,
   resolveFrameChromeBox,
@@ -163,7 +160,6 @@ export function resolveSelectionChromeModel(opts: {
   const isVideo = Boolean(
     singleNodeData && singleNodeData.key === 'video' && !isVideoGen
   );
-  const isTextFrame = Boolean(singleNodeData && isTextFrameNode(singleNodeData));
   const processing = String(singleNodeData?.attrs?.processStatus || '') === 'running';
   const shapeType = String(singleNodeData?.attrs?.shapeType || '');
   const lineChrome = singleNode && (shapeType === 'line' || shapeType === 'arrow');
@@ -180,18 +176,9 @@ export function resolveSelectionChromeModel(opts: {
     ? document?.deltaSetLike?.[toolbarNodeId]
     : null;
 
-  let titleChrome: ReturnType<typeof mediaTitleChrome> | ReturnType<
-    typeof textFrameTitleChrome
-  > | null = null;
+  let titleChrome: ReturnType<typeof mediaTitleChrome> | null = null;
   if (singleNodeData) {
-    if (isTextFrame) {
-      if (!resolveAnimationFrameId(document, singleNodeData)) {
-        titleChrome = textFrameTitleChrome({
-          name: singleNodeData.attrs?.name,
-          plainText: parseNodeText(singleNodeData.attrs || {}),
-        });
-      }
-    } else if (
+    if (
       !isAnimationFrameHostNode(singleNodeData, document) &&
       !resolveAnimationFrameId(document, singleNodeData)
     ) {
@@ -214,8 +201,7 @@ export function resolveSelectionChromeModel(opts: {
 
   const titled =
     Boolean(singleNodeData) &&
-    (isTextFrame ||
-      ['image', 'video', 'lottie', 'audio'].includes(String(singleNodeData?.key || '')));
+    ['image', 'video', 'lottie', 'audio'].includes(String(singleNodeData?.key || ''));
 
   return {
     single,
@@ -233,7 +219,6 @@ export function resolveSelectionChromeModel(opts: {
     toolbarNode,
     titleChrome,
     titled,
-    isTextFrame,
     isWorkbenchMulti: isAnimationWorkbenchSelection(
       document,
       selectedNodeIds,

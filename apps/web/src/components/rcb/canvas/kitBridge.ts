@@ -50,6 +50,9 @@ import {
   buildMarkdownTextAttrs,
   isTextBold,
   isTextItalic,
+  isTextOverline,
+  isTextStrike,
+  isTextUnderline,
   measurePlainTextSize,
   measureWrappedTextSize,
   parseNodeMarkdown,
@@ -580,11 +583,6 @@ function applyKitTextLayoutWidth(
 ) {
   const attrs = (node.attrs || {}) as Record<string, unknown>;
   const autoSize = String(attrs.autoSize ?? 'true') !== 'false';
-  const textFrame =
-    attrs.textFrame === true ||
-    attrs.textFrame === 'true' ||
-    attrs.textFrame === 1 ||
-    attrs.textFrame === '1';
   const renderer = scene.renderer as
     | {
         setTextLayoutWidth?: (id: number, w: number | null) => void;
@@ -593,7 +591,7 @@ function applyKitTextLayoutWidth(
     | null
     | undefined;
   if (!renderer) return;
-  if (!autoSize || textFrame) {
+  if (!autoSize) {
     const w = Math.max(8, Number(node.width) || 0);
     renderer.setTextLayoutWidth?.(kitId, w > 0 ? w : null);
   } else {
@@ -611,11 +609,50 @@ function clearKitTextLayoutWidth(scene: WasmScene | null | undefined, kitId: num
   }
 }
 
+/** Drop Paragraph decoration map when a Kit text node is removed / remounted. */
+function clearKitTextDecoration(scene: WasmScene | null | undefined, kitId: number) {
+  try {
+    (
+      scene?.renderer as { clearTextDecoration?: (id: number) => void } | null | undefined
+    )?.clearTextDecoration?.(kitId);
+  } catch {
+    /* optional */
+  }
+}
+
+function forgetKitTextChrome(scene: WasmScene | null | undefined, kitId: number) {
+  clearKitTextLayoutWidth(scene, kitId);
+  clearKitTextDecoration(scene, kitId);
+}
+
 function kitTextAlignFromStyle(textAlign: string | undefined): number {
   const a = String(textAlign || '').toLowerCase();
   if (a === 'center' || a === 'middle') return 1;
   if (a === 'right' || a === 'end') return 2;
   return 0;
+}
+
+/** CanvasKit / Skia TextDecoration bitflags (Underline|Overline|LineThrough). */
+function kitTextDecorationFlags(style: Partial<TextStyle> | null | undefined): number {
+  let flags = 0;
+  if (isTextUnderline(style)) flags |= 1;
+  if (isTextOverline(style)) flags |= 2;
+  if (isTextStrike(style)) flags |= 4;
+  return flags;
+}
+
+function applyKitTextDecoration(
+  scene: WasmScene,
+  kitId: number,
+  style: Partial<TextStyle> | null | undefined
+) {
+  try {
+    (
+      scene.renderer as { setTextDecoration?: (id: number, flags: number) => void } | null | undefined
+    )?.setTextDecoration?.(kitId, kitTextDecorationFlags(style));
+  } catch {
+    /* optional */
+  }
 }
 
 /**
@@ -670,7 +707,8 @@ function applyKitTextProps(scene: WasmScene, kitId: number, node: SceneNodeInput
   const typo = kitTextTypoFromStyle(style);
   const align = kitTextAlignFromStyle(style.textAlign);
   const lh = Number(style.lineHeight) || 1.2;
-  const sig = `${content}\0${fontSize}\0${typo.family}\0${typo.weight}\0${typo.italic ? 1 : 0}\0${typo.letterSpacing}\0${align}\0${lh}`;
+  const deco = kitTextDecorationFlags(style);
+  const sig = `${content}\0${fontSize}\0${typo.family}\0${typo.weight}\0${typo.italic ? 1 : 0}\0${typo.letterSpacing}\0${align}\0${lh}\0${deco}`;
   if (lastKitTextSig.get(kitId) === sig) return false;
   ensureKitFontFamily(typo.family);
   try {
@@ -685,6 +723,7 @@ function applyKitTextProps(scene: WasmScene, kitId: number, node: SceneNodeInput
   } catch {
     /* ignore */
   }
+  applyKitTextDecoration(scene, kitId, style);
   lastKitTextSig.set(kitId, sig);
   applyKitTextLayoutWidth(scene, kitId, node);
   return true;
@@ -800,7 +839,7 @@ function syncParametricKitShape(
     }
     kitToRcb.delete(kitId);
     rcbToKit.delete(rcbId);
-    clearKitTextLayoutWidth(scene, kitId);
+    forgetKitTextChrome(scene, kitId);
     forgetKitStyle(kitId);
     const newId = create();
     remember(newId, rcbId);
@@ -1301,7 +1340,7 @@ function flushDeletesFromKit(scene: WasmScene, opts?: { skipHistory?: boolean })
   for (const [kitId, rcbId] of [...kitToRcb.entries()]) {
     if (live.has(kitId)) continue;
     dropNodes.push(rcbId);
-    clearKitTextLayoutWidth(scene, kitId);
+    forgetKitTextChrome(scene, kitId);
     kitToRcb.delete(kitId);
     rcbToKit.delete(rcbId);
     lastKitRasterSrc.delete(rcbId);
@@ -2981,6 +3020,39 @@ async function fetchImageBytes(
   }
 }
 
+/**
+ * removeNode / remount clears engine selection; SoftGlow still paints via
+ * rcbToKit while store stays selected — re-apply Kit chrome so the control box
+ * shows during upload (toolbar stays HTML-gated by !processing).
+ * Deferred when inside withSuppress (reconcile / fetch commit) so
+ * syncKitSelectionFromStore is not no-op'd by suppressDepth.
+ */
+function resyncKitSelectionIfStoreSelected(rcbId: string) {
+  if (!attached) return;
+  if (rcbToKit.get(rcbId) == null) return;
+  const ed = store.getState().editor;
+  const selected = (ed.selectedNodeIds || []).map(String);
+  if (!selected.includes(String(rcbId))) return;
+  const handle = attached;
+  const run = () => {
+    if (!attached || attached !== handle) return;
+    if (suppressDepth > 0) {
+      queueMicrotask(run);
+      return;
+    }
+    if (rcbToKit.get(rcbId) == null) return;
+    const live = store.getState().editor;
+    const selected = (live.selectedNodeIds || []).map(String);
+    if (!selected.includes(String(rcbId))) return;
+    syncKitSelectionFromStore(
+      handle,
+      live.selectedNodeIds || [],
+      live.selectedFrameIds || []
+    );
+  };
+  run();
+}
+
 function commitImageBytesToKit(
   scene: WasmScene,
   rcbId: string,
@@ -3033,6 +3105,7 @@ function commitImageBytesToKit(
     applyKitNodeStyle(scene, kitId, node);
     remember(kitId, rcbId);
     if (expected) lastKitRasterSrc.set(rcbId, expected);
+    resyncKitSelectionIfStoreSelected(rcbId);
     attached?.renderer.requestRender();
     return true;
   } catch {
@@ -3130,7 +3203,20 @@ function pushRasterNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInp
       })
     );
     remember(kitId, rcbId);
+    resyncKitSelectionIfStoreSelected(rcbId);
     return;
+  }
+  // Upload / process: mount opacity-0 plate immediately so store→Kit selection
+  // can paint the control box while SoftGlow runs and bytes are still fetching.
+  if (rcbToKit.get(rcbId) == null && src && isNodeProcessRunning(node)) {
+    const x = Number(node.x) || 0;
+    const y = Number(node.y) || 0;
+    const w = Math.max(1, Number(node.width) || 1);
+    const h = Math.max(1, Number(node.height) || 1);
+    const kitId = scene.addRect(x, y, w, h);
+    applyKitNodeStyle(scene, kitId, node);
+    remember(kitId, rcbId);
+    resyncKitSelectionIfStoreSelected(rcbId);
   }
   const cached = imageBytesCache.get(src);
   if (cached) {
@@ -3185,15 +3271,17 @@ function pushNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInput) {
     if (kitId != null) {
       const align = kitTextAlignFromStyle(style.textAlign);
       const lh = Number(style.lineHeight) || 1.2;
+      const deco = kitTextDecorationFlags(style);
       applyKitTextStyleNoHistory(scene, kitId, typo.weight, typo.italic, typo.letterSpacing);
       try {
         scene.setTextPropertiesNoHistory(kitId, typo.family, align, lh);
       } catch {
         /* optional */
       }
+      applyKitTextDecoration(scene, kitId, style);
       lastKitTextSig.set(
         kitId,
-        `${parseNodeMarkdown(attrs)}\0${fontSize}\0${typo.family}\0${typo.weight}\0${typo.italic ? 1 : 0}\0${typo.letterSpacing}\0${align}\0${lh}`
+        `${parseNodeMarkdown(attrs)}\0${fontSize}\0${typo.family}\0${typo.weight}\0${typo.italic ? 1 : 0}\0${typo.letterSpacing}\0${align}\0${lh}\0${deco}`
       );
       applyKitTextLayoutWidth(scene, kitId, node);
     }
@@ -3357,7 +3445,7 @@ export function reconcileKitWithDocument(
     for (const [kitId, rcbId] of [...kitToRcb.entries()]) {
       if (delta[rcbId]) continue;
       scene.removeNode(kitId);
-      clearKitTextLayoutWidth(scene, kitId);
+      forgetKitTextChrome(scene, kitId);
       kitToRcb.delete(kitId);
       rcbToKit.delete(rcbId);
       forgetKitStyle(kitId);
@@ -3380,7 +3468,7 @@ export function reconcileKitWithDocument(
       }
       kitToRcb.delete(kitId);
       rcbToKit.delete(rcbId);
-      clearKitTextLayoutWidth(scene, kitId);
+      forgetKitTextChrome(scene, kitId);
       forgetKitStyle(kitId);
       lastParametricSig.delete(rcbId);
       lastKitRasterSrc.delete(rcbId);
@@ -3418,6 +3506,8 @@ export function reconcileKitWithDocument(
     for (const [id, node] of Object.entries(delta)) {
       if (!node || id === 'ROOT' || rcbToKit.has(id)) continue;
       const key = String(node.key || '');
+      // DomHost FO owns these — never seed a Kit twin (double paint / hug race).
+      if (isDomHostOnlyRcbNode(node)) continue;
       if ((key === 'lottie' || key === 'group') && !isEmptyGeneratorPlate(node)) continue;
       if (
         isEmptyGeneratorPlate(node) ||
@@ -3745,6 +3835,7 @@ export function hydrateKitFromDocument(
     const delta = document.deltaSetLike || {};
     for (const [id, node] of Object.entries(delta)) {
       if (!node || id === 'ROOT') continue;
+      if (isDomHostOnlyRcbNode(node)) continue;
       const key = String(node.key || '');
       if ((key === 'lottie' || key === 'group') && !isEmptyGeneratorPlate(node)) continue;
       if (
@@ -3764,6 +3855,13 @@ export function hydrateKitFromDocument(
   });
   lastArtboardClipPaintSig = '';
   refreshKitArtboardClipPaint(true);
+  // Hydrate/remap can finish after store already selected upload placeholders.
+  const ed = store.getState().editor;
+  syncKitSelectionFromStore(
+    handle,
+    ed.selectedNodeIds || [],
+    ed.selectedFrameIds || []
+  );
 }
 
 function emptyGeneratorIconKind(
@@ -4785,6 +4883,21 @@ export function detachKitBridge() {
 /** True while Kit canvas bridge owns wash / Lucide / pick for mapped nodes. */
 export function isKitBridgeAttached(): boolean {
   return attached != null;
+}
+
+/** Last Kit canvas pointer in scene space (null until a pointer sample). */
+export function getKitPointerScenePos(): { x: number; y: number } | null {
+  const im = attached?.input as
+    | {
+        currentPos?: { x: number; y: number };
+        pointerSceneReady?: boolean;
+      }
+    | null
+    | undefined;
+  if (!im?.pointerSceneReady || !im.currentPos) return null;
+  const { x, y } = im.currentPos;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
 }
 
 /** Kit numeric id for an RCB scene node (null when unmapped / DomHost-only). */

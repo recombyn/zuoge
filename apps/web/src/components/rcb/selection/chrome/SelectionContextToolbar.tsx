@@ -16,7 +16,6 @@ import {
   MdFormatAlignLeft,
   MdFormatAlignRight,
   MdFormatOverline,
-  MdOutlineWrapText,
 } from 'react-icons/md';
 import AppLogo from '@/components/base/AppLogo';
 import { ColorPanelPopover, INPUT_NO_SPIN } from '@/components/base/colorPanel';
@@ -44,16 +43,13 @@ import { ImageToolSep, imageToolBtn } from '@/components/editor/nodes/ImageNode/
 import {
   buildMarkdownTextAttrs,
   buildTextAttrsPreservingMarkdown,
-  defaultTextWrapWidthForFontSize,
   isTextBold,
   isTextItalic,
   isTextOverline,
   isTextStrike,
   isTextUnderline,
   measurePlainTextSize,
-  measureTextFrameExitBox,
   measureTextNodeBoxAfterStyleChange,
-  measureWrappedTextSize,
   normalizeTextFontSize,
   parseNodeMarkdown,
   parseNodeText,
@@ -61,7 +57,6 @@ import {
   toggleTextDecoration,
 } from '@/components/rcb/scene/document/sceneText';
 import { markdownToPlain } from '@/components/rcb/scene/document/sceneMarkdown';
-import { TEXT_FRAME_PADDING, TEXT_FRAME_RADIUS } from '@/components/rcb/scene/document/sceneEffects';
 import { clearNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
 import { getSharedNodeEls } from '@/components/rcb/shapes/shapeHostRegistry';
 import {
@@ -71,7 +66,6 @@ import {
   isImageProcessRunning,
   isLottieGeneratorNode,
   isAnimationFrameHostNode,
-  isTextFrameNode,
   isVideoGeneratorNode,
   supportsCornerRadius,
 } from '@/components/rcb/scene/document/nodeCapabilities';
@@ -546,81 +540,6 @@ function SelectionContextToolbar(props: Props): ReactNode {
     patchTextStyle({ fontSize: next });
   };
 
-  const isTextBoxMode = String(node?.attrs?.textFrame ?? '') === 'true';
-
-  /** Plain text — fixed plate with scrollable content (image-like W×H). */
-  const toggleTextBoxMode = () => {
-    if (!node || !style) return;
-    const plain = parseNodeText(node.attrs || {}) || ' ';
-    if (isTextBoxMode) {
-      const measured = measureTextFrameExitBox(node, style);
-      patchDocumentNode({
-          nodeId,
-          patch: {
-            attrs: { textFrame: null, autoSize: 'false', lockAspect: null },
-            width: measured.width,
-            height: measured.height,
-          },
-        });
-      return;
-    }
-    const fs = Math.max(1, Number(style.fontSize) || 14);
-    const wrapW = defaultTextWrapWidthForFontSize(fs);
-    const content = measureWrappedTextSize(plain, style, wrapW);
-    const pad = TEXT_FRAME_PADDING * 2;
-    const side = Math.min(
-      wrapW * 4,
-      Math.max(
-        wrapW,
-        content.width + pad,
-        content.height + pad,
-        Number(node.width) || 0,
-        Number(node.height) || 0
-      )
-    );
-    const titleName =
-      String(node.attrs?.name || '').trim() ||
-      plain.replace(/\s+/g, ' ').trim().slice(0, 48) ||
-      'Text';
-    patchDocumentNode({
-        nodeId,
-        patch: {
-          attrs: {
-            textFrame: 'true',
-            autoSize: 'false',
-            lockAspect: 'true',
-            name: titleName,
-            'fill-color': '#FFFFFF',
-            radiusTL: TEXT_FRAME_RADIUS,
-            radiusTR: TEXT_FRAME_RADIUS,
-            radiusBR: TEXT_FRAME_RADIUS,
-            radiusBL: TEXT_FRAME_RADIUS,
-            radiusLinked: 'true',
-          },
-          width: Math.round(side),
-          height: Math.round(side),
-        },
-      });
-  };
-
-  const commitTextBoxSize = (axis: 'w' | 'h', raw: string) => {
-    const trimmed = String(raw || '').trim();
-    if (!trimmed) return;
-    const n = Math.round(Number(trimmed));
-    if (!Number.isFinite(n) || n < 1) return;
-    const curW = Math.max(1, Math.round(Number(node?.width) || 1));
-    const curH = Math.max(1, Math.round(Number(node?.height) || 1));
-    if (n === curW && n === curH) return;
-    patchDocumentNode({
-        nodeId,
-        patch: {
-          attrs: { textFrame: 'true', autoSize: 'false', lockAspect: 'true' },
-          width: n,
-          height: n,
-        },
-      });
-  };
-
   const textAlign = String(style?.textAlign || 'left');
   const fontFamily = String(style?.fontFamily || 'Alibaba PuHuiTi');
   // fontCatalogTick bumps after catalog load so weight options re-resolve.
@@ -687,18 +606,7 @@ function SelectionContextToolbar(props: Props): ReactNode {
       label: t('editor.imageToolbar.effects'),
     });
   }
-  if (kind === 'text') {
-    elementMoreItems.push({
-      key: 'textFrame',
-      icon: <MdOutlineWrapText className="h-4 w-4" />,
-      label: isTextBoxMode ? t('editor.textBoxModeOff') : t('editor.textBoxModeOn'),
-    });
-  }
   const runElementMore = (key: string) => {
-    if (key === 'textFrame') {
-      toggleTextBoxMode();
-      return;
-    }
     if (key === 'outline') {
       void outlineSelectedNode({
         nodeId,
@@ -954,8 +862,7 @@ function SelectionContextToolbar(props: Props): ReactNode {
     kind === 'image' ||
     kind === 'video' ||
     kind === 'lottie' ||
-    kind === 'audio' ||
-    (kind === 'text' && isTextFrameNode(node));
+    kind === 'audio';
 
   let lottieToolbarChrome: ReactNode = null;
   if (kind === 'lottie') {
@@ -1215,46 +1122,6 @@ function SelectionContextToolbar(props: Props): ReactNode {
                   <HiOutlineCodeBracket className="h-3.5 w-3.5" />
                 </button>
               </Tooltip>
-              {isTextBoxMode ? (
-                <>
-                  <label className="inline-flex h-8 items-center gap-1 rounded-lg px-1.5 text-[12px] text-[var(--ink)]">
-                    <span className="text-[var(--muted)]">W</span>
-                    <input
-                      className={cn(SEL_SIZE_INPUT, INPUT_NO_SPIN)}
-                      defaultValue={Math.round(Number(node?.width) || 0)}
-                      key={`tw-${nodeId}-${Math.round(Number(node?.width) || 0)}`}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onBlur={(e) => commitTextBoxSize('w', e.target.value)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          commitTextBoxSize('w', (e.target as HTMLInputElement).value);
-                          (e.target as HTMLInputElement).blur();
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="inline-flex h-8 items-center gap-1 rounded-lg px-1.5 text-[12px] text-[var(--ink)]">
-                    <span className="text-[var(--muted)]">H</span>
-                    <input
-                      className={cn(SEL_SIZE_INPUT, INPUT_NO_SPIN)}
-                      defaultValue={Math.round(Number(node?.height) || 0)}
-                      key={`th-${nodeId}-${Math.round(Number(node?.height) || 0)}`}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onBlur={(e) => commitTextBoxSize('h', e.target.value)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          commitTextBoxSize('h', (e.target as HTMLInputElement).value);
-                          (e.target as HTMLInputElement).blur();
-                        }
-                      }}
-                    />
-                  </label>
-                </>
-              ) : null}
               {elementLayerChrome}
               <Sep />
               <ExportSelectionPopover nodeIds={[nodeId]} />

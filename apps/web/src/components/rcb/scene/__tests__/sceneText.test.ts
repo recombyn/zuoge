@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   defaultTextWrapWidthForFontSize,
   measurePlainTextSize,
-  measureTextFrameExitBox,
   measureTextNodeBoxAfterStyleChange,
   normalizeTextFontSize,
   textVisualLines,
@@ -85,36 +84,6 @@ describe('textVisualLines', () => {
       autoSize: true,
     });
     expect(lines).toEqual(['你好世界测试文字']);
-  });
-});
-
-describe('measureTextFrameExitBox', () => {
-  it('exits a huge fixed frame to font-scaled fixed wrap width', () => {
-    const text = '你好\n世界';
-    const fontSize = 14;
-    const node = {
-      width: 1052,
-      height: 1052,
-      attrs: { textFrame: 'true', markdown: text },
-    };
-    const exit = measureTextFrameExitBox(node, { fontSize, lineHeight: 1.4 });
-    const preferred = Math.max(Math.ceil(fontSize * 8), Math.round(fontSize * (400 / 18)));
-    expect(exit.width).toBeGreaterThanOrEqual(preferred);
-    expect(exit.width).toBeLessThanOrEqual(preferred * 2);
-    expect(exit.height).toBeLessThan(200);
-  });
-
-  it('scales exit wrap with fontSize so low-zoom paste/unfix is not 1-glyph wide', () => {
-    const text = 'Illegal mix of collations utf8mb4_unicode_ci error dump line that would be huge unwrapped';
-    const fontSize = 57;
-    const exit = measureTextFrameExitBox(
-      { width: 12689, height: 12689, attrs: { textFrame: 'true', markdown: text } },
-      { fontSize, lineHeight: 1.4 }
-    );
-    expect(exit.width).toBeGreaterThanOrEqual(fontSize * 8);
-    expect(exit.width).toBeLessThan(fontSize * 50);
-    expect(exit.height).toBeLessThan(8000);
-    expect(exit.height).toBeGreaterThan(50);
   });
 });
 

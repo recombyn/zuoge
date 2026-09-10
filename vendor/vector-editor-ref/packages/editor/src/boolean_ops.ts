@@ -20,9 +20,6 @@ export const BOOL_OP_INDEX: Record<BoolOp, number> = {
     exclude: 3,
 };
 
-/** Bezier circle constant: 4·(√2−1)/3 */
-const KAPPA = 0.5522847498;
-
 /**
  * Combine the given nodes (2+) with a boolean op and return the resulting
  * outline as engine subpaths in **world space**, plus the fill rule the result
@@ -75,11 +72,34 @@ export function computeBooleanSubpaths(
         result = combined;
     }
 
+    // PathOps often leaves self-touching / EvenOdd contours that paint as a
+    // sharp inward V (hex ∪/∖ oval). Clean to a winding silhouette first.
+    try {
+        result.simplify();
+    } catch {
+        /* older canvaskit */
+    }
+    try {
+        const wound = result.makeAsWinding();
+        if (wound) {
+            result.delete();
+            result = wound;
+        }
+    } catch {
+        /* optional */
+    }
+
     const subpaths = pathToSubpaths(ck, result);
-    // MakeFromOp emits contours under this fill type (in practice EvenOdd,
-    // with holes wound the same way) — the node style must match or holes
-    // render and hit-test as filled.
-    const fillRule = result.getFillType() === ck.FillType.EvenOdd ? 1 : 0;
+    // Prefer Winding after cleanup so residual EvenOdd pockets don't hollow the
+    // fill. Exclude (XOR) may still report EvenOdd — honour that for holes.
+    let fillRule = 0;
+    try {
+        if (op === 'exclude' && result.getFillType() === ck.FillType.EvenOdd) {
+            fillRule = 1;
+        }
+    } catch {
+        fillRule = 0;
+    }
     result.delete();
     // subpaths may be empty (e.g. intersect of disjoint shapes). That's a real
     // answer, not a failure — see the note on this function.
@@ -310,16 +330,11 @@ export function nodeToWorldPath(ck: CanvasKit, scene: WasmScene, id: number): Pa
             path.addRect(ck.LTRBRect(0, 0, width, height));
         }
     } else if (geometry.Ellipse) {
-        // Build with cubics (not addOval) so boolean results contain no conics
+        // Match renderer paint (`addOval`). Hand-rolled κ-cubics disagree with
+        // PathOps at oval×polygon junctions and produce jagged inward notches;
+        // pathToSubpaths already elevates conics with conicHandleRatio.
         const { radius_x: rx, radius_y: ry } = geometry.Ellipse;
-        const kx = rx * KAPPA,
-            ky = ry * KAPPA;
-        path.moveTo(0, -ry);
-        path.cubicTo(kx, -ry, rx, -ky, rx, 0);
-        path.cubicTo(rx, ky, kx, ry, 0, ry);
-        path.cubicTo(-kx, ry, -rx, ky, -rx, 0);
-        path.cubicTo(-rx, -ky, -kx, -ry, 0, -ry);
-        path.close();
+        path.addOval(ck.LTRBRect(-rx, -ry, rx, ry));
     } else if (geometry.Path) {
         // Use the resolved outline so per-vertex corner radii are honoured in
         // the boolean result (matches what is rendered).
@@ -332,10 +347,28 @@ export function nodeToWorldPath(ck: CanvasKit, scene: WasmScene, id: number): Pa
         return null;
     }
 
+    // PathOps is more stable when operands declare winding (vs unset/EvenOdd).
+    try {
+        path.setFillType(ck.FillType.Winding);
+    } catch {
+        /* ignore */
+    }
+
     // Transform into world space (row-major 3x3 from the engine)
     const t = scene.getTransform(id);
     path.transform(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]);
     return path;
+}
+
+/** True when cubic handles sit on their anchors (straight segment). */
+function isCollocatedHandle(
+    hx: number,
+    hy: number,
+    ax: number,
+    ay: number,
+    eps = 1e-3,
+): boolean {
+    return Math.hypot(hx - ax, hy - ay) < eps;
 }
 
 /** Append engine subpaths (cubic beziers via cp1/cp2) onto a CanvasKit path. */
@@ -347,12 +380,35 @@ export function appendSubpathsToPath(path: Path, subpaths: Subpath[]) {
         for (let i = 1; i < pts.length; i++) {
             const prev = pts[i - 1];
             const p = pts[i];
-            path.cubicTo(prev.cp2[0], prev.cp2[1], p.cp1[0], p.cp1[1], p.x, p.y);
+            // Degenerate cubics on polygon edges are a PathOps footgun at
+            // curve/line junctions — emit a real line when handles collapse.
+            if (
+                isCollocatedHandle(prev.cp2[0], prev.cp2[1], prev.x, prev.y) &&
+                isCollocatedHandle(p.cp1[0], p.cp1[1], p.x, p.y)
+            ) {
+                path.lineTo(p.x, p.y);
+            } else {
+                path.cubicTo(prev.cp2[0], prev.cp2[1], p.cp1[0], p.cp1[1], p.x, p.y);
+            }
         }
         if (sp.closed) {
             const last = pts[pts.length - 1];
             const first = pts[0];
-            path.cubicTo(last.cp2[0], last.cp2[1], first.cp1[0], first.cp1[1], first.x, first.y);
+            if (
+                isCollocatedHandle(last.cp2[0], last.cp2[1], last.x, last.y) &&
+                isCollocatedHandle(first.cp1[0], first.cp1[1], first.x, first.y)
+            ) {
+                path.lineTo(first.x, first.y);
+            } else {
+                path.cubicTo(
+                    last.cp2[0],
+                    last.cp2[1],
+                    first.cp1[0],
+                    first.cp1[1],
+                    first.x,
+                    first.y,
+                );
+            }
             path.close();
         }
     }

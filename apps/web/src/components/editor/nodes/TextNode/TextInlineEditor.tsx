@@ -17,11 +17,8 @@ import {
   wrapPlainTextLines,
   measureTextEmBoxHeight,
 } from '@/components/rcb/scene/document/sceneText';
-import { isTextFrameNode } from '@/components/rcb/scene/document/nodeCapabilities';
 import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
-import { TEXT_FRAME_PADDING, TEXT_SELECTION_PAD, textFrameCornerRadii } from '@/components/rcb/scene/document/sceneEffects';
-import { resolveTextFramePlateFill } from '@/components/rcb/scene/document/nodeFactories';
-import { FRAME_PLATE_STROKE } from '@/components/rcb/frames/types';
+import { TEXT_SELECTION_PAD } from '@/components/rcb/scene/document/sceneEffects';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 
 type Props = {
@@ -67,9 +64,7 @@ function TextInlineEditor({
   const initial = parseNodeMarkdown(node?.attrs || {}) || '';
   const [value, setValue] = useState(initial);
   const autoSize0 = String(node?.attrs?.autoSize ?? 'true') !== 'false';
-  const textFrame0 = isTextFrameNode(node);
   const [autoSize, setAutoSize] = useState(autoSize0);
-  const [textFrame] = useState(textFrame0);
   const committedRef = useRef(false);
   /** Ignore outside pointerdown / blur races from the opening click & store remount. */
   const openedAtRef = useRef(
@@ -81,8 +76,6 @@ function TextInlineEditor({
   styleRef.current = style;
   const autoSizeRef = useRef(autoSize);
   autoSizeRef.current = autoSize;
-  const textFrameRef = useRef(textFrame);
-  textFrameRef.current = textFrame;
   const boxWidthRef = useRef(resolveTextBoxWidth(node?.width, true, style.fontSize));
   const onCommitRef = useRef(onCommit);
   onCommitRef.current = onCommit;
@@ -137,14 +130,11 @@ function TextInlineEditor({
 
   // Prefer content height (tight, even top/bottom). Keep authored nodeH so
   // textVerticalOriginY matches idle ink (taller boxes stay centered).
-  // Text frames keep the authored plate height (image-like) — scroll inside.
-  const heightWorld = textFrame
-    ? Math.max(Math.ceil(fontSize), nodeH)
-    : Math.max(
-        Math.ceil(fontSize),
-        Math.ceil(contentBox.height),
-        nodeH
-      );
+  const heightWorld = Math.max(
+    Math.ceil(fontSize),
+    Math.ceil(contentBox.height),
+    nodeH
+  );
   // Same pad as selection chrome (flush with glyphs).
   const pad = TEXT_SELECTION_PAD;
   const chromeLeft = left - pad;
@@ -168,16 +158,8 @@ function TextInlineEditor({
       : measureWrappedTextSize(trimmed, s, boxW);
     const attrs = buildMarkdownTextAttrs(trimmed, s) as Record<string, unknown>;
     attrs.autoSize = autoSizeRef.current ? 'true' : 'false';
-    if (textFrameRef.current) {
-      attrs.textFrame = 'true';
-      attrs.autoSize = 'false';
-    }
-    let width = autoSizeRef.current ? measured.width : boxW;
-    let height = measured.height;
-    if (textFrameRef.current) {
-      width = Math.max(1, Math.round(Number(node?.width) || boxW));
-      height = Math.max(1, Math.round(Number(node?.height) || measured.height));
-    }
+    const width = autoSizeRef.current ? measured.width : boxW;
+    const height = measured.height;
     onCommitRef.current({
       attrs,
       width,
@@ -218,7 +200,6 @@ function TextInlineEditor({
   // idle ink vertically centers in a taller box; shrinking would jump the glyphs.
   useLayoutEffect(() => {
     if (!node || node.key !== 'text') return;
-    if (textFrameRef.current) return;
     const s = styleRef.current;
     const plain = valueRef.current;
     const has = Boolean(plain.trim());
@@ -328,33 +309,20 @@ function TextInlineEditor({
   const contentScreenW = Math.max(8, widthWorld * z);
   const contentScreenH = Math.max(fontSize * z, heightWorld * z);
   const padScreen = pad * z;
-  // Artboard-like plate: scroll track flush to edge; content pad on the textarea.
-  const contentPadScreen = textFrame ? TEXT_FRAME_PADDING * z : 0;
-  const corner = textFrame ? textFrameCornerRadii(node.attrs || {}) : null;
-  const frameRadius = corner
-    ? Math.max(corner.tl, corner.tr, corner.br, corner.bl) * z
-    : 0;
   const trackLeft = padScreen;
   const trackTop = padScreen;
   const trackW = Math.max(8, contentScreenW);
   const trackH = Math.max(fontSize * z, contentScreenH);
   // Match idle WebGL/Canvas textVerticalOriginY so glyphs do not jump on edit open.
-  const editLines = textFrame
-    ? []
-    : wrapPlainTextLines(value || ' ', style, Math.max(1, widthWorld));
-  const originYWorld = textFrame
-    ? 0
-    : textVerticalOriginY(
-        heightWorld,
-        fontSize,
-        lineH,
-        Math.max(1, editLines.length),
-        measureTextEmBoxHeight(style, (value || '永').slice(0, 1) || '永')
-      );
-  const padTopScreen = contentPadScreen + originYWorld * z;
-  const plateFill = textFrame
-    ? resolveTextFramePlateFill(node.attrs?.['fill-color'])
-    : undefined;
+  const editLines = wrapPlainTextLines(value || ' ', style, Math.max(1, widthWorld));
+  const originYWorld = textVerticalOriginY(
+    heightWorld,
+    fontSize,
+    lineH,
+    Math.max(1, editLines.length),
+    measureTextEmBoxHeight(style, (value || '永').slice(0, 1) || '永')
+  );
+  const padTopScreen = originYWorld * z;
 
   const startEdgeDrag = (side: 'e' | 'w') => (e: React.PointerEvent) => {
     e.preventDefault();
@@ -388,16 +356,11 @@ function TextInlineEditor({
           style={{
             borderWidth: BORDER_PX,
             borderStyle: 'solid',
-            borderRadius: frameRadius || undefined,
-            boxShadow: textFrame
-              ? `inset 0 0 0 1px ${FRAME_PLATE_STROKE}, 0 0 0 ${BORDER_PX}px rgba(255,255,255,0.9)`
-              : `0 0 0 ${BORDER_PX}px rgba(255,255,255,0.9)`,
-            background: plateFill,
+            boxShadow: `0 0 0 ${BORDER_PX}px rgba(255,255,255,0.9)`,
           }}
         />
-        {/* L/R wrap handles — not for scrollable text frames (image-like scale). */}
-        {!textFrame
-          ? (['w', 'e'] as const).map((side) => (
+        {/* L/R wrap handles */}
+        {(['w', 'e'] as const).map((side) => (
               <div
                 key={side}
                 role="button"
@@ -424,8 +387,7 @@ function TextInlineEditor({
                   }}
                 />
               </div>
-            ))
-          : null}
+            ))}
         <textarea
           ref={textareaRef}
           value={value}
@@ -464,31 +426,18 @@ function TextInlineEditor({
             }
             e.stopPropagation();
           }}
-          onWheel={(e) => {
-            if (!textFrame) return;
-            // Ctrl/meta+wheel → let canvas zoom (editor is under stage when FO; overlay uses native listener).
-            if (e.ctrlKey || e.metaKey) return;
-            e.stopPropagation();
-            e.nativeEvent.stopImmediatePropagation();
-          }}
           spellCheck={false}
-          data-text-frame-scroll={textFrame ? '' : undefined}
-          className={
-            textFrame
-              ? 'rcb-edge-scroll absolute z-[2] resize-none overflow-y-auto border-0 bg-transparent shadow-none outline-none ring-0'
-              : 'absolute z-[1] resize-none overflow-hidden border-0 bg-transparent p-0 shadow-none outline-none ring-0'
-          }
+          className="absolute z-[1] resize-none overflow-hidden border-0 bg-transparent p-0 shadow-none outline-none ring-0"
           style={{
             left: trackLeft,
             top: trackTop,
             width: trackW,
             height: trackH,
-            // Frame: pad glyphs only — scrollbar stays on the plate edge.
-            // Non-frame: top pad matches idle textVerticalOriginY (centered stack).
+            // Top pad matches idle textVerticalOriginY (centered stack).
             paddingTop: padTopScreen || 0,
-            paddingLeft: contentPadScreen || 0,
-            paddingRight: contentPadScreen || 0,
-            paddingBottom: contentPadScreen || 0,
+            paddingLeft: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
             fontSize: fontSize * z,
             // Unitless line-height matches SVG.js `leading` (fontSize × lineH).
             lineHeight: lineH,
@@ -501,10 +450,10 @@ function TextInlineEditor({
             textAlign: (style.textAlign as CanvasTextAlign) || 'left',
             letterSpacing: style.letterSpacing ? `${style.letterSpacing * z}px` : undefined,
             margin: 0,
-            // autoSize: no soft wrap (hard `\n` only). Fixed width / frame: wrap like SVG.
-            whiteSpace: autoSize && !textFrame ? 'pre' : 'pre-wrap',
-            overflowWrap: autoSize && !textFrame ? 'normal' : 'break-word',
-            wordBreak: autoSize && !textFrame ? 'normal' : 'break-word',
+            // autoSize: no soft wrap (hard `\n` only). Fixed width: wrap like SVG.
+            whiteSpace: autoSize ? 'pre' : 'pre-wrap',
+            overflowWrap: autoSize ? 'normal' : 'break-word',
+            wordBreak: autoSize ? 'normal' : 'break-word',
             boxSizing: 'border-box',
             display: 'block',
           }}
