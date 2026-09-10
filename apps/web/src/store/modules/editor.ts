@@ -1540,6 +1540,9 @@ export const editorReducers = {
           if (!item?.patch) return true;
           return isTransientNodePatch(item.patch) || patchSkipsHostRemount(item.patch);
         });
+      // Align / distribute / tidy are RCB chrome writes — clear the sticky
+      // Kit→doc flag so KitCanvasHost pushes geometry back into Kit ink.
+      state.lastPatchFromKitCanvas = false;
       if (!skipHistory) persistActivePrecompSession(state);
       syncLibraryOnEdit(state);
       // Bake only frames whose signature actually changed (not every focus tick).

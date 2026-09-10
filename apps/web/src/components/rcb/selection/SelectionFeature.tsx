@@ -303,7 +303,8 @@ function SelectionFeature({
           {...selectionToolbarDock(toolbarChromeBox!, {
             angle: toolbarChromeAngle,
             edgePadScene: edgePad,
-            lineChrome,
+            // Kit dock AABB is already a world corner AABB — skip lineChrome remap.
+            lineChrome: Boolean(lineChrome && !kitDockAabb),
             node: toolbarNode!,
           })}
           valueBox={toolbarValueBox(chromeGeomBox, toolbarNode)}

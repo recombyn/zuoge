@@ -2000,12 +2000,7 @@ export class InputManager {
             lineHeight: geo.Text.line_height || 1.2,
             color,
             textDecoration: decoCss || 'none',
-            textAlign:
-                geo.Text.text_align === 1
-                    ? 'center'
-                    : geo.Text.text_align === 2
-                      ? 'right'
-                      : 'left',
+            textAlign: (['left', 'center', 'right'] as const)[geo.Text.text_align] || 'left',
             value: originalContent,
             layoutWidth: layoutW != null ? layoutW * scaleX : undefined,
             boxTopEm: fontSize > 0 ? Math.max(0.1, -local.y / fontSize) : 1,
@@ -2416,7 +2411,7 @@ export class InputManager {
             maxX = Math.max(maxX, Number(b[2]));
             maxY = Math.max(maxY, Number(b[3]));
         }
-        if (!(minX < maxX && minY < maxY)) return;
+        if (!(Number.isFinite(minX) && minX < maxX && minY < maxY)) return;
         const dx = this.currentPos.x - minX;
         const dy = this.currentPos.y - minY;
         if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
@@ -2480,7 +2475,7 @@ export class InputManager {
             for (const id of live) {
                 const newId = this.scene.duplicateNode(id);
                 // duplicate_node builds in a +20,+20 offset; take it back off for
-                // in-place, or before pointer snap (movePasteToPointer uses bounds).
+                // in-place. Pointer paste leaves it — movePasteToPointer snaps by bounds.
                 if (inPlace) eng.move_node(newId, -20, -20);
                 // Every clone is born at the ROOT wearing the local transform it
                 // had inside its parent, so a copy of a shape in a group scaled

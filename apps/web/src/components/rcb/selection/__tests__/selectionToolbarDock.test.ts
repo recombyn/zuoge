@@ -21,4 +21,16 @@ describe('selectionToolbarDock', () => {
       edgePadScene: 0,
     });
   });
+
+  it('zeros angle after lineChrome endpoint AABB remap', () => {
+    const lineBox = { left: 0, top: 0, width: 100, height: 24 };
+    const dock = selectionToolbarDock(lineBox, {
+      angle: 45,
+      lineChrome: true,
+      node: { attrs: { angle: 45, shapeType: 'line' } },
+    });
+    expect(dock.angle).toBe(0);
+    expect(dock.box).not.toBeNull();
+    expect(dock.box!.height).toBeGreaterThan(1);
+  });
 });
