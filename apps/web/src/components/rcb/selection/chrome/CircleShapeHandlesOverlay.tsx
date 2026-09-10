@@ -7,15 +7,13 @@ import { useRcbCamera } from '@/components/rcb/camera/context';
 import {
   clampEllipseInnerRatio,
   clampEllipseArcPercent,
-  advanceEllipseArcAlong,
-  ellipseArcAlongRadFromPercent,
+  DEFAULT_ELLIPSE_START_DEG,
   ellipseArcEndAngles,
-  ellipseArcPercentFromAlongRad,
   ellipseArcPercentFromAttrs,
+  ellipseArcPercentFromPointerAngle,
   ellipseInnerRatioFromAttrs,
-  ellipseStartDegFromAttrs,
+  ellipseParametricAngle,
   snapEllipseInnerRatio,
-  wrapAngleDelta,
 } from '@/components/rcb/scene/document/sceneShapes';
 import { strokeInnerClearanceScene } from '@/components/rcb/scene/document/sceneEffects';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
@@ -53,9 +51,6 @@ type DragState =
       mode: 'arc';
       startPercent: number;
       current: number;
-      lockSign: 1 | -1;
-      alongRad: number;
-      lastPointerAngle: number;
       startX: number;
       startY: number;
       moved: boolean;
@@ -104,8 +99,11 @@ function CircleShapeHandlesOverlay({
   const outerR = Math.min(rx, ry);
 
   const baseInner = ellipseInnerRatioFromAttrs(node?.attrs);
-  const baseArc = ellipseArcPercentFromAttrs(node?.attrs);
-  const startDeg = ellipseStartDegFromAttrs(node?.attrs);
+  // Always positive clockwise from the right — ignore legacy negative openings.
+  const rawArc = ellipseArcPercentFromAttrs(node?.attrs);
+  const baseArc = clampEllipseArcPercent(Math.abs(rawArc) < 0.5 ? 100 : Math.abs(rawArc));
+  // Unified: fixed start on the right; sweep always clockwise toward the left.
+  const startDeg = DEFAULT_ELLIPSE_START_DEG;
   const innerRatio = liveInner ?? baseInner;
   const arcPercent = liveArc ?? baseArc;
   const isFull = Math.abs(arcPercent) >= 99.95;
@@ -118,33 +116,38 @@ function CircleShapeHandlesOverlay({
     strokeInnerClearanceScene(node)
   );
   const arcSeatR = Math.max(outerR * 0.2, outerR - rimInset);
-  const { a1, mid } = ellipseArcEndAngles(arcPercent, startDeg);
+  const { a1, startRad } = ellipseArcEndAngles(arcPercent, startDeg);
   const seatOnRim = (ang: number, r: number) => ({
     x: cx + Math.cos(ang) * (rx / outerR) * r,
     y: cy + Math.sin(ang) * (ry / outerR) * r,
   });
-  const innerSeatR = innerRatio > 1e-4 ? Math.max(2 * k, outerR * innerRatio) : 0;
-  // Solid: 内半径 at center. Hole: on the inner rim along mid-arc.
+  // atan2 + y-down: −π/2 = top (内半径), 0 = right (周弧度 / start).
+  const INNER_RIM_ANG = -Math.PI / 2;
+
+  // Solid: 内半径 at center. Hole: on the **top** of the inner rim (ref 图2).
   let innerLocal = { x: cx, y: cy };
   if (innerRatio > 1e-4) {
-    const parkedInnerR = Math.max(0, innerSeatR - rimInset);
-    innerLocal = seatOnRim(mid, Math.max(2 * k, parkedInnerR));
+    const innerSeatR = Math.max(2 * k, outerR * innerRatio);
+    innerLocal = seatOnRim(INNER_RIM_ANG, innerSeatR);
   }
-  // 弧度 on the outer rim — opposite the mid when full so it won't sit on 内半径.
-  const arcLocal = seatOnRim(isFull ? mid + Math.PI * 0.5 : a1, arcSeatR);
+  // Full: 弧度 on the **right** outer rim (start ray). Partial: movable cut end a1.
+  const arcLocal = seatOnRim(isFull ? startRad : a1, arcSeatR);
 
   const innerPos = localPointToScene(innerLocal.x, innerLocal.y, box, angle);
   const arcPos = localPointToScene(arcLocal.x, arcLocal.y, box, angle);
 
   const preview = (opts: { inner?: number; arc?: number }) => {
-    const attrs: Record<string, unknown> = {};
+    const attrs: Record<string, unknown> = {
+      // Keep start locked on the right so geometry matches the handle 1:1.
+      ellipseStartDeg: startDeg,
+    };
     const live: Record<string, number> = {};
     if (opts.inner != null) {
       attrs.ellipseInnerRatio = snapEllipseInnerRatio(opts.inner);
       live.ellipseInnerRatio = attrs.ellipseInnerRatio as number;
     }
     if (opts.arc != null) {
-      attrs.ellipseArcPercent = clampEllipseArcPercent(opts.arc);
+      attrs.ellipseArcPercent = clampEllipseArcPercent(Math.abs(opts.arc));
       live.ellipseArcPercent = attrs.ellipseArcPercent as number;
     }
     previewShapeParamsToKit(nodeId, node, attrs, live);
@@ -156,10 +159,9 @@ function CircleShapeHandlesOverlay({
     const onMove = (e: globalThis.PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      if (d.mode === 'inner') {
-        const distSq = (e.clientX - d.startX) ** 2 + (e.clientY - d.startY) ** 2;
-        if (!d.moved && distSq <= DRAG_DISTANCE_SQUARED) return;
-      }
+      const distSq = (e.clientX - d.startX) ** 2 + (e.clientY - d.startY) ** 2;
+      // Gate both knobs so a full-ring Arc seat on the start ray doesn't snap to 0.5%.
+      if (!d.moved && distSq <= DRAG_DISTANCE_SQUARED) return;
       d.moved = true;
 
       const sc = toScene(e.clientX, e.clientY);
@@ -178,15 +180,18 @@ function CircleShapeHandlesOverlay({
         return;
       }
 
-      const pointerAngle = Math.atan2(local.y - cy, local.x - cx);
-      const delta = wrapAngleDelta(pointerAngle - d.lastPointerAngle);
-      d.lastPointerAngle = pointerAngle;
-      d.alongRad = advanceEllipseArcAlong(d.alongRad, delta, d.lockSign);
-      const next = ellipseArcPercentFromAlongRad(d.alongRad, d.lockSign);
+      // Parametric angle so the cut end tracks the pointer on wide/tall ellipses too.
+      const pointerAngle = ellipseParametricAngle(local.x, local.y, cx, cy, rx, ry);
+      let next = ellipseArcPercentFromPointerAngle(pointerAngle, startDeg);
+      // Opening a closed ring: stay full until the pointer clearly leaves the start seam.
+      if (Math.abs(d.startPercent) >= 99.95 && next < 3) {
+        next = 100;
+      }
       d.current = next;
-      setDragValue(Math.round(next * 10) / 10);
+      setDragValue(Math.round(Math.abs(next) * 10) / 10);
       setLiveArc(next);
       preview({ arc: next });
+      return;
     };
 
     const onUp = () => {
@@ -208,7 +213,9 @@ function CircleShapeHandlesOverlay({
         ellipseInnerRatio:
           d.mode === 'inner' ? snapEllipseInnerRatio(d.current) : snapEllipseInnerRatio(baseInner),
         ellipseArcPercent:
-          d.mode === 'arc' ? clampEllipseArcPercent(d.current) : clampEllipseArcPercent(baseArc),
+          d.mode === 'arc'
+            ? clampEllipseArcPercent(Math.abs(d.current))
+            : clampEllipseArcPercent(Math.abs(baseArc) < 0.5 ? 100 : Math.abs(baseArc)),
         ellipseStartDeg: startDeg,
       });
     };
@@ -240,6 +247,8 @@ function CircleShapeHandlesOverlay({
     toScene,
     cx,
     cy,
+    rx,
+    ry,
     outerR,
     z,
     baseInner,
@@ -311,42 +320,27 @@ function CircleShapeHandlesOverlay({
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    const sc = toScene(e.clientX, e.clientY);
-    const local = scenePointToLocal(sc.x, sc.y, box, angle);
-    const pointerAngle = Math.atan2(local.y - cy, local.x - cx);
-    const startRad = (startDeg * Math.PI) / 180;
-    const deltaFromStart = wrapAngleDelta(pointerAngle - startRad);
-    const lockSign: 1 | -1 =
-      Math.abs(baseArc) >= 99.95
-        ? Math.abs(deltaFromStart) < 1e-6
-          ? 1
-          : deltaFromStart < 0
-            ? 1
-            : -1
-        : baseArc < 0
-          ? -1
-          : 1;
+    // Normalize legacy negative / left-opening arcs to positive clockwise from right.
+    const startPercent = clampEllipseArcPercent(
+      Math.abs(baseArc) < 0.5 ? 100 : Math.abs(baseArc)
+    );
     dragRef.current = {
       mode: 'arc',
-      startPercent: baseArc,
-      current: baseArc,
-      lockSign,
-      alongRad: ellipseArcAlongRadFromPercent(baseArc),
-      lastPointerAngle: pointerAngle,
+      startPercent,
+      current: startPercent,
       startX: e.clientX,
       startY: e.clientY,
       moved: false,
     };
     setActiveKey('arc');
-    setDragValue(Math.round(baseArc * 10) / 10);
-    setLiveArc(baseArc);
+    setDragValue(Math.round(Math.abs(startPercent) * 10) / 10);
+    setLiveArc(startPercent);
   };
 
   const resetArcFull = (e: ReactMouseEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    const full = baseArc < 0 ? -100 : 100;
     dragRef.current = null;
     setActiveKey(null);
     setDragValue(null);
@@ -354,7 +348,7 @@ function CircleShapeHandlesOverlay({
     setLiveArc(null);
     commitShapeParamsToKit(nodeId, node, {
       ellipseInnerRatio: snapEllipseInnerRatio(baseInner),
-      ellipseArcPercent: full,
+      ellipseArcPercent: 100,
       ellipseStartDeg: startDeg,
     });
   };
@@ -436,6 +430,8 @@ function CircleShapeHandlesOverlay({
               // Display-only start seat still needs hit-testing for hover badge.
               pointerEvents:
                 knob.interactive || knob.onEnter || knob.onLeave ? 'all' : 'none',
+              cursor:
+                knob.interactive || knob.onEnter || knob.onLeave ? 'pointer' : undefined,
             }}
             onPointerDown={knob.onDown}
             onDoubleClick={knob.onDoubleClick}

@@ -14,11 +14,8 @@ import {
   LuFileJson,
   LuMusic2,
   LuMousePointer2,
-  LuPaintBucket,
   LuPenTool,
   LuPencil,
-  LuPipette,
-  LuGrid3X3,
   LuSquare,
   LuStar,
   LuTriangle,
@@ -93,9 +90,6 @@ const TOOL_SHORTCUT = {
   text: 'T',
   pen: 'P',
   pencil: 'Shift P',
-  bucket: 'B',
-  eyedropper: 'I',
-  mesh: 'U',
   rect: 'R',
   line: 'L',
   circle: 'O',
@@ -442,6 +436,18 @@ function EditorToolStrip({
     setActiveTool('select');
   }, [timelineOpen, activeTool]);
 
+  // Bucket / eyedropper / mesh hidden from rail — bounce leftover active tool.
+  useEffect(() => {
+    if (
+      activeTool !== 'bucket' &&
+      activeTool !== 'eyedropper' &&
+      activeTool !== 'mesh'
+    ) {
+      return;
+    }
+    setActiveTool('select');
+  }, [activeTool]);
+
   const L = useMemo(
     () => ({
       select: t('editor.tools.select'),
@@ -450,9 +456,6 @@ function EditorToolStrip({
       shape: t('editor.tools.shape'),
       pen: t('editor.tools.pen'),
       pencil: t('editor.tools.pencil'),
-      bucket: t('editor.tools.bucket'),
-      eyedropper: t('editor.tools.eyedropper', { defaultValue: '吸管' }),
-      mesh: t('editor.tools.mesh', { defaultValue: '网格' }),
       text: t('editor.tools.text'),
       rect: t('editor.tools.rect'),
       line: t('editor.tools.line'),
@@ -750,9 +753,7 @@ function EditorToolStrip({
       if (key === 'i' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         setOpenMenu('upload');
       }
-      if (key === 'i' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        setActiveTool('eyedropper');
-      }
+      // Eyedropper (I) / mesh (U) / bucket (B) — hidden from rail for now.
       if (key === 'a' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         spawnImageGeneratorAtView();
       }
@@ -768,14 +769,8 @@ function EditorToolStrip({
         if (timelineOpen) return;
         spawnAudioGeneratorAtView();
       }
-      if (key === 'u' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        setActiveTool('mesh');
-      }
       if (key === 'p' && !e.shiftKey) setActiveTool('pen');
       if (key === 'p' && e.shiftKey) setActiveTool('pencil');
-      if (key === 'b' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        setActiveTool('bucket');
-      }
       if (key === 'escape') {
         window.dispatchEvent(new Event('resume:exit-path-edit'));
         setActiveTool('select');
@@ -1060,9 +1055,6 @@ function EditorToolStrip({
   const shapeActive = activeTool === 'shape';
   const imageActive = activeTool === 'image';
   const inkActive = activeTool === 'pen' || activeTool === 'pencil';
-  const bucketActive = activeTool === 'bucket';
-  const eyedropperActive = activeTool === 'eyedropper';
-  const meshActive = activeTool === 'mesh';
   const textActive = activeTool === 'text';
 
   return (
@@ -1079,7 +1071,8 @@ function EditorToolStrip({
           className
         )}
       >
-      {/* Select / Move — click selects, hover for 选择/移动 */}
+      {/* Order (ref): select → shape → pen/pencil → text → frame → animation | upload → generator.
+          Pen + pencil stay one SplitToolButton (not separate slots). */}
       <SplitToolButton
         tip={`${L.select} / ${L.pan}`}
         active={selectActive}
@@ -1103,26 +1096,28 @@ function EditorToolStrip({
         </ToolIcon>
       </SplitToolButton>
 
-      {/* 智能画板 — Kit artboard; toolbar appears on the frame after commit */}
-      {timelineOpen ? null : (
-        <ToolBtn
-          tip={toolTipWithShortcut(L.frame, TOOL_SHORTCUT.frame)}
-          active={frameActive}
-          disabled={toolsLocked}
-          onClick={() => {
-            if (warnIfNewPlateBlockedByAnimationWorkbenchFocus(message.warning, t, 'artboard')) {
-              return;
-            }
-            setActiveTool('frame');
-          }}
-        >
-          <ToolIcon className="h-3.5 w-3.5">
-            <LuFrame className="h-full w-full" strokeWidth={STROKE} />
-          </ToolIcon>
-        </ToolBtn>
-      )}
+      {/* 形状 — click draws current shape, hover to switch */}
+      <SplitToolButton
+        tip={L.shape}
+        active={shapeActive}
+        disabled={toolsLocked}
+        menuOpen={openMenu === 'shape'}
+        onMenuOpenChange={(open) => {
+          setOpenMenu(open ? 'shape' : null);
+        }}
+        items={shapeItems}
+        selectedKeys={[shapeKind]}
+        onMenuPick={pickShape}
+        onPrimaryClick={() =>
+          setShapeKind(resolveToolbarShapeKind(shapeKind))
+        }
+      >
+        <ToolIcon>
+          <ShapeIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+        </ToolIcon>
+      </SplitToolButton>
 
-      {/* 钢笔 / 画笔 — click activates last ink tool, hover to switch */}
+      {/* 钢笔 / 画笔 — one slot; hover to switch */}
       {!compact ? (
         <SplitToolButton
           tip={`${L.pen} / ${L.pencil}`}
@@ -1146,27 +1141,6 @@ function EditorToolStrip({
         </SplitToolButton>
       ) : null}
 
-      {/* 形状 — click draws current shape, hover to switch */}
-      <SplitToolButton
-        tip={L.shape}
-        active={shapeActive}
-        disabled={toolsLocked}
-        menuOpen={openMenu === 'shape'}
-        onMenuOpenChange={(open) => {
-          setOpenMenu(open ? 'shape' : null);
-        }}
-        items={shapeItems}
-        selectedKeys={[shapeKind]}
-        onMenuPick={pickShape}
-        onPrimaryClick={() =>
-          setShapeKind(resolveToolbarShapeKind(shapeKind))
-        }
-      >
-        <ToolIcon>
-          <ShapeIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
-        </ToolIcon>
-      </SplitToolButton>
-
       {/* 文字 */}
       <ToolBtn
         tip={toolTipWithShortcut(L.text, TOOL_SHORTCUT.text)}
@@ -1179,54 +1153,39 @@ function EditorToolStrip({
         </ToolIcon>
       </ToolBtn>
 
-      {chrome === 'flat' ? null : (
-        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden />
+      {/* 智能画板 — Kit artboard; toolbar appears on the frame after commit */}
+      {timelineOpen ? null : (
+        <ToolBtn
+          tip={toolTipWithShortcut(L.frame, TOOL_SHORTCUT.frame)}
+          active={frameActive}
+          disabled={toolsLocked}
+          onClick={() => {
+            if (warnIfNewPlateBlockedByAnimationWorkbenchFocus(message.warning, t, 'artboard')) {
+              return;
+            }
+            setActiveTool('frame');
+          }}
+        >
+          <ToolIcon className="h-3.5 w-3.5">
+            <LuFrame className="h-full w-full" strokeWidth={STROKE} />
+          </ToolIcon>
+        </ToolBtn>
       )}
 
-      {/* 油漆桶 — Live Paint; fill dock while active */}
-      {!compact ? (
+      {/* 动画工作台 — with create tools (before media divider) */}
+      {timelineOpen ? null : (
         <ToolBtn
-          tip={toolTipWithShortcut(L.bucket, TOOL_SHORTCUT.bucket)}
-          ariaLabel={L.bucket}
-          active={bucketActive}
+          tip={toolTipWithShortcut(L.animationBoard, TOOL_SHORTCUT.animationBoard)}
           disabled={toolsLocked}
-          onClick={() => setActiveTool('bucket')}
+          onClick={spawnAnimationBoardAtView}
         >
           <ToolIcon>
-            <LuPaintBucket className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
+            <AnimationOutlineIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
           </ToolIcon>
         </ToolBtn>
-      ) : null}
+      )}
 
-      {/* 吸管 — Kit eyedropper (Kit I) */}
-      {!compact ? (
-        <ToolBtn
-          tip={toolTipWithShortcut(L.eyedropper, TOOL_SHORTCUT.eyedropper)}
-          ariaLabel={L.eyedropper}
-          active={eyedropperActive}
-          disabled={toolsLocked}
-          onClick={() => setActiveTool('eyedropper')}
-        >
-          <ToolIcon>
-            <LuPipette className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
-          </ToolIcon>
-        </ToolBtn>
-      ) : null}
-
-      {/* 网格 — Kit mesh gradient tool (Kit U) */}
-      {!compact ? (
-        <ToolBtn
-          tip={toolTipWithShortcut(L.mesh, TOOL_SHORTCUT.mesh)}
-          ariaLabel={L.mesh}
-          active={meshActive}
-          disabled={toolsLocked}
-          onClick={() => setActiveTool('mesh')}
-        >
-          <ToolIcon>
-            <LuGrid3X3 className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
-          </ToolIcon>
-        </ToolBtn>
-      ) : null}
+      {/* Bucket / eyedropper / mesh — hidden for now (tools + hotkeys retired from rail). */}
 
       {chrome === 'flat' ? null : (
         <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden />
@@ -1243,19 +1202,6 @@ function EditorToolStrip({
             aria-hidden
           />
         ) : null}
-
-      {/* 动画工作台 — product plate (not in Kit rail; sits with media tools) */}
-      {timelineOpen ? null : (
-        <ToolBtn
-          tip={toolTipWithShortcut(L.animationBoard, TOOL_SHORTCUT.animationBoard)}
-          disabled={toolsLocked}
-          onClick={spawnAnimationBoardAtView}
-        >
-          <ToolIcon>
-            <AnimationOutlineIcon className={TOOL_ICON_CLASS} strokeWidth={STROKE} />
-          </ToolIcon>
-        </ToolBtn>
-      )}
 
       {/* 图片/视频上传 — hover opens panel (同形状工具) */}
       <SplitToolButton

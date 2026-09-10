@@ -34,7 +34,6 @@ import {
   previewShapeParamsToKit,
   scenePointToLocal,
   setOverlayHandleSeats,
-  vertexHandleParkScene,
 } from './shapeHandleChrome';
 
 const DRAG_DISTANCE_SQUARED = 16;
@@ -192,12 +191,10 @@ function StarShapeHandlesOverlay({
   const radius = dragValue != null && activeKey === 'radius' ? dragValue : baseR;
 
   const sites = starSites(w, h, sides, innerRatio);
-  // Seat knobs on the geometry like the reference: tip / valley / side tip,
-  // with only a knob-radius tuck (not the large rect-corner park distance).
-  const vertexPark = Math.max(2 / z, vertexHandleParkScene(z));
+  // Radius rides the fillet; at 0 all knobs sit on exact vertices (no tuck).
   const insetFor = (r: number) => {
-    const maxAlong = Math.max(vertexPark, maxR - 1);
-    return Math.max(vertexPark, Math.min(Math.max(0, Number(r) || 0), maxAlong));
+    const along = Math.max(0, Number(r) || 0);
+    return Math.min(along, Math.max(0, maxR - 1));
   };
 
   let radiusLocal = { x: w / 2, y: insetFor(radius) };
@@ -208,15 +205,15 @@ function StarShapeHandlesOverlay({
       x: sites.top.x + sites.top.ix * insetFor(radius),
       y: sites.top.y + sites.top.iy * insetFor(radius),
     };
-    // Inner-ratio sits on the valley tip (reference middle arrow).
+    // Inner-ratio sits on the valley tip.
     innerLocal = {
       x: sites.valley.x,
       y: sites.valley.y,
     };
-    // Vertex-count sits on the rightmost outer tip (reference right arrow).
+    // Vertex-count sits on the rightmost outer tip.
     sidesLocal = {
-      x: sites.tip.x + sites.tip.ix * vertexPark,
-      y: sites.tip.y + sites.tip.iy * vertexPark,
+      x: sites.tip.x,
+      y: sites.tip.y,
     };
   }
 
@@ -504,7 +501,7 @@ function StarShapeHandlesOverlay({
               key={knob.key}
               data-star-handle={knob.key}
               transform={`translate(${knob.lx} ${knob.ly})`}
-              style={{ pointerEvents: 'all' }}
+              style={{ pointerEvents: 'all', cursor: 'pointer' }}
               onPointerDown={knob.onDown}
             >
               <title>{knob.label}</title>

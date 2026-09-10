@@ -42,6 +42,38 @@ export function clearChildren(el: Element): void {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+export function setFill(el: Element, fill: string): void {
+  el.setAttribute('fill', fill);
+}
+
+export function setStroke(
+  el: Element,
+  stroke:
+    | 'none'
+    | {
+        color: string;
+        width: number;
+        linecap?: string;
+        linejoin?: string;
+        miterlimit?: number;
+        dasharray?: string;
+      }
+): void {
+  if (stroke === 'none') {
+    el.setAttribute('stroke', 'none');
+    el.removeAttribute('stroke-width');
+    return;
+  }
+  el.setAttribute('stroke', stroke.color);
+  el.setAttribute('stroke-width', String(stroke.width));
+  if (stroke.linecap) el.setAttribute('stroke-linecap', stroke.linecap);
+  if (stroke.linejoin) el.setAttribute('stroke-linejoin', stroke.linejoin);
+  if (stroke.miterlimit != null && Number.isFinite(stroke.miterlimit) && stroke.miterlimit > 0) {
+    el.setAttribute('stroke-miterlimit', String(stroke.miterlimit));
+  }
+  if (stroke.dasharray) el.setAttribute('stroke-dasharray', stroke.dasharray);
+}
+
 export function ensureDefs(svg: SVGSVGElement): SVGDefsElement {
   let defs = svg.querySelector(':scope > defs') as SVGDefsElement | null;
   if (!defs) {

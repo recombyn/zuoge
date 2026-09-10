@@ -310,7 +310,17 @@ function isTransientNodePatch(patch: unknown): boolean {
 }
 
 const GEOMETRY_NODE_KEYS = new Set(['x', 'y', 'width', 'height', 'attrs']);
-const GEOMETRY_ATTR_KEYS = new Set(['angle', 'flipX', 'flipY']);
+/** Attrs allowed alongside size without forcing a full Kit style reconcile-only path. */
+const GEOMETRY_ATTR_KEYS = new Set([
+  'angle',
+  'flipX',
+  'flipY',
+  // Aspect-preset toolbar writes these with W/H — must still push Kit geom.
+  'lockAspect',
+  'aspect-original-width',
+  'aspect-original-height',
+  'shapeType',
+]);
 
 /**
  * Pure geometry / transform commit — Kit TransformPreview + DomHost noop only.
@@ -874,6 +884,66 @@ function clearLottiePrecompEdit(state: typeof initialState): boolean {
   return changed;
 }
 
+/**
+ * Full Keyframes / timeline teardown (panel + module focus + playhead + camera).
+ * Must run whenever the dock's host or workbench plate is deleted — a bare
+ * `lottieTimelinePanel = null` leaves focus set and the floating strip orphaned.
+ */
+function closeLottieTimelinePanelState(state: typeof initialState) {
+  if (clearLottiePrecompEdit(state)) state.dirty = true;
+  state.lottieTimelinePanel = null;
+  state.lottiePlaying = false;
+  state.lottiePlayingHostId = null;
+  state.lottiePlayheadSec = 0;
+  writeAnimationPlayheadSec(0);
+  setAnimationWorkbenchTimelineFocus(null);
+  setAnimationWorkbenchPlayheadSec(0);
+  requestTimelineCameraRelease();
+  if (state.document && state.selectedNodeIds?.length) {
+    const kept = state.selectedNodeIds.filter(
+      (nid) =>
+        !isAnimationWorkbenchPreviewChild(
+          state.document,
+          state.document?.deltaSetLike?.[nid]
+        )
+    );
+    if (kept.length !== state.selectedNodeIds.length) {
+      state.selectedNodeIds = kept;
+      state.selectedNodeId = kept[0] || null;
+    }
+  }
+}
+
+/**
+ * Close the timeline when its host / focused workbench was removed.
+ * Kit flush deletes mapped nodes before artboards — the panel host may already
+ * be gone from the document when {@link removeArtboardFrames} runs.
+ */
+function maybeCloseLottieTimelineAfterRemoval(
+  state: typeof initialState,
+  removedNodeIds: Set<string>,
+  removedFrameIds: Set<string>
+) {
+  const panelId = String(state.lottieTimelinePanel?.nodeId || '').trim();
+  const focus = String(getAnimationWorkbenchTimelineFocus() || '').trim();
+  if (!panelId && !focus) return;
+
+  let close = false;
+  if (panelId && removedNodeIds.has(panelId)) close = true;
+  if (focus && removedFrameIds.has(focus)) close = true;
+  if (panelId) {
+    const host = state.document?.deltaSetLike?.[panelId];
+    if (!host) {
+      // Host already deleted earlier in the same Kit flush (or orphaned).
+      close = true;
+    } else {
+      const fid = String(host.attrs?.frameId || '').trim();
+      if (fid && removedFrameIds.has(fid)) close = true;
+    }
+  }
+  if (close) closeLottieTimelinePanelState(state);
+}
+
 /** Drop pending process id when its node was deleted (upload-in-flight must not revive it). */
 function clearPendingProcessIfNodeGone(state: typeof initialState) {
   const pending = state.pendingImageProcessId;
@@ -1292,6 +1362,29 @@ export const editorReducers = {
         state.pendingImportPlaceholderId = null;
       }
       clearPendingProcessIfNodeGone(state);
+
+      // Keyframes dock / floating strip — host or workbench plate deleted.
+      maybeCloseLottieTimelineAfterRemoval(state, gone, frameIdSet);
+      if (state.lottieComposePanel && gone.has(state.lottieComposePanel.nodeId)) {
+        state.lottieComposePanel = null;
+      }
+      if (state.animationFramePanel && frameIdSet.has(state.animationFramePanel.frameId)) {
+        state.animationFramePanel = null;
+      }
+      // Drop stale frame selection pointing at removed plates.
+      if (state.document) {
+        const live = new Set(
+          (Array.isArray(state.document.frames) ? state.document.frames : [])
+            .map((f) => String(f?.id || ''))
+            .filter(Boolean)
+        );
+        state.selectedFrameIds = (state.selectedFrameIds || []).filter((id) =>
+          live.has(id)
+        );
+        if (!state.selectedFrameIds.length && state.frameChromeMode === 'full') {
+          state.frameChromeMode = 'soft';
+        }
+      }
 
       state.dirty = true;
       // Surgical paint: deleted hosts unmount via id cull; do not remount every
@@ -1839,10 +1932,8 @@ export const editorReducers = {
       if (state.lottieComposePanel && nodeIdSet.has(state.lottieComposePanel.nodeId)) {
         state.lottieComposePanel = null;
       }
-      if (state.lottieTimelinePanel && nodeIdSet.has(state.lottieTimelinePanel.nodeId)) {
-        state.lottieTimelinePanel = null;
-        clearLottiePrecompEdit(state);
-      }
+      // Kit flush often removes hosts first — panel host may already be gone.
+      maybeCloseLottieTimelineAfterRemoval(state, nodeIdSet, idSet);
       if (state.animationFramePanel && idSet.has(state.animationFramePanel.frameId)) {
         state.animationFramePanel = null;
       }
@@ -1851,6 +1942,21 @@ export const editorReducers = {
         nodeIdSet.has(state.pendingImportPlaceholderId)
       ) {
         state.pendingImportPlaceholderId = null;
+      }
+      // Stale selectedFrameIds / full chrome leave the Keyframes floating strip
+      // docked to the last Kit AABB after the plate is gone.
+      {
+        const live = new Set(
+          (Array.isArray(next.frames) ? next.frames : [])
+            .map((f) => String(f?.id || ''))
+            .filter(Boolean)
+        );
+        state.selectedFrameIds = (state.selectedFrameIds || []).filter((id) =>
+          live.has(id)
+        );
+        if (!state.selectedFrameIds.length) {
+          state.frameChromeMode = 'soft';
+        }
       }
       if (ephemeralIds.length) scrubNodeIdsFromHistory(state, ephemeralIds);
       state.document = next;
@@ -3606,30 +3712,7 @@ export const editorReducers = {
       requestTimelineCameraFit({ afterPaint: true });
     },
     closeLottieTimelinePanel(state) {
-      if (clearLottiePrecompEdit(state)) state.dirty = true;
-      state.lottieTimelinePanel = null;
-      state.lottiePlaying = false;
-      state.lottiePlayingHostId = null;
-      // Exit at first frame so the canvas isn't left mid-scrub.
-      state.lottiePlayheadSec = 0;
-      writeAnimationPlayheadSec(0);
-      setAnimationWorkbenchTimelineFocus(null);
-      setAnimationWorkbenchPlayheadSec(0);
-      requestTimelineCameraRelease();
-      // Preview mode: inner elements are not selectable — clear child picks.
-      if (state.document && state.selectedNodeIds?.length) {
-        const kept = state.selectedNodeIds.filter(
-          (nid) =>
-            !isAnimationWorkbenchPreviewChild(
-              state.document,
-              state.document?.deltaSetLike?.[nid]
-            )
-        );
-        if (kept.length !== state.selectedNodeIds.length) {
-          state.selectedNodeIds = kept;
-          state.selectedNodeId = kept[0] || null;
-        }
-      }
+      closeLottieTimelinePanelState(state);
     },
     enterLottiePrecompEdit(state, action) {
       const hostNodeId = String(action.payload?.hostNodeId || '').trim();

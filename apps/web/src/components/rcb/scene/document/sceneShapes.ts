@@ -14,9 +14,13 @@ export const MAX_STAR_INNER_RATIO = 0.92;
 export const DEFAULT_ELLIPSE_INNER_RATIO = 0;
 export const MIN_ELLIPSE_INNER_RATIO = 0;
 export const MAX_ELLIPSE_INNER_RATIO = 0.92;
-/** Circle / ellipse remaining sweep as % of full turn (閻庢鍟崘顭戝敽 / 闂佸憡绋忛崝灞炬叏椤掍焦鍎?. Signed. */
+/** Circle / ellipse remaining sweep as % of full turn (弧度 / 周弧度). Signed. */
 export const DEFAULT_ELLIPSE_ARC_PERCENT = 100;
-export const MIN_ELLIPSE_ARC_PERCENT = 0;
+/**
+ * Minimum |arc| — 0% collapses to a degenerate spike (triangle mess).
+ * Keep a tiny wedge so geometry + knobs stay stable.
+ */
+export const MIN_ELLIPSE_ARC_PERCENT = 0.5;
 export const MAX_ELLIPSE_ARC_PERCENT = 100;
 /**
  * Snap inner hole 闂?solid disk when ratio is within this.
@@ -26,10 +30,10 @@ export const ELLIPSE_INNER_SNAP_SOLID = 0.12;
 /** Also snap closed when the pointer is within this many screen px of the center. */
 export const ELLIPSE_INNER_SNAP_SOLID_PX = 18;
 /**
- * Fixed cut-end 闂佺偨鍎茬划宀€妲愰幋鐐村弿閻庯絺鏅濈粔瀵哥磽閸愭儳鏋撻柍?in atan2 degrees (0 = east, 90 = south).
- * Start knob does not drag; arc end must not cross past this ray.
+ * Fixed cut-end / 开始位置 in atan2 degrees (0 = east/right, 90 = south).
+ * Arc always opens clockwise from the right toward the left (bottom path).
  */
-export const DEFAULT_ELLIPSE_START_DEG = 90;
+export const DEFAULT_ELLIPSE_START_DEG = 0;
 
 export function clampEllipseInnerRatio(
   n: unknown,
@@ -41,8 +45,9 @@ export function clampEllipseInnerRatio(
 }
 
 /**
- * Signed arc percent in [闂?00, 闂?.5] 闂?[0.5, 100].
- * |value| = remaining sweep from 閻庢鍠掗崑鎾斥攽椤旂⒈鍎庣紓宥呮噽缁? sign = sweep direction.
+ * Signed arc percent in [−100, −0.5] ∪ [0.5, 100].
+ * |value| = remaining sweep from 开始位置; sign = sweep direction.
+ * Never 0 — PathBuilder degenerates into a spike at 0%.
  */
 export function clampEllipseArcPercent(
   n: unknown,
@@ -142,33 +147,35 @@ export function ellipseInnerRatioFromAttrs(
   );
 }
 
-/** Read ellipse arc sweep percent (100 = full / 闂佸憡绋忛崝灞炬叏椤掍焦鍎?. */
+/**
+ * Read ellipse arc sweep percent (100 = full).
+ * Always positive: clockwise from the right (legacy negative openings are normalized).
+ */
 export function ellipseArcPercentFromAttrs(
   attrs: Record<string, unknown> | null | undefined
 ): number {
-  return clampEllipseArcPercent(
+  const pct = clampEllipseArcPercent(
     attrs?.ellipseArcPercent ?? attrs?.circleArcPercent ?? attrs?.['arc-percent'],
     DEFAULT_ELLIPSE_ARC_PERCENT
   );
+  return clampEllipseArcPercent(Math.abs(pct));
 }
 
-/** Read fixed 閻庢鍠掗崑鎾斥攽椤旂⒈鍎庣紓宥呮噽缁?degrees. */
+/**
+ * Fixed cut start in atan2 degrees — always east/right.
+ * Stored `ellipseStartDeg` is ignored so openings never flip left/right.
+ */
 export function ellipseStartDegFromAttrs(
-  attrs: Record<string, unknown> | null | undefined
+  _attrs?: Record<string, unknown> | null
 ): number {
-  return clampEllipseStartDeg(
-    attrs?.ellipseStartDeg ?? attrs?.circleStartDeg ?? attrs?.['start-deg'],
-    DEFAULT_ELLIPSE_START_DEG
-  );
+  return DEFAULT_ELLIPSE_START_DEG;
 }
 
 /**
  * Advance an arc from the pointer's incremental angular movement.
  *
- * An absolute pointer angle has two valid representations around the start
- * ray (a tiny arc and an almost-full arc), which made the opening jump sides.
- * Accumulating movement keeps one sweep direction for a whole drag and clamps
- * it to exactly one turn: once closed, further movement cannot wrap it open.
+ * Prefer {@link ellipseArcPercentFromPointerAngle} for handle drags (1:1 follow).
+ * This accumulator remains for tests / callers that need clamped delta motion.
  */
 export function advanceEllipseArcAlong(
   previousAlong: number,
@@ -177,6 +184,42 @@ export function advanceEllipseArcAlong(
 ): number {
   const next = previousAlong + wrapAngleDelta(pointerAngleDelta) * sweepSign;
   return Math.min(TWO_PI, Math.max(minEllipseArcAlong(), next));
+}
+
+/**
+ * Arc % from pointer angle around the ellipse center — tracks the mouse 1:1.
+ * Always clockwise from the fixed start ray (right → bottom → left in y-down).
+ *
+ * Pass the ellipse **parametric** angle (`atan2(dy/ry, dx/rx)`), not raw cartesian
+ * atan2, so the cut end stays under the cursor on eccentric ovals.
+ */
+export function ellipseArcPercentFromPointerAngle(
+  pointerAngle: number,
+  startDeg: number = DEFAULT_ELLIPSE_START_DEG
+): number {
+  const startRad = (clampEllipseStartDeg(startDeg) * Math.PI) / 180;
+  let along = pointerAngle - startRad;
+  along = ((along % TWO_PI) + TWO_PI) % TWO_PI;
+  if (along < minEllipseArcAlong()) along = minEllipseArcAlong();
+  if (along > TWO_PI - 1e-4) along = TWO_PI;
+  return ellipseArcPercentFromAlongRad(along, 1);
+}
+
+/**
+ * Parametric angle on an axis-aligned ellipse — matches PathBuilder `cos(t)/sin(t)`.
+ */
+export function ellipseParametricAngle(
+  localX: number,
+  localY: number,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number
+): number {
+  return Math.atan2(
+    (localY - cy) / Math.max(1e-6, ry),
+    (localX - cx) / Math.max(1e-6, rx)
+  );
 }
 
 /** Fixed arrowhead length in local (pre-rotation) units. */

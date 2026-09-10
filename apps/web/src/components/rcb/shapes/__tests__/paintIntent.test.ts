@@ -14,11 +14,7 @@ describe('paintIntent', () => {
       height: 400,
       attrs: { src: 'https://example.com/a.png' },
     } as any);
-    const intent = resolvePaintIntent(doc, 'img', doc.deltaSetLike!.img, {
-      zoom: 8,
-      dpr: 1,
-    });
-    expect(intent.kind).toBe('kit');
+    expect(resolvePaintIntent(doc, 'img', doc.deltaSetLike!.img).kind).toBe('kit');
   });
 
   it('routes plate-bound vector raise to Kit (no SVG dual paint)', () => {
@@ -46,13 +42,9 @@ describe('paintIntent', () => {
         },
       ],
     };
-    const intent = resolvePaintIntent(doc, 'r', doc.deltaSetLike!.r, {
-      zoom: 1,
-      dpr: 1,
-      raised: true,
-      forceFull: true,
-    });
-    expect(intent.kind).toBe('kit');
+    expect(
+      resolvePaintIntent(doc, 'r', doc.deltaSetLike!.r, { forceFull: true }).kind
+    ).toBe('kit');
   });
 
   it('routes active video FO shell to DomHost (HTML decoder only)', () => {
@@ -66,19 +58,14 @@ describe('paintIntent', () => {
       height: 180,
       attrs: { src: 'https://example.com/a.mp4', poster: 'https://example.com/p.png' },
     } as any);
-    expect(
-      resolvePaintIntent(doc, 'v', doc.deltaSetLike!.v, { zoom: 1, dpr: 1 }).kind
-    ).toBe('kit');
-    expect(
-      resolvePaintIntent(doc, 'v', doc.deltaSetLike!.v, {
-        zoom: 1,
-        dpr: 1,
-        forceFull: true,
-      })
-    ).toEqual({ kind: 'dom-host', reason: 'html-media-fo' });
+    expect(resolvePaintIntent(doc, 'v', doc.deltaSetLike!.v).kind).toBe('kit');
+    expect(resolvePaintIntent(doc, 'v', doc.deltaSetLike!.v, { forceFull: true })).toEqual({
+      kind: 'dom-host',
+      reason: 'html-media-fo',
+    });
   });
 
-  it('keeps SoftGlow / raise on Kit (no SVG dual paint)', () => {
+  it('routes SoftGlow process plates to Kit (upload / 图片分层 / …)', () => {
     let doc = createEmptyDocument();
     doc = addNodeToDocument(doc, 'img', {
       id: 'img',
@@ -90,13 +77,8 @@ describe('paintIntent', () => {
       attrs: { src: 'https://example.com/a.png', processStatus: 'running' },
     } as any);
     expect(
-      resolvePaintIntent(doc, 'img', doc.deltaSetLike!.img, {
-        zoom: 1,
-        dpr: 1,
-        forceFull: true,
-        raised: true,
-      }).kind
-    ).toBe('kit');
+      resolvePaintIntent(doc, 'img', doc.deltaSetLike!.img, { forceFull: true })
+    ).toEqual({ kind: 'kit' });
   });
 
   it('routes lottie and group to DomHost', () => {

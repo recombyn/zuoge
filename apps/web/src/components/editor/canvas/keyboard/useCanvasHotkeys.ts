@@ -272,9 +272,14 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
           }
           const ids = selectedIdsRef.current;
           const frameIds = selectedFrameIdsRef.current;
-          const useKitClip = selectionUsesKitClipboard(documentRef.current, ids);
+          // Artboard-only: Kit Ctrl+X only cuts node selection (not selectedArtboardId).
+          // Route frame clipboard / duplicate through RCB.
+          const artboardOnly =
+            !ids.length && (frameIds.length > 0 || Boolean(activeFrameIdRef.current));
+          const useKitClip =
+            !artboardOnly && selectionUsesKitClipboard(documentRef.current, ids);
           if (!useKitClip) {
-            // DomHost-only (or mixed with DomHost): RCB clipboard for those ids.
+            // DomHost-only, mixed DomHost, or artboard-only: RCB clipboard.
             if (k === 'c') {
               if (!ids.length && !frameIds.length && !activeFrameIdRef.current) return;
               if (selectionBusy()) return;

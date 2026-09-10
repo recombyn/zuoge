@@ -9,6 +9,7 @@ import { syncStackPaintOrder } from '@/components/rcb/scene/document/sceneStackP
 import {
   createDomHostBoard,
   mountDomHostAnchor,
+  nodeNeedsHtmlMediaMount,
   syncHtmlMediaMountGeometry,
 } from '@/components/rcb/scene/dom/domHostShell';
 import { isEmptyGeneratorPlate } from '@/components/rcb/scene/document/nodeCapabilities';
@@ -270,6 +271,11 @@ function RcbShapeHost({
       return undefined;
     }
 
+    // Kit paints SoftGlow in node local space — host is pill-only (no SVG plate).
+    if (n && String(n.attrs?.processStatus || '') === 'running' && !nodeNeedsHtmlMediaMount(n)) {
+      return undefined;
+    }
+
     const { root, layer, hostLayer, shared } = createDomHostBoard(host, 1, 1, {
       infinite: true,
       sharedRoot,
@@ -401,7 +407,7 @@ function RcbShapeHost({
         opacity: 1,
       }}
     >
-      {processing && paintEl && node ? (
+      {processing && node ? (
         <NodeProcessGlow nodeId={nodeId} node={node} paintHost={paintEl} />
       ) : null}
     </div>

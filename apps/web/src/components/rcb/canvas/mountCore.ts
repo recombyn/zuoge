@@ -10,7 +10,13 @@ import { store } from '@/store';
 import { setActiveTool as setEditorActiveTool } from '@/store/modules/editor';
 import { KIT_CHROME_MINIMAL } from './kitChromeMinimal';
 import { ensureKitAppTextFonts } from './kitTextFonts';
-import { BUCKET_CURSOR, PENCIL_CURSOR, PEN_CURSOR } from './toolMap';
+import {
+  BUCKET_CURSOR,
+  isPersistentDrawSessionTool,
+  PENCIL_CURSOR,
+  PEN_CURSOR,
+  PERSISTENT_DRAW_TOOLS,
+} from './toolMap';
 
 /**
  * Engine::new seeds "Artwork 1". Strip it WITHOUT WasmScene.removeArtboard
@@ -143,12 +149,8 @@ function muteKitPanelDom(ui: UIEngine) {
   ui.updateLayerSelection = () => undefined;
   ui.refreshArtboardPanel = () => undefined;
   ui.clearPropertyPanel = () => undefined;
-  const origSync = ui.syncWithSelection.bind(ui);
   ui.syncWithSelection = (opts: { interactive?: boolean; gesture?: boolean } = {}) => {
-    // Keep engine selection side-effects that Kit tools need; skip DOM writes
-    // by temporarily swapping panel methods (already no-op) and short-circuiting
-    // the heavy path via a thin reimplementation.
-    void origSync;
+    // Keep engine selection side-effects that Kit tools need; skip DOM panel writes.
     const gesture = opts.gesture === true;
     ui.scene.renderer?.requestRender();
     ui.gradientEdit.syncSelection();
@@ -206,12 +208,12 @@ export async function createCanvasEngine(
   // CJK text paint: register Alibaba PuHuiTi aliases before any text tool use.
   await ensureKitAppTextFonts();
 
-  // Idle artboard hairline → SVG edge (HtmlArtboardFrame). Kit still owns
-  // fill, selected blue ring, resize handles, and the name+size label.
-  // - Artboard fill / selected border / label hit / resize handles → Kit
-  //   including 动画工作台 (same artboard chrome — no HTML title fork)
+  // Idle artboard hairline → Kit drawArtboards (dadaki). Kit still owns
+  // fill, idle/selected border, resize handles, and the name+size label.
+  // - Soft (non-selected) highlight edge may still use SVG when needed
   // - Stage theme background → RCB
-  // - Vectors, text, static images, SoftGlow (DropShadow), selection, grid → Kit
+  // - Vectors, text, static images, selection, grid → Kit
+  // - SoftGlow process bloom → Kit overlay (processPlateKit, node local space)
   // - DomHost only for lottie/group + active video/audio HTML FO shells (no SVG ink)
   // Pixel grid: Kit renderer draws 1wu lattice only at ≥1000% zoom.
   // snap.gridSize only controls snap-to-grid — never gates the draw.
@@ -232,6 +234,7 @@ export async function createCanvasEngine(
   const anyAbRenderer = renderer as unknown as {
     zoom: number;
     selectedArtboardId: number | null;
+    softArtboardId: number | null;
     scene: { getArtboards: () => KitArtboard[] };
     ensureOverlayPaints: () => {
       artboardFill: {
@@ -242,7 +245,10 @@ export async function createCanvasEngine(
         setStrokeWidth: (w: number) => void;
         setAntiAlias: (v: boolean) => void;
       };
-      artboardStroke: unknown;
+      artboardStroke: {
+        setStrokeWidth: (w: number) => void;
+        setAntiAlias: (v: boolean) => void;
+      };
     };
     drawArtboards: (canvas: KitLabelCanvas) => void;
     drawArtboardLabel: (canvas: KitLabelCanvas, ab: KitArtboard, selected: boolean) => void;
@@ -316,13 +322,22 @@ export async function createCanvasEngine(
     return hit;
   };
 
-  // Inset Kit white fill under the SVG hairline so canvas/Kit subpixel skew
-  // cannot show a white fringe outside the gray edge (right/bottom bleed).
+  // Artboard chrome — Kit owns idle / soft / full plate stroke (same AABB).
+  // Soft focus recolors the plate stroke blue (generator-parent style) — never
+  // a second SVG edge that can drift from the Kit hairline.
+  // Multi-frame full chrome: member plates stay accent-outlined; handles sit on
+  // the union AABB (same as FrameMultiSelectionToolbar dock).
   anyAbRenderer.drawArtboards = (canvas) => {
     const op = anyAbRenderer.ensureOverlayPaints();
     const zoom = Math.max(0.05, Number(anyAbRenderer.zoom) || 1);
-    const fillInset = 1 / zoom;
-    for (const ab of anyAbRenderer.scene.getArtboards()) {
+    const multiIds = (
+      (anyAbRenderer as { rcbSelectedArtboardKitIds?: number[] }).rcbSelectedArtboardKitIds || []
+    ).filter((id) => Number.isFinite(id));
+    const multiSet = new Set(multiIds);
+    const multiSelect = multiSet.size > 1;
+    const artboards = anyAbRenderer.scene.getArtboards();
+
+    for (const ab of artboards) {
       const bg = ab.background;
       op.artboardFill.setColor(
         canvasKit.Color(
@@ -333,32 +348,55 @@ export async function createCanvasEngine(
         )
       );
       op.artboardFill.setAntiAlias?.(false);
-      const fi = Math.min(fillInset, Math.max(0, ab.w / 4), Math.max(0, ab.h / 4));
       canvas.drawRect(
-        canvasKit.LTRBRect(ab.x + fi, ab.y + fi, ab.x + ab.w - fi, ab.y + ab.h - fi),
+        canvasKit.LTRBRect(ab.x, ab.y, ab.x + ab.w, ab.y + ab.h),
         op.artboardFill
       );
 
-      const selected = ab.id === anyAbRenderer.selectedArtboardId;
-      if (selected) {
-        const border = op.selOutline;
-        const sw = 1 / zoom;
-        border.setStrokeWidth(sw);
-        border.setAntiAlias(false);
-        const inset = sw / 2;
-        canvas.drawRect(
-          canvasKit.LTRBRect(
-            ab.x + inset,
-            ab.y + inset,
-            ab.x + ab.w - inset,
-            ab.y + ab.h - inset
-          ),
-          border
-        );
+      const soleSelected = !multiSelect && ab.id === anyAbRenderer.selectedArtboardId;
+      const multiMember = multiSelect && multiSet.has(ab.id);
+      const selected = soleSelected || multiMember;
+      const soft =
+        !selected && ab.id === anyAbRenderer.softArtboardId;
+      const border = selected || soft ? op.selOutline : op.artboardStroke;
+      border.setStrokeWidth(1 / zoom);
+      border.setAntiAlias(true);
+      canvas.drawRect(
+        canvasKit.LTRBRect(ab.x, ab.y, ab.x + ab.w, ab.y + ab.h),
+        border
+      );
+
+      anyAbRenderer.drawArtboardLabel(canvas, ab, selected || soft);
+      // Per-plate handles only for sole full chrome — multi uses the union box.
+      if (soleSelected) anyAbRenderer.drawArtboardHandles(canvas, ab);
+    }
+
+    if (multiSelect) {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const ab of artboards) {
+        if (!multiSet.has(ab.id)) continue;
+        minX = Math.min(minX, ab.x);
+        minY = Math.min(minY, ab.y);
+        maxX = Math.max(maxX, ab.x + ab.w);
+        maxY = Math.max(maxY, ab.y + ab.h);
       }
-      // Idle gray hairline stays on SVG (`data-rcb-artboard-edge`).
-      anyAbRenderer.drawArtboardLabel(canvas, ab, selected);
-      if (selected) anyAbRenderer.drawArtboardHandles(canvas, ab);
+      if (maxX > minX && maxY > minY) {
+        op.selOutline.setStrokeWidth(1 / zoom);
+        op.selOutline.setAntiAlias(true);
+        canvas.drawRect(canvasKit.LTRBRect(minX, minY, maxX, maxY), op.selOutline);
+        anyAbRenderer.drawArtboardHandles(canvas, {
+          id: -1,
+          name: '',
+          x: minX,
+          y: minY,
+          w: maxX - minX,
+          h: maxY - minY,
+          background: { r: 1, g: 1, b: 1, a: 1 },
+        });
+      }
     }
   };
 
@@ -421,11 +459,11 @@ export async function createCanvasEngine(
         op?.selOutline?.setAntiAlias?.(true);
         op?.selHandleStroke?.setColor(accent);
         op?.hoverOutline?.setColor(canvasKit.Color(0, 162, 255, 0.55));
-        // Idle artboard hairline is SVG (`data-rcb-artboard-edge`) so resize /
-        // zoom keep a stable screen-constant stroke. Kit only draws the
-        // selected accent ring (selOutline) — keep idle stroke invisible.
-        op?.artboardStroke?.setColor(canvasKit.Color(0, 0, 0, 0));
-        op?.artboardStroke?.setAntiAlias?.(false);
+        // Dadaki idle plate hairline — Kit owns it (see drawArtboards).
+        // Keep AA on (same as node Rect selection) — AA-off strokeRect drops
+        // top/left edges after fractional zoom. Light cool gray (not near-black).
+        op?.artboardStroke?.setColor(canvasKit.Color(197, 201, 210, 1));
+        op?.artboardStroke?.setAntiAlias?.(true);
       } catch {
         /* ignore */
       }
@@ -434,8 +472,7 @@ export async function createCanvasEngine(
   }
 
   // RCB toolbar picks the tool; Kit maybeRevertTool one-shots back to
-  // selection after create unless the user double-click-locks (lock=true).
-  // Do not force toolLocked=true — that disabled Kit's Figma-style revert.
+  // selection after create unless toolLocked (pen/pencil via setTool lock=true).
   ui.toolLocked = false;
 
   // Product SVG cursors (not bare crosshair) for pen / pencil / bucket.
@@ -477,6 +514,8 @@ export async function createCanvasEngine(
     // Don't steal pan / path-edit (direct) chrome — only unwind create tools.
     if (cur === 'select' || cur === 'selection' || cur === 'scale' || cur === 'pan') return;
     if (cur === 'direct') return;
+    // Pen/pencil lock=true — maybeRevertTool must not flip the product toolbar.
+    if (isPersistentDrawSessionTool(cur) && ui.toolLocked) return;
     setEditorActiveTool('select');
   };
 
@@ -578,8 +617,10 @@ export async function createCanvasEngine(
     input,
     ui,
     setTool: (toolId: string) => {
-      // lock=false: Kit one-shot revert after create (maybeRevertTool).
-      ui.setActiveTool(toolId, false);
+      // Pen/pencil lock until 退出编辑 — maybeRevertTool must not one-shot back
+      // to selection. Other create tools stay lock=false (Figma one-shot).
+      const lock = PERSISTENT_DRAW_TOOLS.has(toolId);
+      ui.setActiveTool(toolId, lock);
       // Tool chrome must not reintroduce per-tool palette colors — re-assert
       // the single product create style after every tool switch.
       if (createStyleJson) ui.setCurrentStyle(createStyleJson);
@@ -691,7 +732,7 @@ export async function loadCanvasKit(): Promise<CanvasKit> {
   };
 
   try {
-    const CanvasKitInit = (await import('canvaskit-wasm')).default;
+  const CanvasKitInit = (await import('canvaskit-wasm')).default;
     return await CanvasKitInit({ locateFile });
   } catch (npmErr) {
     console.warn('[rcb/canvas] canvaskit-wasm import failed, trying /canvaskit.js', npmErr);

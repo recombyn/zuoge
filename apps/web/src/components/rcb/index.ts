@@ -135,7 +135,6 @@ export { hitTestRcbIdFromKit } from './canvas/kitBridge';
 export {
   enterKitPathEditForRcbId,
   exitKitPathEdit,
-  isKitPathEditing,
   kitRcbIdBeingPathEdited,
   placeKitImageFromUrl,
   syncKitLivePaintFromBucketFill,

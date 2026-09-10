@@ -1,4 +1,4 @@
-/** Artboard: Kit paints fill / selected ring; SVG edge owns idle hairline. */
+/** Artboard: Kit paints fill / idle / soft / selected stroke; SoftGlow when generating. */
 import {
   useEffect,
   useLayoutEffect,
@@ -25,9 +25,18 @@ import {
 import NodeTitleLabel from '../selection/chrome/NodeTitleLabel';
 import { ProcessGlowShell } from '@/components/rcb/process/ProcessGlowShell';
 import {
+  appendProcessPlatePaths,
+  syncProcessPlateGeometry,
+} from '@/components/rcb/process/processPlateSvg';
+import { roundedRectPath } from '@/components/rcb/scene/document/sceneRadii';
+import {
+  FRAME_HIGHLIGHT_STROKE,
+  FRAME_PLATE_STROKE,
   applyArtboardPlateEdgeStroke,
+  framePlateStrokeSceneWidth,
   type ArtboardFrame,
 } from '@/components/rcb/frames/types';
+import { isKitBridgeAttached } from '@/components/rcb/canvas/kitBridge';
 
 /**
  * Clear plate stroke only when selection chrome owns the outline.
@@ -207,7 +216,14 @@ export function previewArtboardFrameGeometry(
   host.__sceneTop = y;
   host.sceneWidth = width;
   host.sceneHeight = height;
-  // Kit paints artboard fill / selected ring / process glow.
+  if (el.getAttribute('data-rcb-process-plate') === '1') {
+    syncProcessPlateGeometry(
+      el,
+      roundedRectPath(width, height, { tl: 0, tr: 0, br: 0, bl: 0 })
+    );
+    return true;
+  }
+  // Kit paints artboard fill / selected ring.
   // Idle hairline: SVG edge tracks resize via previewArtboardFrameGeometry.
   const plate = el.querySelector<SVGRectElement>(
     'rect[data-rcb-artboard-edge="1"], rect[data-baseline="1"]'
@@ -259,24 +275,43 @@ function paintFramePlate(
   g.sceneWidth = w;
   g.sceneHeight = h;
 
-  // Kit paints artboard fill / selection border / process glow.
-  // Idle plate hairline lives on SVG (`data-rcb-artboard-edge`) so resize /
-  // zoom cannot drop a Kit 1/zoom stroke that had nowhere to update.
+  // Kit paints SoftGlow + plate chrome when generating (drawProcessingPlates).
+  if (generating && isKitBridgeAttached()) {
+    return g;
+  }
+
+  const root = layer.ownerSVGElement;
+  if (generating && root) {
+    const stroke = selected
+      ? undefined
+      : {
+          color: highlighted ? FRAME_HIGHLIGHT_STROKE : FRAME_PLATE_STROKE,
+          width: framePlateStrokeSceneWidth(zoom),
+        };
+    const clipD = roundedRectPath(w, h, { tl: 0, tr: 0, br: 0, bl: 0 });
+    appendProcessPlatePaths(g, root, frame.id, clipD, w, h, stroke);
+    return g;
+  }
+
+  // Kit paints artboard fill / idle gray / selected+soft blue (dadaki drawArtboards).
+  // When Kit is attached, never paint an SVG soft edge — it drifts from Kit's
+  // plate stroke (same geometry must be recolored in drawArtboards instead).
   const edge = svgEl('rect') as SVGRectElement;
   setAttrs(edge, {
     fill: 'none',
     'data-rcb-artboard-edge': '1',
     'pointer-events': 'none',
   });
+  const kitOwnsIdleEdge = isKitBridgeAttached();
   applyArtboardPlateEdgeStroke(edge, {
-    selected,
-    highlighted,
+    // Kit owns all plate strokes — suppress SVG edge entirely.
+    selected: selected || kitOwnsIdleEdge,
+    highlighted: kitOwnsIdleEdge ? false : highlighted && !selected,
     zoom,
     width: w,
     height: h,
   });
   append(g, edge);
-  void generating;
   return g;
 }
 

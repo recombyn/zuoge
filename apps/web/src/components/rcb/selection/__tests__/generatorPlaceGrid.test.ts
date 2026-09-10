@@ -70,22 +70,20 @@ describe('generator plate place size + grid', () => {
     const box = 18;
     const icon = generatorEmptyIconSize(box, box);
     const oldFloor = Math.max(72, box * 0.34);
-    // eslint-disable-next-line no-console
-    console.log('[test:gen-icon@small]', { box, icon, oldFloor });
     expect(icon).toBeLessThan(box);
-    expect(icon).toBeCloseTo(box * 0.28, 6);
+    expect(icon).toBeCloseTo(box * 0.42, 6);
     expect(oldFloor).toBeGreaterThan(box);
   });
 
-  it('caps empty-gen Lucide size so large plates keep title-like stroke weight', () => {
-    // 360×0.28 = 100.8 would stroke at ~8 CSS px — too dark / chunky.
-    expect(generatorEmptyIconSize(360, 360, 1)).toBeCloseTo(48, 5);
-    expect(generatorEmptyIconSize(360, 360, 2)).toBeCloseTo(24, 5);
+  it('caps empty-gen icon size on large plates', () => {
+    // 360×0.42 = 151.2 — screen-cap keeps CSS size readable.
+    expect(generatorEmptyIconSize(360, 360, 1)).toBeCloseTo(88, 5);
+    expect(generatorEmptyIconSize(360, 360, 2)).toBeCloseTo(44, 5);
   });
 
   it('tiny high-zoom plates (5×5) still paint a visible glyph', () => {
     const icon = generatorEmptyIconSize(5, 5);
-    expect(icon).toBeCloseTo(1.4, 5);
+    expect(icon).toBeCloseTo(2.1, 5);
     // Old `icon >= 4` skipped this — plate looks empty when zoomed in.
     expect(icon < 4).toBe(true);
     expect(generatorEmptyIconVisible(icon)).toBe(true);

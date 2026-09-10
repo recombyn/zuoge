@@ -30,7 +30,9 @@ export function findClippingFrameForNode(
   ).trim();
   if (!explicitOwner) return null;
   const ownedFrame = frames.find((frame) => String(frame.id) === explicitOwner);
-  if (!ownedFrame || !ownedFrame.clipContent || ownedFrame.hidden) return null;
+  // Default on (undefined): only an explicit `false` disables clip — matches
+  // normalizeDocument / selectionLogic.
+  if (!ownedFrame || ownedFrame.clipContent === false || ownedFrame.hidden) return null;
   const live = getLiveArtboardFrameGeometry(String(ownedFrame.id || ''));
   const fx = num(live?.x ?? ownedFrame.x);
   const fy = num(live?.y ?? ownedFrame.y);

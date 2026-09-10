@@ -33,7 +33,6 @@ import {
   previewShapeParamsToKit,
   scenePointToLocal,
   setOverlayHandleSeats,
-  vertexHandleParkScene,
 } from './shapeHandleChrome';
 
 const DRAG_DISTANCE_SQUARED = 16;
@@ -69,15 +68,11 @@ function sidesHandleLocal(
   shapeType: string,
   width: number,
   height: number,
-  sides: number,
-  parkScene: number
+  sides: number
 ): { x: number; y: number } {
   const pts = shapeVertexPoints(shapeType, width, height, sides);
-  const cx = width / 2;
-  const cy = height / 2;
   if (!pts.length) {
-    const park = Math.max(0, parkScene);
-    return { x: width - park, y: height / 2 };
+    return { x: width, y: height / 2 };
   }
   let best = pts[0];
   for (const p of pts) {
@@ -85,14 +80,7 @@ function sidesHandleLocal(
       best = p;
     }
   }
-  let ix = cx - best[0];
-  let iy = cy - best[1];
-  const len = Math.hypot(ix, iy) || 1;
-  const park = Math.max(0, parkScene);
-  return {
-    x: best[0] + (ix / len) * park,
-    y: best[1] + (iy / len) * park,
-  };
+  return { x: best[0], y: best[1] };
 }
 
 function uniformRadii(r: number): CornerRadii {
@@ -186,10 +174,10 @@ function PolygonShapeHandlesOverlay({
   );
   const radius = dragValue != null && activeKey === 'radius' ? dragValue : baseR;
 
-  const parkScene = Math.max(2 / z, vertexHandleParkScene(z));
+  // Radius knob rides the fillet; at 0 it sits on the vertex (no forced tuck).
   const insetFor = (r: number) => {
-    const maxAlong = Math.max(parkScene, maxR - 1);
-    return Math.max(parkScene, Math.min(Math.max(0, Number(r) || 0), maxAlong));
+    const along = Math.max(0, Number(r) || 0);
+    return Math.min(along, Math.max(0, maxR - 1));
   };
 
   const topSite = topRadiusSite(shapeType, w, h, sides);
@@ -199,7 +187,7 @@ function PolygonShapeHandlesOverlay({
         y: topSite.y + topSite.iy * insetFor(radius),
       }
     : { x: w / 2, y: insetFor(radius) };
-  const sidesLocal = sidesHandleLocal(shapeType, w, h, sides, parkScene);
+  const sidesLocal = sidesHandleLocal(shapeType, w, h, sides);
   const radiusPos = localPointToScene(radiusLocal.x, radiusLocal.y, box, angle);
   const sidesPos = localPointToScene(sidesLocal.x, sidesLocal.y, box, angle);
 
@@ -422,7 +410,7 @@ function PolygonShapeHandlesOverlay({
               key={knob.key}
               data-poly-handle={knob.key}
               transform={`translate(${knob.lx} ${knob.ly})`}
-              style={{ pointerEvents: 'all' }}
+              style={{ pointerEvents: 'all', cursor: 'pointer' }}
               onPointerDown={knob.onDown}
             >
               <title>{knob.label}</title>

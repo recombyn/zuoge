@@ -18,6 +18,7 @@ import {
   detachKitBridge,
   hydrateKitFromDocument,
   reconcileKitWithDocument,
+  syncKitArtboardChromeHighlight,
   syncKitGeometryFromDocument,
   syncKitGeometryFromTransformPreviews,
   syncKitLivePaintFromBucketFill,
@@ -112,6 +113,14 @@ export default function KitCanvasHost({
   );
   const selectedFrameIds = useSelector(
     (s: RootState) => s.editor.selectedFrameIds || EMPTY_ID_LIST
+  );
+  const frameChromeMode = useSelector((s: RootState) =>
+    s.editor.frameChromeMode === 'full' ? 'full' : 'soft'
+  );
+  const activeFrameId = useSelector((s: RootState) =>
+    s.editor.document?.activeFrameId != null
+      ? String(s.editor.document.activeFrameId)
+      : ''
   );
   const bucketFill = useSelector((s: RootState) => s.editor.bucketFill);
 
@@ -267,6 +276,12 @@ export default function KitCanvasHost({
       return;
     }
     reconcileKitWithDocument(handle, doc);
+    // Aspect / W·H toolbar patches that also write lockAspect were historically
+    // treated as non-transform-only → reconcile skipped Kit geom. Always push
+    // geometry for the patched ids when the write came from RCB chrome.
+    if (lastPatchedNodeIds.length) {
+      syncKitGeometryFromDocument(handle, doc, lastPatchedNodeIds);
+    }
     // Intentionally omit document object identity — revision+token are the truth.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   }, [
@@ -314,6 +329,14 @@ export default function KitCanvasHost({
     syncKitSelectionFromStore(handle, selectedNodeIds, selectedFrameIds);
     selectionMirrorSeenRef.current = getKitSelectionMirrorGeneration();
   }, [engineReady, selectedNodeIds, selectedFrameIds]);
+
+  // Soft plate focus can change without selection ids (setSoftFrameContext).
+  useEffect(() => {
+    const handle = engineRef.current ?? sharedHandle;
+    if (!handle || !engineReady) return;
+    syncKitArtboardChromeHighlight(handle);
+    handle.renderer.requestRender();
+  }, [engineReady, frameChromeMode, activeFrameId, selectedFrameIds]);
 
   // Kit artboard drag: Kit bounds move every frame while inGesture skips flush —
   // mirror into RCB live plate geom so DomHost / clips track.

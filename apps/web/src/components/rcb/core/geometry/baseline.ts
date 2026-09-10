@@ -155,6 +155,7 @@ export function getShapeBaseline(
 
   if (shapeType === 'circle' || shapeType === 'ellipse' || shapeType === 'oval') {
     const innerRatio = ellipseInnerRatioFromAttrs(node.attrs);
+    // Always clockwise from the right (positive arc + fixed east start).
     const arcPercent = ellipseArcPercentFromAttrs(node.attrs);
     const startDeg = ellipseStartDegFromAttrs(node.attrs);
     return {

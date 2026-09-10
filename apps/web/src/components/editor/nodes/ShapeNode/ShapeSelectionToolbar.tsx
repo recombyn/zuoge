@@ -430,8 +430,11 @@ function ShapeSelectionToolbar({
   };
 
   const applyEllipseArc = (pct: number) => {
-    const sign = ellipseArcPercent < 0 ? -1 : 1;
-    patchParametricAttrs({ ellipseArcPercent: clampEllipseArcPercent(sign * pct) });
+    // Always clockwise from the right — never reopen counter-clockwise / from the left.
+    patchParametricAttrs({
+      ellipseArcPercent: clampEllipseArcPercent(Math.abs(pct)),
+      ellipseStartDeg: 0,
+    });
   };
 
   const applyAspectPreset = (preset: (typeof ELEMENT_ASPECT_PRESETS)[number]) => {
@@ -551,7 +554,7 @@ function ShapeSelectionToolbar({
           <ToolbarValueSlider
             prefix="Ar"
             value={Math.abs(ellipseArcPercent)}
-            min={0}
+            min={0.5}
             max={100}
             step={0.1}
             precision={1}

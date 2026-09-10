@@ -9,6 +9,7 @@ import {
   getKitSelectionDockAabb,
   kitSelectionGestureActive,
   kitSelectionMoveActive,
+  kitSelectionResizeOrRotateActive,
 } from '@/components/rcb/canvas/kitBridge';
 import type { SceneBox } from '@/components/rcb/selection/alignGuides';
 
@@ -44,6 +45,7 @@ export function useKitSelectionDockAabb(
       const next = getKitSelectionDockAabb();
       setBox((prev) => {
         // Transient null (Kit mapping lag) — keep last box for this selection.
+        // Cleared when selection is empty (hasSel) or ids change (effect restart).
         if (!next) return prev;
         return sameBox(prev, next) ? prev : next;
       });
@@ -91,4 +93,40 @@ export function useKitSelectionMoveActive(): boolean {
     };
   }, []);
   return moving;
+}
+
+/**
+ * True while Kit is resizing/rotating — hide parametric shape knobs so they
+ * do not sit on the pre-resize box until geometry flush lands.
+ */
+export function useKitSelectionResizeOrRotateActive(): boolean {
+  const [busy, setBusy] = useState(() => kitSelectionResizeOrRotateActive());
+  useEffect(() => {
+    let raf = 0;
+    let alive = true;
+    const pull = () => {
+      if (!alive) return;
+      const next = kitSelectionResizeOrRotateActive();
+      setBusy((prev) => (prev === next ? prev : next));
+      if (next || kitSelectionGestureActive()) {
+        raf = requestAnimationFrame(pull);
+      }
+    };
+    pull();
+    const onPtr = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(pull);
+    };
+    window.addEventListener('pointerdown', onPtr, true);
+    window.addEventListener('pointermove', onPtr, true);
+    window.addEventListener('pointerup', onPtr, true);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointerdown', onPtr, true);
+      window.removeEventListener('pointermove', onPtr, true);
+      window.removeEventListener('pointerup', onPtr, true);
+    };
+  }, []);
+  return busy;
 }

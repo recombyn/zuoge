@@ -14,19 +14,13 @@ export type PaintIntent =
   | { kind: 'dom-host'; reason: string };
 
 export type PaintIntentCtx = {
-  zoom?: number;
-  dpr?: number;
-  /** Active video/audio FO shell (HTML decoder). SoftGlow must not set this. */
+  /** Active video/audio FO shell (HTML decoder). SoftGlow uses its own route. */
   forceFull?: boolean;
-  raised?: boolean;
-  revealed?: boolean;
-  gesture?: boolean;
-  artboardInk?: boolean;
 };
 
 /**
  * Resolve paint route. Kit owns vector / image ink.
- * DomHost: lottie/group shells, active video/audio FO.
+ * DomHost: lottie/group shells, active video/audio FO. SoftGlow → Kit overlay.
  * Empty generators: Kit gray wash + Lucide glyph overlay (no DomHost).
  */
 export function resolvePaintIntent(
@@ -43,14 +37,14 @@ export function resolvePaintIntent(
   if (isEmptyGeneratorPlate(node)) {
     return { kind: 'kit' };
   }
+  // Upload / remove-bg / 图片分层 — Kit paints SoftGlow in node local space;
+  // status pill stays React (NodeProcessGlow / ProcessGlowShell).
   if (key === 'lottie' || key === 'group') {
     return { kind: 'dom-host', reason: key };
   }
-  // Active HTML decoder shell only — SoftGlow / selection stay on Kit.
-  if (ctx.forceFull) {
-    if (isVideoNode(node) || isAudioNode(node) || key === 'video' || key === 'audio') {
-      return { kind: 'dom-host', reason: 'html-media-fo' };
-    }
+  // Active HTML decoder shell only.
+  if (ctx.forceFull && (isVideoNode(node) || isAudioNode(node) || key === 'video' || key === 'audio')) {
+    return { kind: 'dom-host', reason: 'html-media-fo' };
   }
   return { kind: 'kit' };
 }
@@ -62,12 +56,4 @@ export function paintIntentNeedsDomHost(
   opts?: PaintIntentCtx
 ): boolean {
   return resolvePaintIntent(document, id, node, opts).kind === 'dom-host';
-}
-
-export function paintIntentSetMembership(
-  ids: ReadonlySet<string> | readonly string[] | undefined,
-  id: string
-): boolean {
-  if (!ids) return false;
-  return ids instanceof Set ? ids.has(id) : (ids as readonly string[]).includes(id);
 }

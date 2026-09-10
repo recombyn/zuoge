@@ -137,6 +137,7 @@ import {
   kitCanUndo,
   deleteKitSelection,
   isDomHostOnlyRcbNode,
+  reconcileKitWithDocument,
 } from '@/components/rcb/canvas/kitBridge';
 import { kitOwnsStagePointer } from '@/components/rcb/canvas/toolMap';
 import SvgPaper from './SvgPaper';
@@ -182,6 +183,7 @@ import {
   kitRcbIdBeingPathEdited,
   placeKitImageFromUrl,
 } from '@/components/rcb/canvas/kitBridge';
+import { getCanvasEngine } from '@/components/rcb/canvas/KitCanvasHost';
 import { useRcbScreenToScene } from '@/components/rcb/camera/context';
 import AudioNodeOverlay, {
   resolveActiveAudioPlayerId,
@@ -1206,14 +1208,39 @@ function SvgCanvas({
           isDomHostOnlyRcbNode(doc0.deltaSetLike?.[id])
         );
         const kitDeleted = deleteKitSelection(kitNodes, frameIds);
-        if (kitDeleted) {
-          if (domOnly.length) {
-            removeDocumentNodes({ nodeIds: domOnly });
+        // Kit flush is sync now, but unmapped / DomHost / partial failures can
+        // leave SceneDocument members — scrub whatever is still present.
+        const docNow = store.getState().editor.document;
+        const stillFrames = frameIds.filter((fid) =>
+          (docNow?.frames || []).some((f: { id?: string }) => String(f?.id) === fid)
+        );
+        const stillNodes = [
+          ...new Set([
+            ...domOnly,
+            ...allNodes.filter((id) => Boolean(docNow?.deltaSetLike?.[id])),
+          ]),
+        ];
+        if (!kitDeleted || stillFrames.length || stillNodes.length) {
+          if (stillFrames.length || stillNodes.length) {
+            removeDocumentNodes({
+              nodeIds: stillNodes,
+              frameIds: stillFrames,
+            });
+          } else if (!kitDeleted) {
+            removeDocumentNodes({ nodeIds: allNodes, frameIds });
           }
-          requestProjectFlush();
-          return true;
         }
-        removeDocumentNodes({ nodeIds: allNodes, frameIds });
+        // Empty-gen marquee delete used to scrub Document while Kit gray plates
+        // stayed (icons gone, boards remain). Force Kit↔doc membership now.
+        const eng = getCanvasEngine();
+        const docAfter = store.getState().editor.document;
+        if (eng && docAfter) {
+          try {
+            reconcileKitWithDocument(eng, docAfter);
+          } catch {
+            /* ignore */
+          }
+        }
         requestProjectFlush();
         return true;
       };
@@ -1767,11 +1794,22 @@ function SvgCanvas({
     };
     const onSub = (e: Event) => {
       const s = (e as CustomEvent).detail?.subtool;
-      // Kit NODE_EDIT_TOOLS: direct | pen | scissors while editing.
-      if (s === 'pen') setEngineToolFromRcb('pen');
-      else if (s === 'add-anchor') setEngineToolFromRcb('scissors');
-      else if (s === 'curve') setEngineToolFromRcb('direct');
-      else setEngineToolFromRcb('direct');
+      // Kit NODE_EDIT_TOOLS: direct | pen while editing.
+      // add-anchor → direct + addPointMode (not scissors — that cuts paths).
+      const input = getCanvasEngine()?.input as { addPointMode?: boolean } | undefined;
+      if (s === 'pen') {
+        if (input) input.addPointMode = false;
+        setEngineToolFromRcb('pen');
+      } else if (s === 'add-anchor') {
+        setEngineToolFromRcb('direct');
+        if (input) input.addPointMode = true;
+      } else if (s === 'curve') {
+        if (input) input.addPointMode = false;
+        setEngineToolFromRcb('direct');
+      } else {
+        if (input) input.addPointMode = false;
+        setEngineToolFromRcb('direct');
+      }
     };
     window.addEventListener('resume:enter-path-edit', onEnter);
     window.addEventListener('resume:exit-path-edit', onExit);
@@ -1794,7 +1832,8 @@ function SvgCanvas({
   // (anchors / draft pen) ? do not let SelectionFeature clear selection on empty
   // click (that unmounts path-edit and looks like ?auto exit?).
   const selectToolActive = activeTool === 'select' || activeTool === 'scale';
-  // Path-edit keeps SelectionFeature on so PathEditToolbar docks like rect chrome.
+  // Path-edit keeps SelectionFeature on (suppresses selection chrome); PathEditToolbar
+  // docks at page top-center via EditorToolDocks when activeTool === 'direct'.
   const selectMode = selectToolActive || Boolean(kitPathEditNodeId);
 
   return (

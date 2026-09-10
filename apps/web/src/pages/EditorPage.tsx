@@ -1686,7 +1686,7 @@ function EditorPage() {
               bandRightPx={toolsRightDockPx}
             />
 
-            {/* Pen / pencil / bucket options — top center (not above bottom tool strip) */}
+            {/* Pen / pencil / bucket / path-edit options — top center (not above bottom tool strip) */}
             <div
               data-tour="editor-create-dock"
               className="pointer-events-none absolute z-30 -translate-x-1/2 hidden md:block"

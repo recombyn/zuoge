@@ -126,15 +126,17 @@ export function rcbLayoutGeneratorPlate(opts: {
 
 /** Empty-state glyph size in scene units — always fits inside the plate. */
 /**
- * Cap Lucide size in CSS px so stroke weight stays title-like (~2 in 24 box).
- * Without this, a 360wu plate made a ~100wu icon with ~8 CSS px strokes (too dark).
+ * Cap icon size in CSS px so large plates stay readable without dominating.
+ * (Was 48 — too small on typical artboard generators.)
  */
-export const GENERATOR_EMPTY_ICON_MAX_CSS_PX = 48;
+export const GENERATOR_EMPTY_ICON_MAX_CSS_PX = 88;
+/** Fraction of the plate's short side used for the glyph (before screen cap). */
+export const GENERATOR_EMPTY_ICON_PLATE_RATIO = 0.42;
 
 export function generatorEmptyIconSize(boxW: number, boxH: number, zoom = 1): number {
   const side = Math.min(Math.max(0, boxW), Math.max(0, boxH));
   // Never floor to a fixed scene px (old Math.max(72, …) overflowed at 3000% zoom).
-  const byPlate = side * 0.28;
+  const byPlate = side * GENERATOR_EMPTY_ICON_PLATE_RATIO;
   const z = Math.max(0.05, Number(zoom) || 1);
   const byScreen = GENERATOR_EMPTY_ICON_MAX_CSS_PX / z;
   return Math.min(byPlate, byScreen);

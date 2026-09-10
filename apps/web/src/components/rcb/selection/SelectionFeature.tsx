@@ -4,9 +4,6 @@ import { useSelector } from '@/store';
 import { useAnimationPlayheadSec } from '@/components/editor/nodes/AnimationNode/animationTransport';
 import ImageVariantsOverlay from '@/components/editor/nodes/ImageNode/ImageVariantsOverlay';
 import { useImageVariantsExpandedNodeId } from '@/components/editor/nodes/ImageNode/imageVariantsExpand';
-import PathEditToolbar, {
-  type PathEditSubtool,
-} from '@/components/editor/chrome/PathEditToolbar';
 import { useRcbCamera, useRcbScreenToScene } from '@/components/rcb/camera/context';
 import {
   supportsCornerRadius,
@@ -15,8 +12,8 @@ import {
 import CircleShapeHandlesOverlay from './chrome/CircleShapeHandlesOverlay';
 import PolygonShapeHandlesOverlay from './chrome/PolygonShapeHandlesOverlay';
 import StarShapeHandlesOverlay from './chrome/StarShapeHandlesOverlay';
+import RectCornerRadiusBadgeOverlay from './chrome/RectCornerRadiusBadgeOverlay';
 import { rcbCameraCssZoom } from '@/components/rcb/core/math';
-import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   collectPairSpacingGuides,
   type SceneBox,
@@ -26,14 +23,12 @@ import SelectionContextToolbar from './chrome/SelectionContextToolbar';
 import MultiSelectionToolbar from './chrome/MultiSelectionToolbar';
 import NodeTitleLabel from './chrome/NodeTitleLabel';
 import SmartGuidesOverlay from './chrome/SmartGuidesOverlay';
-import { SelectionToolbarShell } from './chrome/SelectionToolbarShell';
 import { subscribeLiveShapeParamsPreview } from '@/components/rcb/scene/document/sceneShapes';
 import { liveShapeGeomBox } from './hostGeom';
 import { nodePaintZIndex } from '@/components/rcb/scene/document/sceneDocument';
 import { listImageVariantUrls } from '@/components/rcb/scene/document/mediaLifecycle';
 import {
   inflateSelectionBox,
-  strokeOuterClearanceScene,
 } from '@/components/rcb/scene/document/sceneEffects';
 import { patchDocumentNode } from '@/store/modules/editor';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
@@ -51,7 +46,7 @@ import {
   resolveSelectionChromeModel,
   toolbarValueBox,
 } from './selectionChromeModel';
-import { useKitSelectionDockAabb, useKitSelectionMoveActive } from './useKitSelectionDockAabb';
+import { useKitSelectionDockAabb, useKitSelectionMoveActive, useKitSelectionResizeOrRotateActive } from './useKitSelectionDockAabb';
 
 type SelectionFeatureProps = {
   enabled: boolean;
@@ -61,7 +56,7 @@ type SelectionFeatureProps = {
   selectedFrameIds?: string[];
   getNodeBox: (nodeId: string) => SceneBox | null;
   suppressChrome?: boolean;
-  /** Kit path-edit: dock PathEditToolbar above the path (same shell as rect). */
+  /** Kit path-edit: hide selection chrome; PathEditToolbar docks at page top-center. */
   pathEditNodeId?: string | null;
   onOpenAgent?: (opts?: { prompt?: string }) => void;
 };
@@ -77,22 +72,6 @@ function SelectionFeature({
   pathEditNodeId = null,
   onOpenAgent,
 }: SelectionFeatureProps) {
-  const [pathEditSubtool, setPathEditSubtool] = useState<PathEditSubtool>('select');
-
-  useEffect(() => {
-    if (!pathEditNodeId) {
-      setPathEditSubtool('select');
-      return;
-    }
-    setPathEditSubtool('select');
-    const onSubtool = (e: Event) => {
-      const s = (e as CustomEvent).detail?.subtool;
-      if (s === 'pen' || s === 'add-anchor' || s === 'curve') setPathEditSubtool(s);
-      else setPathEditSubtool('select');
-    };
-    window.addEventListener('resume:path-edit-subtool', onSubtool);
-    return () => window.removeEventListener('resume:path-edit-subtool', onSubtool);
-  }, [pathEditNodeId]);
   const zoom = Math.max(0.05, rcbCameraCssZoom(useRcbCamera()));
   const toScene = useRcbScreenToScene();
   const workspaceMode = useSelector(
@@ -115,6 +94,7 @@ function SelectionFeature({
     shapeStylePanel?.kind === 'radius' ||
     Boolean(variantsExpandedId);
   const kitMoving = useKitSelectionMoveActive();
+  const kitResizeOrRotate = useKitSelectionResizeOrRotateActive();
   const inspectDev = workspaceMode === 'dev' || readOnly;
 
   const [hostEpoch, setHostEpoch] = useState(0);
@@ -159,7 +139,10 @@ function SelectionFeature({
   );
 
   const hideToolbars =
-    suppressToolbars || model.selectionFullyHidden || kitMoving;
+    suppressToolbars ||
+    model.selectionFullyHidden ||
+    kitMoving ||
+    kitResizeOrRotate;
   // Kit control-box AABB is SoT for dock. Do not pass stroke×zoom as screen pad —
   // SelectionToolbarShell already clears handles in screen px.
   const edgePad = 0;
@@ -224,44 +207,12 @@ function SelectionFeature({
     isWorkbenchMulti,
   } = model;
 
-  const pathEditId = pathEditNodeId ? String(pathEditNodeId) : '';
-  const pathEditNode = pathEditId ? document?.deltaSetLike?.[pathEditId] : null;
-  const pathEditShapeType = String(pathEditNode?.attrs?.shapeType || '');
-  const pathEditLineChrome =
-    pathEditShapeType === 'line' || pathEditShapeType === 'arrow';
-  const pathEditBox = useMemo(() => {
-    if (!pathEditId || !pathEditNode) return null;
-    const live = liveShapeGeomBox(pathEditId);
-    if (live) return inflateSelectionBox(live, pathEditNode);
-    const fromDoc = getNodeBox(pathEditId);
-    if (fromDoc) return inflateSelectionBox(fromDoc, pathEditNode);
-    const { left, top } = nodeLeftTop(document, pathEditNode);
-    return inflateSelectionBox(
-      {
-        left,
-        top,
-        width: Math.max(1, Number(pathEditNode.width) || 1),
-        height: Math.max(1, Number(pathEditNode.height) || 1),
-      },
-      pathEditNode
-    );
-  }, [pathEditId, pathEditNode, document, getNodeBox, hostEpoch]);
-  const pathEditAngle = pathEditId ? readNodeAngle(document, pathEditId) : 0;
-  const pathEditEdgePad = pathEditNode
-    ? Math.max(0, strokeOuterClearanceScene(pathEditNode)) * zoom
-    : 0;
-  const pathEditDock = selectionToolbarDock(pathEditBox, {
-    angle: pathEditAngle,
-    edgePadScene: pathEditEdgePad,
-    lineChrome: pathEditLineChrome,
-    node: pathEditNode,
-  });
-
   if (!enabled) return null;
 
-  const showPathEditToolbar =
-    Boolean(pathEditId && pathEditDock.box) && !inspectDev && !readOnly;
-  const chromeIdle = !inspectDev && !showPathEditToolbar && !hideToolbars;
+  // Path-edit chrome lives in EditorToolDocks (page top-center); only suppress
+  // selection toolbars/handles while Kit path-edit is active.
+  const pathEditActive = Boolean(pathEditNodeId) && !inspectDev && !readOnly;
+  const chromeIdle = !inspectDev && !pathEditActive && !hideToolbars;
   const showToolbar =
     chromeIdle &&
     Boolean(toolbarChromeBox && toolbarNodeId && toolbarNode) &&
@@ -285,35 +236,43 @@ function SelectionFeature({
     !isWorkbenchMulti;
 
   const paramShapeType = String(singleNodeData?.attrs?.shapeType || '');
+  const shapeHandleAngle =
+    singleId && singleNodeData ? readNodeAngle(document, singleId) : 0;
+  // Always document geometry — Kit dock AABB can differ by a few px and regenerating
+  // vertices in that box mis-seats polygon/star knobs off the true corners.
+  // Handles are hidden during Kit resize/rotate, so dock "liveness" is unused here.
+  const shapeHandleBox = chromeGeomBox;
+  const shapeHandlesIdle = chromeIdle && !readOnly && !kitMoving && !kitResizeOrRotate;
   const showCircleHandles =
-    chromeIdle &&
+    shapeHandlesIdle &&
     singleNode &&
-    Boolean(singleId && singleNodeData && chromeGeomBox) &&
-    !readOnly &&
-    !kitMoving &&
+    Boolean(singleId && singleNodeData && shapeHandleBox) &&
     (paramShapeType === 'circle' ||
       paramShapeType === 'ellipse' ||
       singleNodeData?.key === 'ellipse');
   const showPolygonHandles =
-    chromeIdle &&
+    shapeHandlesIdle &&
     singleNode &&
-    Boolean(singleId && singleNodeData && chromeGeomBox) &&
-    !readOnly &&
-    !kitMoving &&
+    Boolean(singleId && singleNodeData && shapeHandleBox) &&
     paramShapeType === 'polygon' &&
     supportsCornerRadius(singleNodeData) &&
     supportsShapeSides(singleNodeData);
   const showStarHandles =
-    chromeIdle &&
+    shapeHandlesIdle &&
     singleNode &&
-    Boolean(singleId && singleNodeData && chromeGeomBox) &&
-    !readOnly &&
-    !kitMoving &&
+    Boolean(singleId && singleNodeData && shapeHandleBox) &&
     paramShapeType === 'star' &&
     supportsCornerRadius(singleNodeData) &&
     supportsShapeSides(singleNodeData);
-  const shapeHandleAngle =
-    singleId && singleNodeData ? readNodeAngle(document, singleId) : 0;
+  const showRectRadiusBadge =
+    chromeIdle &&
+    !readOnly &&
+    singleNode &&
+    Boolean(singleId && singleNodeData) &&
+    supportsCornerRadius(singleNodeData) &&
+    (paramShapeType === 'rect' ||
+      paramShapeType === 'roundRect' ||
+      singleNodeData?.key === 'rect');
 
   return (
     <>
@@ -325,28 +284,6 @@ function SelectionFeature({
             : null
         }
       />
-      {showPathEditToolbar ? (
-        <SelectionToolbarShell
-          box={pathEditDock.box}
-          angle={pathEditDock.angle}
-          edgePadScene={pathEditDock.edgePadScene}
-          bare
-        >
-          <PathEditToolbar
-            chrome="pill"
-            subtool={pathEditSubtool}
-            onSubtoolChange={(s) => {
-              setPathEditSubtool(s);
-              window.dispatchEvent(
-                new CustomEvent('resume:path-edit-subtool', { detail: { subtool: s } })
-              );
-            }}
-            onExit={() => {
-              window.dispatchEvent(new Event('resume:exit-path-edit'));
-            }}
-          />
-        </SelectionToolbarShell>
-      ) : null}
       {showToolbar ? (
         <SelectionContextToolbar
           document={document}
@@ -415,9 +352,12 @@ function SelectionFeature({
           })}
         />
       ) : null}
+      {showRectRadiusBadge ? (
+        <RectCornerRadiusBadgeOverlay enabled />
+      ) : null}
       {showCircleHandles ? (
         <CircleShapeHandlesOverlay
-          box={chromeGeomBox!}
+          box={shapeHandleBox!}
           angle={shapeHandleAngle}
           nodeId={singleId!}
           node={singleNodeData!}
@@ -426,7 +366,7 @@ function SelectionFeature({
       ) : null}
       {showPolygonHandles ? (
         <PolygonShapeHandlesOverlay
-          box={chromeGeomBox!}
+          box={shapeHandleBox!}
           angle={shapeHandleAngle}
           nodeId={singleId!}
           node={singleNodeData!}
@@ -435,7 +375,7 @@ function SelectionFeature({
       ) : null}
       {showStarHandles ? (
         <StarShapeHandlesOverlay
-          box={chromeGeomBox!}
+          box={shapeHandleBox!}
           angle={shapeHandleAngle}
           nodeId={singleId!}
           node={singleNodeData!}

@@ -29,7 +29,16 @@ import {
   setSoftFrameContext,
   patchDocumentNode,
   withKitCanvasDocumentFlush,
+  clearCanvasAttachPick,
+  setCanvasAttachPickBlocked,
+  setPendingCanvasAttach,
 } from '@/store/modules/editor';
+import {
+  attachPickFilterOpts,
+  canAttachFrameToPick,
+  frameForFullBleedPlate,
+  resolveAttachPickPayload,
+} from '@/components/editor/canvas/attachPick';
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 import {
   addNodeToDocument,
@@ -40,6 +49,7 @@ import {
 import {
   buildMarkdownTextAttrs,
   measurePlainTextSize,
+  measureWrappedTextSize,
   parseNodeMarkdown,
   parseNodeTextStyle,
   toFabricFontFamily,
@@ -64,43 +74,57 @@ import { strokeDashForStyle } from '@/components/rcb/scene/document/sceneStrokeS
 import { store } from '@/store';
 import type { CanvasEngineHandle } from './mountCore';
 import { stripKitSeedArtboards } from './mountCore';
+import { isPersistentDrawSessionTool } from './toolMap';
+import {
+  isNodeProcessRunning,
+  paintKitProcessPlateLocal,
+} from '@/components/rcb/process/processPlateKit';
+import { listProcessingNodeIds } from '@/components/rcb/process/processGlow';
 import type { WasmScene } from '@rcb-vector/wasm_scene';
 import type { SceneNode as KitSceneNode } from '@rcb-vector/types';
 import { isGradient, isMeshGradient, isSolid } from '@rcb-vector/types';
 import { applyBooleanOp, type BoolOp } from '@rcb-vector/boolean_ops';
+import { cornerRadiusHandles } from '@rcb-vector/corner_handles';
 import { FRAME_SEL_PREFIX, frameSelId } from '@/components/rcb/frames/frameSceneQuery';
 import { frameForNodeIntersectPlacement } from '@/components/rcb/frames/frameNodeBinding';
 import { frameIsEmpty } from '@/components/rcb/frames/framePlatePointer';
+import {
+  isAnimationFrameHostNode,
+  isArtboardVisibleInDocument,
+  isAudioGeneratorNode,
+  isEmptyGeneratorPlate,
+  isImageGeneratorNode,
+  isLottieGeneratorNode,
+  isNodeMarqueeSkippable,
+  isVideoGeneratorNode,
+} from '@/components/rcb/scene/document/nodeCapabilities';
+import { nodeSceneAabb } from '@/components/rcb/scene/layout/nodeAabb';
+import { storedOriginForSceneResult } from '@/components/rcb/scene/layout/coords';
+import { frameSceneBounds, nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
+import {
+  getLiveArtboardFrameGeometry,
+  previewArtboardFrameGeometry,
+} from '@/components/rcb/frames/HtmlArtboardFrame';
 import {
   applyNodeFrameBindings,
   type GeomPatch,
 } from '@/components/editor/canvas/canvasSession';
 import {
-  isAudioGeneratorNode,
-  isEmptyGeneratorPlate,
-  isImageGeneratorNode,
-  isLottieGeneratorNode,
-  isVideoGeneratorNode,
-} from '@/components/rcb/scene/document/nodeCapabilities';
-import {
-  generatorEmptyIconWorldSegs,
+  GEN_AUDIO_BARS,
+  GEN_AUDIO_BAR_STROKE,
+  GEN_IMAGE_MOUNTAIN_PATH,
+  GEN_IMAGE_SUN,
+  GEN_VIDEO_PLAY_PATH,
+  GENERATOR_EMPTY_ICON_COLOR,
+  GENERATOR_EMPTY_PLATE_STROKE,
   GENERATOR_EMPTY_PLATE_STROKE_WIDTH,
-  LU_AUDIO_LINES_SEGS,
-  LU_ICON_STROKE,
-  LU_IMAGE_PLUS_CIRCLE,
-  LU_IMAGE_PLUS_PATHS,
-  LU_VIDEO_PATHS,
-  LU_VIDEO_RECT_PATH,
+  generatorEmptyCssRgb,
   type GeneratorEmptyIconKind,
 } from '@/components/rcb/core/generatorEmptyIcons';
 import {
   generatorEmptyIconSize,
   generatorEmptyIconVisible,
 } from '@/components/rcb/core/layout';
-import { nodeSceneAabb } from '@/components/rcb/scene/layout/nodeAabb';
-import { storedOriginForSceneResult } from '@/components/rcb/scene/layout/coords';
-import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
-import { previewArtboardFrameGeometry } from '@/components/rcb/frames/HtmlArtboardFrame';
 import { findClippingFrameForNode } from '@/components/rcb/frames/frameContentClip';
 import { frameClipRevealsOverflow } from '@/components/rcb/selection/selectionPaintRaise';
 import { getShapeBaselineD } from '@/components/rcb/core/geometry';
@@ -140,6 +164,13 @@ let selectionMirrorGeneration = 0;
 
 /** Coalesce Kit→RCB flushes off the WASM call stack (avoids wasm-bindgen aliasing). */
 let mutateFlushQueued = false;
+/**
+ * Draw-tool id captured during onMutate (still polygon/star/…) before
+ * maybeRevertTool flips Kit + store to selection. flushCreates must tag
+ * shapeType from this — otherwise polygons land as plain `path` and lose
+ * 圆角 / 边数 chrome.
+ */
+let pendingCreateTool: string | null = null;
 /** Kit undo/redo reconcile — update SceneDocument without pushing RCB editorHistory. */
 let kitHistoryReconcile = false;
 /** Kit placeImage has no src URL — remember product URL until flushCreates maps Image → RCB. */
@@ -168,6 +199,13 @@ let origOnMouseUp: ((e: MouseEvent) => void) | null = null;
  * RCB frame so a click (no drag) can soft-select the plate like a generator.
  */
 let pendingSoftArtboardFrameId: string | null = null;
+/**
+ * Fingerprint of which Kit-mapped nodes are artboard-clipped.
+ * Clips are baked into the retained scene picture at record time — when this
+ * changes (frameId bind, clipContent toggle) we must invalidateScenePicture,
+ * not only requestRender (replay keeps the old clip state).
+ */
+let lastArtboardClipPaintSig = '';
 
 function withSuppress<T>(fn: () => T): T {
   suppressDepth += 1;
@@ -488,6 +526,45 @@ function forgetKitStyle(kitId: number) {
   lastKitTextSig.delete(kitId);
 }
 
+/** Sync RCB autoSize / box width → Kit Paragraph wrap width. */
+function applyKitTextLayoutWidth(
+  scene: WasmScene,
+  kitId: number,
+  node: { width?: number; attrs?: Record<string, unknown> | null }
+) {
+  const attrs = (node.attrs || {}) as Record<string, unknown>;
+  const autoSize = String(attrs.autoSize ?? 'true') !== 'false';
+  const textFrame =
+    attrs.textFrame === true ||
+    attrs.textFrame === 'true' ||
+    attrs.textFrame === 1 ||
+    attrs.textFrame === '1';
+  const renderer = scene.renderer as
+    | {
+        setTextLayoutWidth?: (id: number, w: number | null) => void;
+        clearTextLayoutWidth?: (id: number) => void;
+      }
+    | null
+    | undefined;
+  if (!renderer) return;
+  if (!autoSize || textFrame) {
+    const w = Math.max(8, Number(node.width) || 0);
+    renderer.setTextLayoutWidth?.(kitId, w > 0 ? w : null);
+  } else {
+    renderer.clearTextLayoutWidth?.(kitId);
+  }
+}
+
+function clearKitTextLayoutWidth(scene: WasmScene | null | undefined, kitId: number) {
+  try {
+    (
+      scene?.renderer as { clearTextLayoutWidth?: (id: number) => void } | null | undefined
+    )?.clearTextLayoutWidth?.(kitId);
+  } catch {
+    /* optional */
+  }
+}
+
 function kitTextAlignFromStyle(textAlign: string | undefined): number {
   const a = String(textAlign || '').toLowerCase();
   if (a === 'center' || a === 'middle') return 1;
@@ -519,6 +596,7 @@ function applyKitTextProps(scene: WasmScene, kitId: number, node: SceneNodeInput
     /* ignore */
   }
   lastKitTextSig.set(kitId, sig);
+  applyKitTextLayoutWidth(scene, kitId, node);
   return true;
 }
 
@@ -632,6 +710,7 @@ function syncParametricKitShape(
     }
     kitToRcb.delete(kitId);
     rcbToKit.delete(rcbId);
+    clearKitTextLayoutWidth(scene, kitId);
     forgetKitStyle(kitId);
     const newId = create();
     remember(newId, rcbId);
@@ -791,8 +870,10 @@ function kitNodeToCreated(
   const tool = String(createTool || '').toLowerCase();
 
   if (g.Rect) {
-    const w = Math.max(1, Number(g.Rect.width) || 1);
-    const h = Math.max(1, Number(g.Rect.height) || 1);
+    const rw = Number(g.Rect.width);
+    const rh = Number(g.Rect.height);
+    const w = Number.isFinite(rw) && rw > 0 ? rw : 1;
+    const h = Number.isFinite(rh) && rh > 0 ? rh : 1;
     return createShapeNode({
       x: Number(t.x) || 0,
       y: Number(t.y) || 0,
@@ -806,8 +887,8 @@ function kitNodeToCreated(
     });
   }
   if (g.Ellipse) {
-    const rx = Math.max(0.5, Number(g.Ellipse.radius_x) || 1);
-    const ry = Math.max(0.5, Number(g.Ellipse.radius_y) || 1);
+    const rx = Math.max(1e-6, Number(g.Ellipse.radius_x) || 1);
+    const ry = Math.max(1e-6, Number(g.Ellipse.radius_y) || 1);
     return createShapeNode({
       x: (Number(t.x) || 0) - rx,
       y: (Number(t.y) || 0) - ry,
@@ -871,8 +952,8 @@ function kitNodeToCreated(
     return createShapeNode({
       x: (Number(t.x) || 0) + minX,
       y: (Number(t.y) || 0) + minY,
-      width: Math.max(1, maxX - minX),
-      height: Math.max(1, maxY - minY),
+      width: Math.max(1e-6, maxX - minX),
+      height: Math.max(1e-6, maxY - minY),
       shapeType,
       fill: closed && shapeType !== 'pen' && shapeType !== 'pencil' ? fillCss : 'transparent',
       stroke: paint.stroke,
@@ -926,34 +1007,37 @@ function flushCreates(
   const skipHistory = Boolean(opts?.skipHistory) || kitHistoryReconcile;
   const editor = store.getState().editor;
   let doc = editor.document ? normalizeDocument(editor.document) : null;
-  if (!doc) return;
+  if (!doc) {
+    // No document to import into — drop hint so paste/boolean cannot inherit it.
+    pendingCreateTool = null;
+    return;
+  }
 
   let dirty = false;
   let lastCreated: string | null = null;
   let createdArtboardId: string | null = null;
   // Prefer product tool id for shapeType tagging (arrow vs line); engine tool is
   // already applied at create time via InputManager.
+  // pendingCreateTool wins: maybeRevertTool sets store+Kit to selection before
+  // this microtask runs, which would otherwise tag polygons as plain `path`.
   const editorTool =
     editor.activeTool === 'shape'
       ? String(editor.shapeKind || 'rect')
       : String(editor.activeTool || '');
+  const hintedTool = pendingCreateTool;
   const createTool =
+    hintedTool ||
     editorTool ||
     attached?.ui?.activeTool ||
     '';
+  // Consume once per flush; restore below if we bail before import.
+  pendingCreateTool = null;
 
-  // Import Kit artboards when the product frame tool is active — OR when Kit
-  // still has an unmapped selected artboard. Kit maybeRevertTool switches
-  // to selection before this microtask flush runs; gating on `frame` alone
-  // then treated the new board as an orphan and remove_artboard'd it (blank
-  // canvas after draw). Do not trust Kit ui.activeTool alone for *import all*
-  // — bare `a` used to flip Kit while RCB stayed on select.
-  const productFrameTool = String(editor.activeTool || '') === 'frame';
-  const selectedAbId = Number(
-    (attached?.renderer as { selectedArtboardId?: number | null } | undefined)
-      ?.selectedArtboardId ?? NaN
-  );
-  let removedOrphan = false;
+  // Always import unmapped Kit artboards (create / duplicate / paste). Gating on
+  // frame-tool or selectedArtboardId used to drop duplicates: selection sync
+  // cleared selectedArtboardId before this microtask, so the copy was treated as
+  // an orphan and only reappeared after the next create flush. Seed boards are
+  // stripped at mount — do not delete "orphans" here.
   for (const ab of [...scene.getArtboards()]) {
     if (kitArtboardToFrame.has(ab.id)) continue;
     const frameId = `kit${ab.id}`;
@@ -963,45 +1047,30 @@ function flushCreates(
       rememberFrame(ab.id, frameId);
       continue;
     }
-    const shouldImport =
-      productFrameTool || (Number.isFinite(selectedAbId) && ab.id === selectedAbId);
-    if (shouldImport) {
-      addArtboardFrame({
-        id: frameId,
-        x: ab.x,
-        y: ab.y,
-        width: ab.w,
-        height: ab.h,
-        name: ab.name || 'Frame',
-        activate: true,
-      });
-      rememberFrame(ab.id, frameId);
-      createdArtboardId = frameId;
-      dirty = true;
-      doc = store.getState().editor.document
-        ? normalizeDocument(store.getState().editor.document)
-        : doc;
-      continue;
-    }
-    // Drop orphan Kit artboards (seed / accidental create) so they cannot paint.
-    try {
-      scene.engine?.remove_artboard(ab.id);
-      removedOrphan = true;
-    } catch {
-      /* ignore */
-    }
-  }
-  if (removedOrphan) {
-    try {
-      scene.invalidateCache?.(false);
-    } catch {
-      /* optional */
-    }
+    addArtboardFrame({
+      id: frameId,
+      x: ab.x,
+      y: ab.y,
+      width: ab.w,
+      height: ab.h,
+      name: ab.name || 'Frame',
+      activate: true,
+    });
+    rememberFrame(ab.id, frameId);
+    createdArtboardId = frameId;
+    dirty = true;
+    doc = store.getState().editor.document
+      ? normalizeDocument(store.getState().editor.document)
+      : doc;
   }
 
   doc = store.getState().editor.document
     ? normalizeDocument(store.getState().editor.document)
     : doc;
+  if (!doc) {
+    if (hintedTool) pendingCreateTool = hintedTool;
+    return;
+  }
 
   const data = scene.getSceneData();
   for (const rootId of data.root_nodes || []) {
@@ -1040,7 +1109,11 @@ function flushCreates(
   if (!dirty || !doc) return;
   if (!skipHistory) pushEditorHistory();
   mirrorKitDocument(doc);
+  // frameId lands after Kit already recorded the scene picture — re-record so
+  // clipContent applies on the first post-create paint (not only after a later mutation).
+  refreshKitArtboardClipPaint();
   // Figma-style finish: select the new object and return to the select tool.
+  // Pen/pencil stay armed until 退出编辑 — skip the one-shot revert for them.
   // Skip during Kit history reconcile — undo/redo must not steal selection/tool.
   if (!skipHistory) {
     if (lastCreated) {
@@ -1051,7 +1124,8 @@ function flushCreates(
       setSelectedNodeIds([lastCreated]);
       setSelectedFrameIds([]);
     }
-    if (lastCreated || createdArtboardId) {
+    const stayOnDrawTool = isPersistentDrawSessionTool(createTool);
+    if ((lastCreated || createdArtboardId) && !stayOnDrawTool) {
       setActiveTool('select');
       attached?.setTool('selection');
     }
@@ -1071,6 +1145,7 @@ function flushDeletesFromKit(scene: WasmScene, opts?: { skipHistory?: boolean })
   for (const [kitId, rcbId] of [...kitToRcb.entries()]) {
     if (live.has(kitId)) continue;
     dropNodes.push(rcbId);
+    clearKitTextLayoutWidth(scene, kitId);
     kitToRcb.delete(kitId);
     rcbToKit.delete(rcbId);
   }
@@ -1133,8 +1208,8 @@ function flushKitSceneToDocument(opts?: { preserveKitStyle?: boolean; skipHistor
  * - Angle comes from getNodeTransformComponents (same as Kit prop-rotation).
  * - Centered Ellipse / Polygon / Star keep transform-at-center; RCB stores
  *   top-left box = center − half size.
- * - Freehand Path keeps transform as local origin; size from existing RCB box
- *   unless Rect/Ellipse/Image geometry reports a size.
+ * - Path local AABB (after Kit resize_node) updates RCB width/height so
+ *   parametric knobs track the resized outline.
  */
 function isCenteredKitMirror(rn: SceneNodeInput, kn: KitSceneNode): boolean {
   const shapeType = String(
@@ -1149,6 +1224,46 @@ function isCenteredKitMirror(rn: SceneNodeInput, kn: KitSceneNode): boolean {
     shapeType === 'ellipse' ||
     shapeType === 'oval'
   );
+}
+
+/** Local AABB of a Kit Path (resolved outline when available). */
+function kitPathLocalAabb(
+  scene: WasmScene,
+  kitId: number,
+  kn: KitSceneNode
+): { minX: number; minY: number; w: number; h: number } | null {
+  let subpaths = kn.geometry?.Path?.subpaths as
+    | Array<{ points?: Array<{ x: number; y: number }> }>
+    | undefined;
+  try {
+    const resolved = scene.getResolvedSubpaths?.(kitId);
+    if (resolved && resolved.length) subpaths = resolved as typeof subpaths;
+  } catch {
+    /* optional on older wasm */
+  }
+  if (!subpaths?.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const sp of subpaths) {
+    for (const p of sp.points || []) {
+      const px = Number(p.x);
+      const py = Number(p.y);
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+      minX = Math.min(minX, px);
+      minY = Math.min(minY, py);
+      maxX = Math.max(maxX, px);
+      maxY = Math.max(maxY, py);
+    }
+  }
+  if (!Number.isFinite(minX) || !(maxX > minX) || !(maxY > minY)) return null;
+  return {
+    minX,
+    minY,
+    w: Math.max(1, maxX - minX),
+    h: Math.max(1, maxY - minY),
+  };
 }
 
 function flushMappedGeometry(scene: WasmScene) {
@@ -1224,8 +1339,16 @@ function flushMappedGeometry(scene: WasmScene) {
       x = tx;
       y = ty;
     } else if (kn.geometry?.Path) {
-      // Kit: rotation never mutates path points — do not rematerialize pathD.
-      if (centered) {
+      // Kit `add_path` (boolean / pen) stores local points around the AABB center
+      // with transform at that center. Always derive top-left as tx+minX — never
+      // treat transform as the box origin (that shifted boolean results by w/2,h/2).
+      const local = kitPathLocalAabb(scene, kitId, kn);
+      if (local) {
+        w = local.w;
+        h = local.h;
+        x = tx + local.minX;
+        y = ty + local.minY;
+      } else if (centered) {
         x = tx - w / 2;
         y = ty - h / 2;
       } else {
@@ -1255,26 +1378,64 @@ function flushMappedGeometry(scene: WasmScene) {
         content !== prevPlain ||
         Math.abs(fontSize - prevStyle.fontSize) > 0.01 ||
         family !== prevStyle.fontFamily;
-      if (textChanged) {
-        const measured = measurePlainTextSize(content || 'M', {
-          fontSize,
-          fontFamily: family,
-        });
-        const autoSize = String((rn.attrs as Record<string, unknown>)?.autoSize || 'true') !== 'false';
+      const layoutW = (
+        scene.renderer as { getTextLayoutWidth?: (id: number) => number | undefined } | null
+      )?.getTextLayoutWidth?.(kitId);
+      const tb = (
+        scene.renderer as {
+          getTextLocalBounds?: (id: number) => { x: number; y: number; w: number; h: number } | null;
+        } | null
+      )?.getTextLocalBounds?.(kitId);
+      const wrapMode = layoutW != null && layoutW > 0;
+      const styleForMeasure = {
+        fontSize,
+        fontFamily: family,
+        lineHeight: Number(kn.geometry.Text.line_height) || prevStyle.lineHeight || 1.2,
+        letterSpacing: Number(kn.geometry.Text.letter_spacing) || prevStyle.letterSpacing || 0,
+        fontWeight: String(kn.geometry.Text.font_weight || prevStyle.fontWeight || '400'),
+        fontStyle: kn.geometry.Text.italic ? 'italic' : 'normal',
+      };
+      let nextW = w;
+      let nextH = h;
+      let nextAuto = String((rn.attrs as Record<string, unknown>)?.autoSize || 'true') !== 'false';
+      if (wrapMode) {
+        nextAuto = false;
+        nextW = Math.max(8, layoutW);
+        const measured = measureWrappedTextSize(content || ' ', styleForMeasure, nextW);
+        nextH = Math.max(1, Math.round(tb?.h ?? measured.height));
+      } else if (textChanged || nextAuto) {
+        const measured = measurePlainTextSize(content || 'M', styleForMeasure);
+        nextW = Math.max(2, Math.round(tb?.w ?? measured.width));
+        nextH = Math.max(1, Math.round(tb?.h ?? measured.height));
+        nextAuto = true;
+      }
+      const autoAttr = nextAuto ? 'true' : 'false';
+      const prevAuto = String((rn.attrs as Record<string, unknown>)?.autoSize || 'true');
+      if (
+        textChanged ||
+        prevAuto !== autoAttr ||
+        Math.abs((Number(rn.x) || 0) - x) >= 0.01 ||
+        Math.abs((Number(rn.y) || 0) - y) >= 0.01 ||
+        Math.abs((Number(rn.width) || 0) - nextW) >= 0.01 ||
+        Math.abs((Number(rn.height) || 0) - nextH) >= 0.01 ||
+        Math.abs(Number((rn.attrs as Record<string, unknown>)?.angle || 0) - angle) >= 0.01
+      ) {
         doc = updateNodeInDocument(doc, rcbId, {
           x,
           y,
-          width: autoSize ? Math.max(2, measured.width) : w,
-          height: autoSize ? Math.max(1, measured.height) : h,
+          width: nextW,
+          height: nextH,
           attrs: {
             ...(rn.attrs || {}),
             angle,
-            ...buildMarkdownTextAttrs(content, {
-              ...prevStyle,
-              fontSize,
-              fontFamily: family,
-            }),
-            autoSize: autoSize ? 'true' : 'false',
+            ...(textChanged
+              ? buildMarkdownTextAttrs(content, {
+                  ...prevStyle,
+                  fontSize,
+                  fontFamily: family,
+                })
+              : {}),
+            autoSize: autoAttr,
           },
         });
         dirty = true;
@@ -1282,11 +1443,11 @@ function flushMappedGeometry(scene: WasmScene) {
           nodeId: rcbId,
           left: x,
           top: y,
-          width: autoSize ? Math.max(2, measured.width) : w,
-          height: autoSize ? Math.max(1, measured.height) : h,
+          width: nextW,
+          height: nextH,
         });
-        continue;
       }
+      continue;
     }
 
     if (
@@ -1320,6 +1481,8 @@ function flushMappedGeometry(scene: WasmScene) {
   }
 
   if (dirty && doc) mirrorKitDocument(doc);
+  // Ownership may have changed without a style/geom changeCounter bump.
+  if (dirty) refreshKitArtboardClipPaint();
 }
 
 /** Kit Live Paint / style mutations → SceneDocument fill/stroke attrs. */
@@ -1373,7 +1536,14 @@ function flushMappedStyle(scene: WasmScene) {
   if (dirty && doc) mirrorKitDocument(doc);
 }
 
-function flushSelectionToStore(handle: CanvasEngineHandle, opts?: { force?: boolean }) {
+function flushSelectionToStore(
+  handle: CanvasEngineHandle,
+  opts?: {
+    force?: boolean;
+    /** Captured before InputManager mouseup clears `input.marqueeRect`. */
+    marquee?: { x: number; y: number; w: number; h: number } | null;
+  }
+) {
   if (suppressDepth > 0) return;
   const sel = Array.from(handle.scene.getSelection() || []);
   const nodeIds: string[] = [];
@@ -1480,9 +1650,12 @@ function flushSelectionToStore(handle: CanvasEngineHandle, opts?: { force?: bool
     }
     pushRcb(resolveRcbForKitId(kitId));
   }
-  // Marquee still holds its rect until mouseup clears it — union DomHost-only
-  // plates (empty generators) that Kit never maps.
-  const marquee = handle.input?.marqueeRect;
+  // Union DomHost-only plates (lottie / group / empty generators) Kit never maps.
+  // Prefer the rect captured before mouseup — `input.marqueeRect` is already cleared.
+  const marquee =
+    opts?.marquee && opts.marquee.w > 1 && opts.marquee.h > 1
+      ? opts.marquee
+      : handle.input?.marqueeRect;
   if (marquee && marquee.w > 1 && marquee.h > 1) {
     const editor = store.getState().editor;
     const doc = editor.document ? normalizeDocument(editor.document) : null;
@@ -1494,6 +1667,9 @@ function flushSelectionToStore(handle: CanvasEngineHandle, opts?: { force?: bool
     for (const [id, node] of Object.entries(delta)) {
       if (!node || id === 'ROOT' || rcbToKit.has(id)) continue;
       if (!isDomHostOnlyRcbNode(node) && !isEmptyGeneratorPlate(node)) continue;
+      // Host chrome / preview-isolated / locked — not marquee targets.
+      if (isAnimationFrameHostNode(node, doc)) continue;
+      if (isNodeMarqueeSkippable(doc, node)) continue;
       const box = nodeSceneAabb(doc!, id);
       if (!box) continue;
       if (box.minX < mx1 && box.maxX > mx0 && box.minY < my1 && box.maxY > my0) {
@@ -1508,17 +1684,61 @@ function flushSelectionToStore(handle: CanvasEngineHandle, opts?: { force?: bool
   if (Number.isFinite(abId) && kitArtboardToFrame.has(abId)) {
     frameIds.push(kitArtboardToFrame.get(abId)!);
   }
+  const editorDocForSoft = store.getState().editor.document;
   const softParent =
     !frameIds.length && nodeIds.length
       ? sharedBoundFrameId(
-          store.getState().editor.document
-            ? normalizeDocument(store.getState().editor.document!)
-            : null,
+          editorDocForSoft ? normalizeDocument(editorDocForSoft) : null,
           nodeIds
         )
       : null;
   const key = `${nodeIds.join(',')}|${frameIds.join(',')}|soft:${softParent || ''}`;
   if (!opts?.force && key === lastSelKey) return;
+
+  // Composer「从画布选择」— Kit owns hits; complete attach here (SvgCanvas onSelect is bypassed).
+  const pick = store.getState().editor.canvasAttachPick as null | {
+    target: string;
+    accept?: 'image' | 'media';
+  };
+  if (pick?.target) {
+    const editorDoc = store.getState().editor.document;
+    const doc = editorDoc ? normalizeDocument(editorDoc) : null;
+    const filter = attachPickFilterOpts(pick);
+    if (!nodeIds.length && !frameIds.length) {
+      clearCanvasAttachPick();
+    } else if (doc) {
+      const plateFrame =
+        nodeIds.length === 1 && !frameIds.length
+          ? frameForFullBleedPlate(doc, nodeIds[0]!)
+          : null;
+      if (plateFrame) {
+        if (!canAttachFrameToPick(doc, plateFrame.id, filter)) {
+          setCanvasAttachPickBlocked(true);
+        } else {
+          setPendingCanvasAttach({
+            target: pick.target,
+            payload: `frame:${plateFrame.id}`,
+          });
+          clearCanvasAttachPick();
+        }
+      } else {
+        const resolved = resolveAttachPickPayload(doc, nodeIds, frameIds[0], filter);
+        if (!resolved) {
+          clearCanvasAttachPick();
+        } else if (resolved.blockedOnly) {
+          // Generators / processing nodes — stay in pick mode (not-allowed cursor).
+          setCanvasAttachPickBlocked(true);
+        } else {
+          setPendingCanvasAttach({
+            target: pick.target,
+            payload: resolved.payload,
+          });
+          clearCanvasAttachPick();
+        }
+      }
+    }
+  }
+
   lastSelKey = key;
   selectionMirrorGeneration += 1;
   // Prefer setSelectedNodeIds only — setSelectedNodeId resets selectedNodeIds to [id]
@@ -1537,12 +1757,34 @@ function flushSelectionToStore(handle: CanvasEngineHandle, opts?: { force?: bool
     if (softParent) {
       // Occupied plate context: soft edge like selecting a generator parent.
       setSoftFrameContext(softParent);
-    } else if (!nodeIds.length) {
-      setActiveFrameId(null);
-      setSoftFrameContext(null);
     } else {
       setSoftFrameContext(null);
+      if (!nodeIds.length) setActiveFrameId(null);
     }
+  }
+  if (attached) syncKitArtboardChromeHighlight(attached);
+}
+
+/** Soft / full artboard chrome → Kit softArtboardId / selectedArtboardId. */
+export function syncKitArtboardChromeHighlight(handle: CanvasEngineHandle) {
+  const editor = store.getState().editor;
+  const chromeMode = editor.frameChromeMode === 'full' ? 'full' : 'soft';
+  const active = String(editor.document?.activeFrameId || '').trim();
+  const softFrameId =
+    chromeMode === 'soft'
+      ? active || String((editor.selectedFrameIds || [])[0] || '').trim()
+      : '';
+  const softKit = softFrameId ? frameToKitArtboard.get(softFrameId) ?? null : null;
+  const r = handle.renderer as {
+    softArtboardId?: number | null;
+    selectedArtboardId?: number | null;
+  };
+  if (r.softArtboardId !== softKit) {
+    r.softArtboardId = softKit;
+  }
+  // Soft must never leave a stale selectedArtboardId (handles / title chrome).
+  if (chromeMode === 'soft' && softKit != null && r.selectedArtboardId != null) {
+    r.selectedArtboardId = null;
   }
 }
 
@@ -1657,6 +1899,8 @@ function finalizeMarqueeSelection(
       let multi = already.size > 0 || shiftKey;
       for (const [rcbId, kitId] of rcbToKit.entries()) {
         if (already.has(kitId)) continue;
+        const node = doc.deltaSetLike[rcbId];
+        if (node && isNodeMarqueeSkippable(doc, node)) continue;
         const box = nodeSceneAabb(doc, rcbId);
         if (!box) continue;
         if (box.minX < x1 && box.maxX > x0 && box.minY < y1 && box.maxY > y0) {
@@ -1667,6 +1911,24 @@ function finalizeMarqueeSelection(
           } catch {
             /* ignore */
           }
+        }
+      }
+      // Drop Kit hits that map to preview-isolated / locked RCB nodes so
+      // timeline-closed workbench marquees do not select unpickable ink.
+      const skipKit = new Set<number>();
+      for (const kitId of already) {
+        const rcbId = kitToRcb.get(kitId);
+        if (!rcbId) continue;
+        const node = doc.deltaSetLike[rcbId];
+        if (node && isNodeMarqueeSkippable(doc, node)) skipKit.add(kitId);
+      }
+      if (skipKit.size) {
+        try {
+          const keep = [...already].filter((id) => !skipKit.has(id));
+          handle.scene.engine?.clear_selection();
+          for (const id of keep) handle.scene.selectNode(id, true);
+        } catch {
+          /* ignore */
         }
       }
     }
@@ -1681,23 +1943,160 @@ function finalizeMarqueeSelection(
     }
     handle.renderer.requestRender();
   }
-  flushSelectionToStore(handle, { force: true });
+  flushSelectionToStore(handle, { force: true, marquee });
 
-  // Occupied plate body click (no marquee / no node hit): soft-select like a generator.
-  if (!marqueeSignificant && softPending) {
+  // Artboards are selection units (same as click / Shift+title multi-select).
+  // Without this, a plate marquee only selects bound children → node toolbar
+  // and no multi-frame control box (FrameMultiSelectionToolbar).
+  if (marqueeSignificant && marquee) {
+    promoteMarqueeToArtboardUnits(handle, marquee, shiftKey);
+  }
+
+  // Occupied plate body click (no marquee): soft-select like a generator.
+  // Marquee that only hit preview-isolated / unpickable ink: soft-select the
+  // plate — but never on Shift (additive) or when frames are already selected.
+  if (softPending) {
     const kitSel = Array.from(handle.scene.getSelection?.() || []);
-    if (!kitSel.length) {
+    const ed = store.getState().editor;
+    const storeSel = ed.selectedNodeIds || [];
+    const frameSel = ed.selectedFrameIds || [];
+    const allowSoft =
+      !kitSel.length &&
+      !storeSel.length &&
+      (!marqueeSignificant || (!shiftKey && !frameSel.length));
+    if (allowSoft) {
       selectionMirrorGeneration += 1;
       setMixedSelection({ nodeIds: [], frameIds: [softPending] });
-      // setMixedSelection leaves soft for single occupied plate — ensure soft.
       setSoftFrameContext(softPending);
       lastSelKey = `|${softPending}|soft:${softPending}`;
     }
   }
 }
 
-function applyPreviewToKit(_scene: WasmScene) {
-  void _scene;
+/** Scene frames whose plate AABB intersects the marquee rect. */
+function framesIntersectingMarquee(
+  doc: SceneDocument,
+  marquee: { x: number; y: number; w: number; h: number }
+): string[] {
+  const frames = Array.isArray(doc.frames) ? doc.frames : [];
+  if (!frames.length) return [];
+  const x0 = marquee.x;
+  const y0 = marquee.y;
+  const x1 = marquee.x + marquee.w;
+  const y1 = marquee.y + marquee.h;
+  const out: string[] = [];
+  for (const frame of frames) {
+    const id = String(frame?.id || '').trim();
+    if (!id || !isArtboardVisibleInDocument(frame)) continue;
+    if (frame.locked) continue;
+    const box = frameSceneBounds(doc, frame, getLiveArtboardFrameGeometry(id));
+    if (
+      box.left < x1 &&
+      box.left + box.width > x0 &&
+      box.top < y1 &&
+      box.top + box.height > y0
+    ) {
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+function aabbIntersectionArea(
+  a: { left: number; top: number; width: number; height: number },
+  mx0: number,
+  my0: number,
+  mx1: number,
+  my1: number
+): number {
+  const x0 = Math.max(a.left, mx0);
+  const y0 = Math.max(a.top, my0);
+  const x1 = Math.min(a.left + a.width, mx1);
+  const y1 = Math.min(a.top + a.height, my1);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/**
+ * Marquee that targets artboard plates → select frames (full chrome), not only
+ * their children. Multi-plate → FrameMultiSelectionToolbar + union control box.
+ */
+function promoteMarqueeToArtboardUnits(
+  handle: CanvasEngineHandle,
+  marquee: { x: number; y: number; w: number; h: number },
+  shiftKey: boolean
+) {
+  const editor = store.getState().editor;
+  const doc = editor.document ? normalizeDocument(editor.document) : null;
+  if (!doc) return;
+
+  const hitFrames = framesIntersectingMarquee(doc, marquee);
+  if (!hitFrames.length) return;
+
+  const hitSet = new Set(hitFrames);
+  const nodeIds = (editor.selectedNodeIds || []).map(String).filter(Boolean);
+  const freeOrForeign = nodeIds.filter((id) => {
+    const fid = String(doc.deltaSetLike?.[id]?.attrs?.frameId || '').trim();
+    return !fid || !hitSet.has(fid);
+  });
+  // Pasteboard / other-frame content in the same marquee → keep node selection.
+  if (freeOrForeign.length) return;
+
+  // Multi empty plates / bare empty: promote. Single occupied plate: only when
+  // the marquee mostly covers it (whole-board gesture).
+  if (hitFrames.length < 2 && nodeIds.length > 0) {
+    const fid = hitFrames[0]!;
+    const frame = (Array.isArray(doc.frames) ? doc.frames : []).find(
+      (f) => String(f?.id) === fid
+    );
+    if (!frame) return;
+    const box = frameSceneBounds(doc, frame, getLiveArtboardFrameGeometry(fid));
+    const area = Math.max(1, box.width * box.height);
+    const cover =
+      aabbIntersectionArea(box, marquee.x, marquee.y, marquee.x + marquee.w, marquee.y + marquee.h) /
+      area;
+    if (cover < 0.55) return;
+  }
+
+  let nextFrames = hitFrames;
+  if (shiftKey) {
+    const cur = new Set((editor.selectedFrameIds || []).map(String).filter(Boolean));
+    for (const id of hitFrames) {
+      if (cur.has(id)) cur.delete(id);
+      else cur.add(id);
+    }
+    nextFrames = [...cur];
+    if (!nextFrames.length) {
+      try {
+        handle.scene.engine?.clear_selection();
+      } catch {
+        /* ignore */
+      }
+      (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId = null;
+      selectionMirrorGeneration += 1;
+      setSelectedNodeIds([]);
+      setSelectedFrameIds([]);
+      lastSelKey = '|';
+      syncKitArtboardChromeHighlight(handle);
+      handle.renderer.requestRender();
+      return;
+    }
+  }
+
+  try {
+    handle.scene.engine?.clear_selection();
+  } catch {
+    /* ignore */
+  }
+  selectionMirrorGeneration += 1;
+  // setSelectedFrameIds → full chrome (toolbar + handles). Clear nodes so
+  // SelectionFeature does not show MultiSelectionToolbar over plates.
+  setSelectedNodeIds([]);
+  setSelectedFrameIds(nextFrames);
+  lastSelKey = `|${nextFrames.join(',')}|`;
+  syncKitSelectionFromStore(handle, [], nextFrames);
+  handle.renderer.requestRender();
 }
 
 /** Parse CSS hex/rgba into Kit 0–1 color. */
@@ -2014,45 +2413,43 @@ function applyKitNodeGeom(
   }
 }
 
-function effectsJsonFromRcbNode(node: SceneNodeInput): string {
-  const attrs = (node.attrs || {}) as Record<string, unknown>;
-  // SoftGlow / process was SVG dual ink — Kit DropShadow matches the reference effects path.
-  if (String(attrs.processStatus || '') === 'running') {
-    return JSON.stringify([
-      {
-        DropShadow: {
-          dx: 0,
-          dy: 0,
-          blur: 28,
-          color: { r: 0.25, g: 0.55, b: 1, a: 0.55 },
-        },
-      },
-    ]);
+const KIT_EFFECTS_EMPTY_JSON = '[]';
+
+function kitStyleJsonForNode(node: SceneNodeInput): string {
+  if (isEmptyGeneratorPlate(node)) return emptyGeneratorKitStyleJson();
+  if (isNodeProcessRunning(node)) {
+    return JSON.stringify({
+      fills: [],
+      strokes: [],
+      // Ink hidden — Kit overlay paints SoftGlow in node local space.
+      opacity: 0,
+      blend_mode: 0,
+      fill_rule: 0,
+      corner_radius: 0,
+      effects: [],
+    });
   }
-  return JSON.stringify([]);
+  const key = String(node.key || '');
+  if (key === 'image' || key === 'video' || key === 'audio') {
+    const opacity = Number(node.attrs?.opacity ?? 1);
+    const o = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
+    return JSON.stringify({
+      fills: [],
+      strokes: [],
+      opacity: o,
+      blend_mode: 0,
+      fill_rule: 0,
+      corner_radius: 0,
+      effects: [],
+    });
+  }
+  return styleJsonFromRcbNode(node);
 }
 
 function applyKitNodeStyle(scene: WasmScene, kitId: number, node: SceneNodeInput): boolean {
   let changed = false;
   try {
-    const key = String(node.key || '');
-    let styleJson = isEmptyGeneratorPlate(node)
-      ? emptyGeneratorKitStyleJson()
-      : key === 'image' || key === 'video' || key === 'audio'
-        ? (() => {
-            const opacity = Number(node.attrs?.opacity ?? 1);
-            const o = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
-            return JSON.stringify({
-              fills: [],
-              strokes: [],
-              opacity: o,
-              blend_mode: 0,
-              fill_rule: 0,
-              corner_radius: 0,
-              effects: [],
-            });
-          })()
-        : styleJsonFromRcbNode(node);
+    let styleJson = kitStyleJsonForNode(node);
     // Mesh fills live in Kit Mesh tool — SceneDocument only mirrors
     // solid/gradient today. Never clobber an active mesh with RCB solid attrs.
     const kitNode = scene.getNode(kitId);
@@ -2078,11 +2475,13 @@ function applyKitNodeStyle(scene: WasmScene, kitId: number, node: SceneNodeInput
     /* ignore */
   }
   if (applyKitTextProps(scene, kitId, node)) changed = true;
+  else if (String(node.key || '') === 'text') {
+    applyKitTextLayoutWidth(scene, kitId, node);
+  }
   try {
-    const effectsJson = effectsJsonFromRcbNode(node);
-    if (lastKitEffectsJson.get(kitId) !== effectsJson) {
-      scene.setNodeEffectsNoHistory(kitId, effectsJson);
-      lastKitEffectsJson.set(kitId, effectsJson);
+    if (lastKitEffectsJson.get(kitId) !== KIT_EFFECTS_EMPTY_JSON) {
+      scene.setNodeEffectsNoHistory(kitId, KIT_EFFECTS_EMPTY_JSON);
+      lastKitEffectsJson.set(kitId, KIT_EFFECTS_EMPTY_JSON);
       changed = true;
     }
   } catch {
@@ -2197,7 +2596,7 @@ function commitImageBytesToKit(
 function emptyGeneratorKitStyleJson(): string {
   return JSON.stringify({
     fills: [{ r: 233 / 255, g: 234 / 255, b: 238 / 255, a: 1 }],
-    // Edge is screen-constant in drawEmptyGeneratorIcons (#c5c9d2 @ 1 CSS px).
+    // Edge is screen-constant in drawEmptyGeneratorIcons (GENERATOR_EMPTY_PLATE_STROKE @ 1 CSS px).
     strokes: [],
     opacity: 1,
     blend_mode: 0,
@@ -2325,6 +2724,7 @@ function pushNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInput) {
         kitId,
         `${parseNodeMarkdown(attrs)}\0${fontSize}\0${family}\0${align}\0${lh}`
       );
+      applyKitTextLayoutWidth(scene, kitId, node);
     }
   } else if (shapeType === 'circle' || shapeType === 'ellipse' || shapeType === 'oval') {
     if (ellipseNeedsVariantPath(attrs)) {
@@ -2475,6 +2875,7 @@ export function reconcileKitWithDocument(
     for (const [kitId, rcbId] of [...kitToRcb.entries()]) {
       if (delta[rcbId]) continue;
       scene.removeNode(kitId);
+      clearKitTextLayoutWidth(scene, kitId);
       kitToRcb.delete(kitId);
       rcbToKit.delete(rcbId);
       forgetKitStyle(kitId);
@@ -2496,6 +2897,7 @@ export function reconcileKitWithDocument(
       }
       kitToRcb.delete(kitId);
       rcbToKit.delete(rcbId);
+      clearKitTextLayoutWidth(scene, kitId);
       forgetKitStyle(kitId);
       lastParametricSig.delete(rcbId);
       dirty = true;
@@ -2553,7 +2955,7 @@ export function reconcileKitWithDocument(
       const key = String(node.key || '');
       if (isEmptyGeneratorPlate(node) || key === 'image' || key === 'video' || key === 'audio') {
         // Upgrade placeholder → real Kit image when src/poster arrives.
-        // Empty generators stay Kit gray rect + HTML Lucide overlay.
+        // Empty generators stay Kit gray rect + overlay glyph paint.
         pushRasterNodeToKit(scene, rcbId, node);
         dirty = true;
         continue;
@@ -2593,6 +2995,8 @@ export function reconcileKitWithDocument(
       handle.renderer.requestRender();
     }
   });
+  // clipContent / frameId can change with no Kit changeCounter — re-record clips.
+  refreshKitArtboardClipPaint();
   // First generator spawn: store selection lands before Kit maps the plate.
   // Retry Store→Kit now that membership is current.
   const editor = store.getState().editor;
@@ -2623,6 +3027,9 @@ export function syncKitGeometryFromDocument(
       if (kitId == null || !node) continue;
       const { left, top } = nodeLeftTop(document, node);
       applyKitNodeGeom(scene, kitId, node, { worldX: left, worldY: top });
+      // Gradients store absolute local endpoints — re-push style so fill tracks
+      // the new box (resize_node only stretches path/rect, not fill coords).
+      applyKitNodeStyle(scene, kitId, node);
     }
     handle.renderer.requestRender();
   });
@@ -2693,38 +3100,6 @@ export function syncKitGeometryFromTransformPreviews(
   });
 }
 
-/** Panel / toolbar attr edits → Kit ink (fill, stroke, opacity, gradients). */
-export function syncKitStyleFromDocument(
-  handle: CanvasEngineHandle,
-  document: SceneDocument | null | undefined,
-  onlyIds?: Iterable<string>
-) {
-  if (!document || suppressDepth > 0) return;
-  const scene = handle.scene;
-  const delta = document.deltaSetLike || {};
-  const idList = onlyIds ? [...onlyIds] : [...rcbToKit.keys()];
-  withSuppress(() => {
-    for (const rcbId of idList) {
-      const kitId = rcbToKit.get(String(rcbId));
-      const node = delta[String(rcbId)];
-      if (kitId == null || !node) continue;
-      applyKitNodeStyle(scene, kitId, node);
-    }
-    for (const [frameId, kitId] of frameToKitArtboard.entries()) {
-      if (onlyIds) {
-        const want = new Set([...onlyIds].map(String));
-        if (!want.has(frameId)) continue;
-      }
-      const frame = (Array.isArray(document.frames) ? document.frames : []).find(
-        (f) => String(f?.id) === frameId
-      );
-      if (!frame) continue;
-      applyKitArtboardFromFrame(scene, kitId, frame);
-    }
-    handle.renderer.requestRender();
-  });
-}
-
 /**
  * Store → Kit selection (layers / paste / external chrome only).
  * Kit: canvas pick/marquee/move live in the engine — never fight that with a
@@ -2761,8 +3136,13 @@ export function syncKitSelectionFromStore(
   const wantNodeKey = [...nodes].sort().join(',');
   const chromeMode =
     store.getState().editor.frameChromeMode === 'full' ? 'full' : 'soft';
-  // Soft plate focus is HTML edge only — Kit must not hold selectedArtboardId
-  // (that paints full artboard handles / title drag chrome).
+  // Soft plate focus: Kit recolors the plate stroke (softArtboardId) — do not
+  // set selectedArtboardId (that paints full handles / title drag chrome).
+  // Multi-frame full: keep selectedArtboardId on primary for Kit body-drag, and
+  // stamp rcbSelectedArtboardKitIds so drawArtboards paints the union control box.
+  const kitFrameIds = frames
+    .map((fid) => frameToKitArtboard.get(fid))
+    .filter((id): id is number => id != null);
   const wantAb =
     chromeMode === 'full' && frames[0] != null
       ? frameToKitArtboard.get(frames[0]) ?? null
@@ -2773,8 +3153,18 @@ export function syncKitSelectionFromStore(
     wantAb == null ? curAb == null : wantAb === curAb;
   const kitMatchesWant = kitNodeKey === wantNodeKey && artboardMatches;
 
+  const stampMultiArtboards = () => {
+    const r = handle.renderer as {
+      rcbSelectedArtboardKitIds?: number[];
+    };
+    r.rcbSelectedArtboardKitIds =
+      chromeMode === 'full' && kitFrameIds.length > 1 ? kitFrameIds : [];
+  };
+
   if (kitMatchesWant) {
     lastSelKey = key;
+    stampMultiArtboards();
+    syncKitArtboardChromeHighlight(handle);
     handle.renderer.requestRender();
     return;
   }
@@ -2808,11 +3198,12 @@ export function syncKitSelectionFromStore(
         applied += 1;
       }
     } else if (frameId && chromeMode === 'soft') {
-      // Soft artboard focus lives in the store / HTML plate edge only.
       applied += 1;
     }
+    stampMultiArtboards();
     // Tool stays with Kit InputManager / toolbar setTool — do not re-assert
     // 'selection' here (that fought create one-shot + path-edit).
+    syncKitArtboardChromeHighlight(handle);
     handle.renderer.requestRender();
   });
   // Store selected a node/frame before Kit mapped it — leave lastSelKey unset
@@ -2886,6 +3277,8 @@ export function hydrateKitFromDocument(
     }
     handle.renderer.requestRender();
   });
+  lastArtboardClipPaintSig = '';
+  refreshKitArtboardClipPaint(true);
 }
 
 function emptyGeneratorIconKind(
@@ -2913,7 +3306,168 @@ function kitSelectionIsEmptyGeneratorsOnly(handle: CanvasEngineHandle): boolean 
   return true;
 }
 
-/** CanvasKit strokes for empty-generator Lucide glyphs + 1 CSS px plate hairline. */
+let processGlowRaf = 0;
+
+function hasActiveProcessGlow(): boolean {
+  const editor = store.getState().editor;
+  const doc = editor.document ? normalizeDocument(editor.document) : null;
+  if (doc && listProcessingNodeIds(doc).length > 0) return true;
+  const ai = editor.aiOperationState;
+  return Boolean(ai?.active && ai.frameId);
+}
+
+function ensureProcessGlowAnimation(handle: CanvasEngineHandle) {
+  if (processGlowRaf || !hasActiveProcessGlow()) return;
+  const tick = () => {
+    if (!attached || attached !== handle || !hasActiveProcessGlow()) {
+      processGlowRaf = 0;
+      return;
+    }
+    try {
+      handle.renderer.requestRender();
+    } catch {
+      /* ignore */
+    }
+    processGlowRaf = requestAnimationFrame(tick);
+  };
+  processGlowRaf = requestAnimationFrame(tick);
+}
+
+function stopProcessGlowAnimation() {
+  if (!processGlowRaf) return;
+  cancelAnimationFrame(processGlowRaf);
+  processGlowRaf = 0;
+}
+
+/** Kit-local SoftGlow for processing nodes + AI-generating artboards. */
+function drawProcessingPlates(handle: CanvasEngineHandle, canvas: unknown, dpr: number) {
+  if (!hasActiveProcessGlow()) return;
+  ensureProcessGlowAnimation(handle);
+
+  const editor = store.getState().editor;
+  const doc = editor.document ? normalizeDocument(editor.document) : null;
+  const timeMs = performance.now();
+
+  const renderer = handle.renderer as {
+    ck: {
+      Paint: new () => {
+        setStyle: (s: unknown) => void;
+        setShader?: (s: unknown | null) => void;
+        setColor: (c: unknown) => void;
+        setAntiAlias: (v: boolean) => void;
+        delete: () => void;
+      };
+      PaintStyle: { Fill: unknown };
+      Color4f?: (r: number, g: number, b: number, a: number) => unknown;
+      Color: (r: number, g: number, b: number, a: number) => unknown;
+      LTRBRect?: (l: number, t: number, r: number, b: number) => unknown;
+      ClipOp?: { Intersect: unknown };
+    };
+    zoom: number;
+    pan: { x: number; y: number };
+  };
+  const ck = renderer.ck;
+  const c = canvas as {
+    save: () => void;
+    restore: () => void;
+    scale: (x: number, y: number) => void;
+    translate: (x: number, y: number) => void;
+    concat: (m: unknown) => void;
+    clipRect?: (r: unknown, op: unknown, aa: boolean) => void;
+    drawRect: (r: unknown, paint: unknown) => void;
+    drawCircle?: (cx: number, cy: number, r: number, paint: unknown) => void;
+  };
+  const paint = new ck.Paint();
+  paint.setAntiAlias(true);
+
+  c.save();
+  c.scale(dpr, dpr);
+  c.translate(renderer.pan.x, renderer.pan.y);
+  c.scale(renderer.zoom, renderer.zoom);
+
+  if (doc?.deltaSetLike) {
+    for (const rcbId of listProcessingNodeIds(doc)) {
+      const node = doc.deltaSetLike[rcbId];
+      const kitId = rcbToKit.get(rcbId);
+      if (!node || kitId == null || isEmptyGeneratorPlate(node)) continue;
+
+      // World AABB — Image/Path local origins differ; never concat(getTransform)
+      // with document width (that stretched SoftGlow into a huge black plate).
+      let x = Number(node.x) || 0;
+      let y = Number(node.y) || 0;
+      let w = Math.max(1, Number(node.width) || 1);
+      let h = Math.max(1, Number(node.height) || 1);
+      const aabb = kitNodeWorldAabb(handle.scene, kitId);
+      if (aabb) {
+        x = aabb.minX;
+        y = aabb.minY;
+        w = aabb.maxX - aabb.minX;
+        h = aabb.maxY - aabb.minY;
+      }
+      if (!(w > 0) || !(h > 0)) continue;
+
+      c.save();
+      try {
+        const clip = kitNodeArtboardClipRect(handle, kitId);
+        if (clip && clip.w > 0 && clip.h > 0 && c.clipRect && ck.LTRBRect && ck.ClipOp) {
+          c.clipRect(
+            ck.LTRBRect(clip.x, clip.y, clip.x + clip.w, clip.y + clip.h),
+            ck.ClipOp.Intersect,
+            true
+          );
+        }
+      } catch {
+        /* ignore artboard clip */
+      }
+      try {
+        c.translate(x, y);
+        paintKitProcessPlateLocal(c, ck, paint, w, h, rcbId, timeMs);
+      } catch {
+        /* skip node */
+      }
+      c.restore();
+    }
+  }
+
+  const ai = editor.aiOperationState;
+  if (ai?.active && ai.frameId) {
+    const abId = frameToKitArtboard.get(String(ai.frameId));
+    if (abId != null) {
+      const ab = handle.scene.getArtboards().find((a) => a.id === abId);
+      if (ab && ab.w > 0 && ab.h > 0) {
+        c.save();
+        c.translate(ab.x, ab.y);
+        paintKitProcessPlateLocal(c, ck, paint, ab.w, ab.h, String(ai.frameId), timeMs);
+        c.restore();
+      }
+    }
+  }
+
+  c.restore();
+  paint.delete();
+}
+
+/** World AABB from Kit bounds (`[minX,minY,maxX,maxY]`), or null. */
+function kitNodeWorldAabb(
+  scene: { getNodeBounds: (id: number) => ArrayLike<number> | null | undefined },
+  kitId: number
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  try {
+    const b = scene.getNodeBounds(kitId);
+    if (!b || b.length < 4) return null;
+    const minX = Number(b[0]);
+    const minY = Number(b[1]);
+    const maxX = Number(b[2]);
+    const maxY = Number(b[3]);
+    if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
+    if (!(maxX > minX) || !(maxY > minY)) return null;
+    return { minX, minY, maxX, maxY };
+  } catch {
+    return null;
+  }
+}
+
+/** CanvasKit: 1 CSS px plate hairline + filled empty-gen glyphs (never squash). */
 function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dpr: number) {
   const editor = store.getState().editor;
   const doc = editor.document ? normalizeDocument(editor.document) : null;
@@ -2933,16 +3487,14 @@ function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dp
         new (): {
           moveTo: (x: number, y: number) => void;
           lineTo: (x: number, y: number) => void;
+          close?: () => void;
+          addCircle?: (cx: number, cy: number, r: number) => void;
           addRect?: (r: unknown) => void;
           delete: () => void;
         };
-        MakeFromSVGString?: (d: string) => {
-          moveTo: (x: number, y: number) => void;
-          lineTo: (x: number, y: number) => void;
-          delete: () => void;
-        } | null;
+        MakeFromSVGString?: (d: string) => { delete: () => void } | null;
       };
-      PaintStyle: { Stroke: unknown };
+      PaintStyle: { Stroke: unknown; Fill: unknown };
       StrokeCap: { Round: unknown; Butt?: unknown };
       StrokeJoin: { Round: unknown; Miter?: unknown };
       Color: (r: number, g: number, b: number, a: number) => unknown;
@@ -2962,13 +3514,15 @@ function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dp
     concat: (m: unknown) => void;
     drawPath: (path: unknown, paint: unknown) => void;
     drawRect?: (r: unknown, paint: unknown) => void;
+    drawCircle?: (cx: number, cy: number, r: number, paint: unknown) => void;
     clipRect?: (r: unknown, op: unknown, aa: boolean) => void;
   };
   const zoom = Math.max(0.05, Number(renderer.zoom) || 1);
   const plateSw = GENERATOR_EMPTY_PLATE_STROKE_WIDTH / zoom;
+  const plateRgb = generatorEmptyCssRgb(GENERATOR_EMPTY_PLATE_STROKE);
+  const iconRgb = generatorEmptyCssRgb(GENERATOR_EMPTY_ICON_COLOR);
 
   const paint = new ck.Paint();
-  paint.setStyle(ck.PaintStyle.Stroke);
   paint.setAntiAlias(true);
 
   c.save();
@@ -2986,7 +3540,24 @@ function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dp
     if (!rect || !(rect.width > 0) || !(rect.height > 0)) continue;
     const w = rect.width;
     const h = rect.height;
-    const icon = generatorEmptyIconSize(w, h, zoom);
+
+    // World AABB — icon size/placement must ignore non-uniform node scale
+    // (16:9 plates used to squash Lucide strokes via concat(transform)).
+    let worldW = w;
+    let worldH = h;
+    let worldCx = w / 2;
+    let worldCy = h / 2;
+    let haveWorld = false;
+    const aabb = kitNodeWorldAabb(handle.scene, kitId);
+    if (aabb) {
+      worldW = aabb.maxX - aabb.minX;
+      worldH = aabb.maxY - aabb.minY;
+      worldCx = (aabb.minX + aabb.maxX) / 2;
+      worldCy = (aabb.minY + aabb.maxY) / 2;
+      haveWorld = true;
+    }
+    const icon = generatorEmptyIconSize(worldW, worldH, zoom);
+
     c.save();
     try {
       const clip = kitNodeArtboardClipRect(handle, kitId);
@@ -2997,18 +3568,19 @@ function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dp
           true
         );
       }
-      c.concat(handle.scene.getTransform(kitId));
     } catch {
-      c.restore();
-      continue;
+      /* ignore clip */
     }
 
-    // Idle plate hairline — 1 CSS px cool gray (historical generator ink).
-    paint.setStrokeCap(ck.StrokeCap.Butt ?? ck.StrokeCap.Round);
-    paint.setStrokeJoin(ck.StrokeJoin.Miter ?? ck.StrokeJoin.Round);
-    paint.setStrokeWidth(plateSw);
-    paint.setColor(ck.Color(0xc5 / 255, 0xc9 / 255, 0xd2 / 255, 1));
-    {
+    // Idle plate hairline in local node space (follows plate transform).
+    c.save();
+    try {
+      c.concat(handle.scene.getTransform(kitId));
+      paint.setStyle(ck.PaintStyle.Stroke);
+      paint.setStrokeCap(ck.StrokeCap.Butt ?? ck.StrokeCap.Round);
+      paint.setStrokeJoin(ck.StrokeJoin.Miter ?? ck.StrokeJoin.Round);
+      paint.setStrokeWidth(plateSw);
+      paint.setColor(ck.Color(plateRgb.r, plateRgb.g, plateRgb.b, 1));
       const inset = plateSw / 2;
       const x0 = inset;
       const y0 = inset;
@@ -3026,21 +3598,29 @@ function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dp
         c.drawPath(edge, paint);
         edge.delete();
       }
+    } catch {
+      /* skip edge */
     }
+    c.restore();
 
     if (generatorEmptyIconVisible(icon)) {
-      // Soft Lucide — same glyph family as title chrome, screen-capped size.
-      paint.setStrokeCap(ck.StrokeCap.Round);
-      paint.setStrokeJoin(ck.StrokeJoin.Round);
-      paint.setColor(ck.Color(0x9a / 255, 0xa3 / 255, 0xb2 / 255, 0.85));
-      const s = icon / 24;
-      const ox = (w - icon) / 2;
-      const oy = (h - icon) / 2;
-      paint.setStrokeWidth(LU_ICON_STROKE * s);
+      // Filled glyphs in WORLD space — uniform scale only (图1 play / 图2 landscape / 图3 bars).
       c.save();
-      c.translate(ox, oy);
-      c.scale(s, s);
-      drawGeneratorEmptyLucideOnCk(ck, c, paint, kind);
+      if (haveWorld) {
+        c.translate(worldCx - icon / 2, worldCy - icon / 2);
+      } else {
+        try {
+          c.concat(handle.scene.getTransform(kitId));
+        } catch {
+          c.restore();
+          c.restore();
+          continue;
+        }
+        c.translate((w - icon) / 2, (h - icon) / 2);
+      }
+      c.scale(icon / 24, icon / 24);
+      paint.setColor(ck.Color(iconRgb.r, iconRgb.g, iconRgb.b, 1));
+      drawGeneratorEmptyFilledOnCk(ck, c, paint, kind);
       c.restore();
     }
     c.restore();
@@ -3050,67 +3630,147 @@ function drawEmptyGeneratorIcons(handle: CanvasEngineHandle, canvas: unknown, dp
   paint.delete();
 }
 
-function drawGeneratorEmptyLucideOnCk(
+function drawGeneratorEmptyFilledOnCk(
   ck: {
     Path: {
       new (): {
         moveTo: (x: number, y: number) => void;
         lineTo: (x: number, y: number) => void;
+        close?: () => void;
         delete: () => void;
       };
-      MakeFromSVGString?: (d: string) => {
-        delete: () => void;
-      } | null;
+      MakeFromSVGString?: (d: string) => { delete: () => void } | null;
     };
+    PaintStyle: { Stroke: unknown; Fill: unknown };
+    StrokeCap: { Round: unknown };
   },
-  c: { drawPath: (path: unknown, paint: unknown) => void },
-  paint: unknown,
+  c: {
+    drawPath: (path: unknown, paint: unknown) => void;
+    drawCircle?: (cx: number, cy: number, r: number, paint: unknown) => void;
+  },
+  paint: {
+    setStyle: (s: unknown) => void;
+    setStrokeWidth: (w: number) => void;
+    setStrokeCap: (c: unknown) => void;
+  },
   kind: GeneratorEmptyIconKind
 ) {
   const makeSvg = ck.Path.MakeFromSVGString?.bind(ck.Path);
 
   if (kind === 'audio') {
-    for (const [x0, y0, x1, y1] of LU_AUDIO_LINES_SEGS) {
+    paint.setStyle(ck.PaintStyle.Stroke);
+    paint.setStrokeCap(ck.StrokeCap.Round);
+    paint.setStrokeWidth(GEN_AUDIO_BAR_STROKE);
+    for (const [x, y0, y1] of GEN_AUDIO_BARS) {
       const path = new ck.Path();
-      path.moveTo(x0, y0);
-      path.lineTo(x1, y1);
+      path.moveTo(x, y0);
+      path.lineTo(x, y1);
       c.drawPath(path, paint);
       path.delete();
     }
     return;
   }
 
-  const paths =
-    kind === 'image' ? LU_IMAGE_PLUS_PATHS : [...LU_VIDEO_PATHS, LU_VIDEO_RECT_PATH];
-
-  if (makeSvg) {
-    for (const d of paths) {
-      const p = makeSvg(d);
-      if (!p) continue;
+  paint.setStyle(ck.PaintStyle.Fill);
+  if (kind === 'video') {
+    const p = makeSvg?.(GEN_VIDEO_PLAY_PATH);
+    if (p) {
       c.drawPath(p, paint);
       p.delete();
+      return;
     }
-    if (kind === 'image') {
-      const { cx, cy, r } = LU_IMAGE_PLUS_CIRCLE;
-      const circ = makeSvg(
-        `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0`
-      );
-      if (circ) {
-        c.drawPath(circ, paint);
-        circ.delete();
-      }
-    }
+    const tri = new ck.Path();
+    tri.moveTo(9, 6.5);
+    tri.lineTo(9, 17.5);
+    tri.lineTo(18, 12);
+    tri.close?.();
+    c.drawPath(tri, paint);
+    tri.delete();
     return;
   }
 
-  // Densify fallback in local 24×24 (caller already scaled).
-  const segs = generatorEmptyIconWorldSegs(kind, 0, 0, 24, 24, 24);
-  for (const seg of segs) {
-    const path = new ck.Path();
-    path.moveTo(seg.x0, seg.y0);
-    path.lineTo(seg.x1, seg.y1);
-    c.drawPath(path, paint);
-    path.delete();
+  // image — sun + mountains
+  if (typeof c.drawCircle === 'function') {
+    c.drawCircle(GEN_IMAGE_SUN.cx, GEN_IMAGE_SUN.cy, GEN_IMAGE_SUN.r, paint);
+  } else {
+    const circ = makeSvg?.(
+      `M ${GEN_IMAGE_SUN.cx - GEN_IMAGE_SUN.r} ${GEN_IMAGE_SUN.cy} a ${GEN_IMAGE_SUN.r} ${GEN_IMAGE_SUN.r} 0 1 0 ${GEN_IMAGE_SUN.r * 2} 0 a ${GEN_IMAGE_SUN.r} ${GEN_IMAGE_SUN.r} 0 1 0 ${-GEN_IMAGE_SUN.r * 2} 0`
+    );
+    if (circ) {
+      c.drawPath(circ, paint);
+      circ.delete();
+    }
+  }
+  const mt = makeSvg?.(GEN_IMAGE_MOUNTAIN_PATH);
+  if (mt) {
+    c.drawPath(mt, paint);
+    mt.delete();
+    return;
+  }
+  const poly = new ck.Path();
+  poly.moveTo(3.2, 18.2);
+  poly.lineTo(9.4, 8.6);
+  poly.lineTo(12.8, 13.4);
+  poly.lineTo(16.2, 9.2);
+  poly.lineTo(20.8, 18.2);
+  poly.close?.();
+  c.drawPath(poly, paint);
+  poly.delete();
+}
+
+/**
+ * Ownership / clipContent fingerprint for Kit-mapped nodes (no live bounds —
+ * plate drag already invalidates via move_nodes / invalidateCache).
+ */
+function artboardClipPaintSig(): string {
+  const doc = store.getState().editor.document as SceneDocument | null;
+  if (!doc?.deltaSetLike) return '';
+  const frames = Array.isArray(doc.frames) ? doc.frames : [];
+  const frameById = new Map(
+    frames.map((f) => [String(f?.id || ''), f] as const).filter(([id]) => Boolean(id))
+  );
+  const parts: string[] = [];
+  for (const frame of frames) {
+    const id = String(frame?.id || '').trim();
+    if (!id) continue;
+    const on = frame.clipContent !== false && !frame.hidden ? 1 : 0;
+    parts.push(`f:${id}:${on}`);
+  }
+  for (const rcbId of rcbToKit.keys()) {
+    const node = doc.deltaSetLike[rcbId] as
+      | { attrs?: Record<string, unknown> }
+      | undefined;
+    const frameId = String(node?.attrs?.frameId || '').trim();
+    if (!frameId) continue;
+    const frame = frameById.get(frameId);
+    const on =
+      frame && frame.clipContent !== false && !frame.hidden ? 1 : 0;
+    parts.push(`n:${rcbId}:${frameId}:${on}`);
+  }
+  parts.sort();
+  return parts.join('|');
+}
+
+/**
+ * Clips bake into Kit's retained scene picture at record time. Changing
+ * frameId / clipContent without bumping changeCounter leaves requestRender
+ * replaying an unclipped (or stale) picture — invalidate then redraw.
+ */
+function refreshKitArtboardClipPaint(force = false) {
+  const handle = attached;
+  if (!handle) return;
+  const sig = artboardClipPaintSig();
+  if (!force && sig === lastArtboardClipPaintSig) return;
+  lastArtboardClipPaintSig = sig;
+  try {
+    handle.renderer.invalidateScenePicture?.();
+  } catch {
+    /* optional */
+  }
+  try {
+    handle.renderer.requestRender();
+  } catch {
+    /* optional */
   }
 }
 
@@ -3305,13 +3965,68 @@ function unwrapKitOccupiedArtboardBody(handle: CanvasEngineHandle) {
  * A sync flushCreates/getSceneJson here re-enters WASM and throws
  * "recursive use of an object" — poisoning get_selection / render forever.
  */
-function scheduleKitMutateFlush() {
-  if (mutateFlushQueued || suppressDepth > 0) return;
+function capturePendingCreateTool() {
+  const editor = store.getState().editor;
+  const fromStore =
+    editor.activeTool === 'shape'
+      ? String(editor.shapeKind || 'rect')
+      : String(editor.activeTool || '');
+  const storeTool = fromStore.toLowerCase();
+  // Product create tools / shapeKinds that kitNodeToCreated understands.
+  const PRODUCT_CREATE = new Set([
+    'rect',
+    'rectangle',
+    'circle',
+    'ellipse',
+    'oval',
+    'polygon',
+    'star',
+    'line',
+    'arrow',
+    'pen',
+    'pencil',
+    'brush',
+    'frame',
+    'artboard',
+    'text',
+    'type',
+  ]);
+  if (PRODUCT_CREATE.has(storeTool)) {
+    pendingCreateTool = fromStore;
+    return;
+  }
+  const kitTool = String(attached?.ui?.activeTool || '');
+  if (
+    kitTool === 'rect' ||
+    kitTool === 'ellipse' ||
+    kitTool === 'polygon' ||
+    kitTool === 'star' ||
+    kitTool === 'line' ||
+    kitTool === 'pen' ||
+    kitTool === 'pencil' ||
+    kitTool === 'artboard' ||
+    kitTool === 'text'
+  ) {
+    pendingCreateTool = kitTool;
+  }
+}
+
+function enqueueKitMutateFlush() {
+  if (mutateFlushQueued) return;
   mutateFlushQueued = true;
   queueMicrotask(() => {
     mutateFlushQueued = false;
     const handle = attached;
-    if (!handle || suppressDepth > 0) return;
+    if (!handle) {
+      pendingCreateTool = null;
+      return;
+    }
+    // Do not drop a queued create flush while suppress is held — retry so
+    // pendingCreateTool cannot stick and mis-tag a later paste/boolean.
+    if (suppressDepth > 0) {
+      enqueueKitMutateFlush();
+      return;
+    }
     try {
       flushKitSceneToDocument({
         preserveKitStyle: kitHistoryReconcile,
@@ -3321,6 +4036,14 @@ function scheduleKitMutateFlush() {
       console.error('[rcb/canvas] kit mutate flush failed', err);
     }
   });
+}
+
+function scheduleKitMutateFlush() {
+  if (suppressDepth > 0) return;
+  // Capture while draw tool is still active (onMutate runs inside addPolygon,
+  // before maybeRevertTool → selection).
+  capturePendingCreateTool();
+  enqueueKitMutateFlush();
 }
 
 export function attachKitBridge(handle: CanvasEngineHandle) {
@@ -3339,6 +4062,7 @@ export function attachKitBridge(handle: CanvasEngineHandle) {
   renderer.selectionOutlineOnly = () => kitSelectionIsEmptyGeneratorsOnly(handle);
   renderer.getNodeArtboardClip = (nodeId) => kitNodeArtboardClipRect(handle, nodeId);
   renderer.drawProductSceneOverlay = (canvas, dpr) => {
+    drawProcessingPlates(handle, canvas, dpr);
     drawEmptyGeneratorIcons(handle, canvas, dpr);
   };
   wrapKitHitTestForArtboardClip(handle);
@@ -3450,7 +4174,9 @@ export function attachKitBridge(handle: CanvasEngineHandle) {
 }
 
 export function detachKitBridge() {
+  stopProcessGlowAnimation();
   mutateFlushQueued = false;
+  pendingCreateTool = null;
   if (attached) {
     unwrapKitHitTestForArtboardClip(attached);
     unwrapKitArtboardContainedRoots(attached);
@@ -3466,6 +4192,11 @@ export function detachKitBridge() {
     rendererHooks.selectionOutlineOnly = null;
     rendererHooks.drawProductSceneOverlay = null;
     rendererHooks.getNodeArtboardClip = null;
+    try {
+      (attached.renderer as { softArtboardId?: number | null }).softArtboardId = null;
+    } catch {
+      /* ignore */
+    }
     if (origSyncWithSelection) {
       attached.ui.syncWithSelection = origSyncWithSelection;
     }
@@ -3492,6 +4223,7 @@ export function detachKitBridge() {
   pendingBucketImageFill = null;
   lastSelKey = '';
   lastHydrateKey = '';
+  lastArtboardClipPaintSig = '';
   pendingImageSrcByKitId.clear();
 }
 
@@ -3500,45 +4232,10 @@ export function isKitBridgeAttached(): boolean {
   return attached != null;
 }
 
-export function clearKitBridgeMaps() {
-  kitToRcb.clear();
-  rcbToKit.clear();
-  kitArtboardToFrame.clear();
-  frameToKitArtboard.clear();
-  lastKitStyleJson.clear();
-  lastKitEffectsJson.clear();
-  lastParametricSig.clear();
-  lastHydrateKey = '';
-}
-
 /** Kit numeric id for an RCB scene node (null when unmapped / DomHost-only). */
 export function kitIdForRcbId(rcbId: string): number | null {
   const id = rcbToKit.get(String(rcbId || ''));
   return id != null && Number.isFinite(id) ? id : null;
-}
-
-/** Scene AABB of a mapped Kit node (`[minX,minY,maxX,maxY]`). */
-export function getKitNodeSceneBox(
-  rcbId: string
-): { left: number; top: number; width: number; height: number } | null {
-  if (!attached) return null;
-  const kitId = rcbToKit.get(String(rcbId || ''));
-  if (kitId == null) return null;
-  try {
-    const b = attached.scene.getNodeBounds(kitId);
-    if (!b || b.length < 4) return null;
-    const minX = Number(b[0]);
-    const minY = Number(b[1]);
-    const maxX = Number(b[2]);
-    const maxY = Number(b[3]);
-    if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
-    const width = maxX - minX;
-    const height = maxY - minY;
-    if (!(width > 0) || !(height > 0)) return null;
-    return { left: minX, top: minY, width, height };
-  } catch {
-    return null;
-  }
 }
 
 /** True when every id maps into Kit (no DomHost-only / unmapped rows). */
@@ -3618,61 +4315,144 @@ function syncAfterKitHistory() {
 /**
  * Kit InputManager.deleteSelection / deleteSelectedArtboard.
  * Sync store → Kit selection first (engine selection must be non-empty).
- * onMutate → flushDeletesFromKit updates SceneDocument.
+ * Document membership is flushed **synchronously** after Kit remove — the
+ * onMutate microtask alone races React hydrate and resurrects artboards.
+ *
+ * deleteCanvasSelection expands selected frames → bound children, so the
+ * common "Delete artboard" case arrives as frames+nodes. Prefer artboard
+ * delete (frame + contents); never treat that as node-only delete.
  */
+function resolveKitArtboardIdForDelete(frameId: string): number | null {
+  const mapped = frameToKitArtboard.get(frameId);
+  if (mapped != null) return mapped;
+  // flushCreates seeds `kit${ab.id}` — recover if the map was cleared mid-session.
+  const m = /^kit(\d+)$/i.exec(String(frameId || ''));
+  if (!m) return null;
+  const id = Number(m[1]);
+  return Number.isFinite(id) ? id : null;
+}
+
+/**
+ * Remove Kit nodes by RCB id map (keep maps so flushDeletesFromKit can drop
+ * SceneDocument rows). Empty-generator marquee often leaves store selection
+ * without a matching engine selection — deleteSelection alone no-ops and only
+ * the overlay icon disappears after a document scrub.
+ */
+function removeMappedKitNodesByRcbIds(rcbIds: readonly string[]): number {
+  const handle = attached;
+  if (!handle || !rcbIds.length) return 0;
+  const kitIds: number[] = [];
+  const seen = new Set<number>();
+  for (const raw of rcbIds) {
+    const kitId = rcbToKit.get(String(raw));
+    if (kitId == null || seen.has(kitId)) continue;
+    seen.add(kitId);
+    kitIds.push(kitId);
+  }
+  if (!kitIds.length) return 0;
+  try {
+    handle.scene.engine?.clear_selection();
+  } catch {
+    /* ignore */
+  }
+  try {
+    handle.scene.removeNodes(kitIds);
+  } catch {
+    for (const kitId of kitIds) {
+      try {
+        handle.scene.removeNode(kitId);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return kitIds.length;
+}
+
 export function deleteKitSelection(
   rcbNodeIds: readonly string[] = [],
   rcbFrameIds: readonly string[] = []
 ): boolean {
   const handle = attached;
   if (!handle) return false;
-  const nodes = [...rcbNodeIds].map(String).filter((id) => rcbToKit.has(id));
-  const frames = [...rcbFrameIds].map(String).filter((id) => frameToKitArtboard.has(id));
-  if (!nodes.length && !frames.length) return false;
+  const requestedNodes = [...rcbNodeIds].map(String).filter(Boolean);
+  const nodes = requestedNodes.filter((id) => rcbToKit.has(id));
+  const requestedFrames = [...rcbFrameIds].map(String).filter(Boolean);
+  const frameKitPairs = requestedFrames
+    .map((frameId) => {
+      const ab = resolveKitArtboardIdForDelete(frameId);
+      return ab == null ? null : { frameId, ab };
+    })
+    .filter((p): p is { frameId: string; ab: number } => p != null);
+  if (!requestedNodes.length && !requestedFrames.length) return false;
 
-  // Artboard-only: Kit Delete uses selectedArtboardId + deleteSelectedArtboard.
-  if (frames.length && !nodes.length) {
-    const ab = frameToKitArtboard.get(frames[0]);
-    if (ab == null) return false;
+  if (requestedFrames.length) {
     try {
       handle.scene.engine?.clear_selection();
     } catch {
       /* ignore */
     }
-    (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId = ab;
-    handle.input.deleteSelectedArtboard();
+    const deletedAbs = new Set<number>();
+    for (const { ab } of frameKitPairs) {
+      if (deletedAbs.has(ab)) continue;
+      const stillThere = handle.scene.getArtboards().some((a) => a.id === ab);
+      if (!stillThere) continue;
+      (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId = ab;
+      handle.input.deleteSelectedArtboard();
+      deletedAbs.add(ab);
+    }
+    // Full chrome may still point at a Kit plate even if the RCB↔Kit map was lost.
+    const danglingAb = Number(
+      (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId ?? NaN
+    );
+    if (Number.isFinite(danglingAb) && !deletedAbs.has(danglingAb)) {
+      handle.input.deleteSelectedArtboard();
+      deletedAbs.add(danglingAb);
+    }
+    // Apply SceneDocument drops now (do not wait for onMutate microtask).
+    try {
+      flushDeletesFromKit(handle.scene);
+    } catch (err) {
+      console.error('[rcb/canvas] kit artboard delete flush failed', err);
+    }
+    // Multi-select: plate + off-plate shapes — remove leftovers after frames.
+    const frameSet = new Set(requestedFrames);
+    const doc = store.getState().editor.document;
+    const leftover = nodes.filter((id) => {
+      if (!rcbToKit.has(id)) return false;
+      const fid = String(
+        (doc?.deltaSetLike?.[id]?.attrs as Record<string, unknown> | undefined)?.frameId || ''
+      ).trim();
+      return !fid || !frameSet.has(fid);
+    });
+    if (leftover.length) {
+      removeMappedKitNodesByRcbIds(leftover);
+      try {
+        flushDeletesFromKit(handle.scene);
+      } catch {
+        /* ignore */
+      }
+    }
+    handle.renderer.requestRender();
+    // True when Kit removed something OR caller still has RCB frames to scrub.
+    return deletedAbs.size > 0 || requestedFrames.length > 0;
+  }
+
+  // Node delete: do not trust engine selection alone. Empty generators are often
+  // store-selected via marquee union while Kit selection is empty / outline-only.
+  if (nodes.length) {
+    removeMappedKitNodesByRcbIds(nodes);
+    try {
+      flushDeletesFromKit(handle.scene);
+    } catch (err) {
+      console.error('[rcb/canvas] kit node delete flush failed', err);
+    }
     handle.renderer.requestRender();
     return true;
   }
 
-  syncKitSelectionFromStore(handle, nodes, []);
-  const sel = handle.scene.engine?.get_selection?.() ?? [];
-  if (!sel.length) {
-    // Selection desync — push maps explicitly then retry once.
-    withSuppress(() => {
-      try {
-        handle.scene.engine?.clear_selection();
-      } catch {
-        /* ignore */
-      }
-      let multi = false;
-      for (const rcbId of nodes) {
-        const kitId = rcbToKit.get(rcbId);
-        if (kitId == null) continue;
-        try {
-          handle.scene.selectNode(kitId, multi);
-          multi = true;
-        } catch {
-          /* ignore */
-        }
-      }
-    });
-  }
-  const after = handle.scene.engine?.get_selection?.() ?? [];
-  if (!after.length) return false;
-  handle.input.deleteSelection();
-  handle.renderer.requestRender();
-  return true;
+  // Requested nodes but none mapped — document path must scrub; Kit has nothing.
+  return false;
 }
 
 /** Kit node ids bound to an RCB frame (frameLocal children travel with the plate). */
@@ -3726,6 +4506,14 @@ export function syncKitArtboardBoundsLive(frame: {
         } catch {
           /* optional */
         }
+      }
+    } else {
+      // Resize-only: clip rects bake into the scene picture; changeCounter may
+      // not bump when only artboard bounds change.
+      try {
+        handle.renderer.invalidateScenePicture?.();
+      } catch {
+        /* optional */
       }
     }
   });
@@ -3988,12 +4776,6 @@ function toKitBoolOp(mode: string): BoolOp | null {
   return null;
 }
 
-/** Kit artboard id for an RCB frame id. */
-export function kitArtboardIdForFrameId(frameId: string): number | null {
-  const id = frameToKitArtboard.get(String(frameId || ''));
-  return id != null && Number.isFinite(id) ? id : null;
-}
-
 /**
  * Product pick (attach / context-menu): Kit wasm `Engine.hit_test` via WasmScene.
  * Maps kit numeric id → RCB node id, or `__frame__:${frameId}` for artboards.
@@ -4010,12 +4792,10 @@ export function hitTestRcbIdFromKit(x: number, y: number): string | null {
   if (kitId != null && Number.isFinite(kitId)) {
     // Reject picks on clipped-away overflow (ink is clipped; hit must match).
     const clip = kitNodeArtboardClipRect(attached, kitId);
-    if (
-      clip &&
-      (x < clip.x || x > clip.x + clip.w || y < clip.y || y > clip.y + clip.h)
-    ) {
-      // Fall through to DomHost / empty — do not select overflow ink.
-    } else {
+    const inClip =
+      !clip ||
+      (x >= clip.x && x <= clip.x + clip.w && y >= clip.y && y <= clip.y + clip.h);
+    if (inClip) {
       const rcbId = kitToRcb.get(kitId);
       if (rcbId) return rcbId;
       const frameId = kitArtboardToFrame.get(kitId);
@@ -4078,10 +4858,6 @@ export function exitKitPathEdit(): void {
   notifyPathEditChrome(false, null);
 }
 
-export function isKitPathEditing(): boolean {
-  return Boolean(attached?.isPathEditing());
-}
-
 export function kitRcbIdBeingPathEdited(): string | null {
   const kitId = attached?.getEditingKitId() ?? null;
   if (kitId == null) return null;
@@ -4102,6 +4878,48 @@ export function getKitSelectionDockAabb(): {
 } | null {
   if (!attached) return null;
   try {
+    // Multi artboard full chrome: union of every selected plate (not only
+    // selectedArtboardId / frames[0]).
+    const frameIds = (store.getState().editor.selectedFrameIds || [])
+      .map(String)
+      .filter(Boolean);
+    if (frameIds.length > 1) {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      let any = false;
+      for (const fid of frameIds) {
+        const kitId = frameToKitArtboard.get(fid);
+        const ab =
+          kitId != null
+            ? attached.scene.getArtboards().find((a) => a.id === kitId)
+            : null;
+        if (ab && ab.w > 1e-6 && ab.h > 1e-6) {
+          any = true;
+          minX = Math.min(minX, ab.x);
+          minY = Math.min(minY, ab.y);
+          maxX = Math.max(maxX, ab.x + ab.w);
+          maxY = Math.max(maxY, ab.y + ab.h);
+          continue;
+        }
+        const doc = store.getState().editor.document;
+        const frame = (Array.isArray(doc?.frames) ? doc!.frames : []).find(
+          (f) => String(f?.id) === fid
+        );
+        if (!frame) continue;
+        const box = frameSceneBounds(doc, frame, getLiveArtboardFrameGeometry(fid));
+        any = true;
+        minX = Math.min(minX, box.left);
+        minY = Math.min(minY, box.top);
+        maxX = Math.max(maxX, box.left + box.width);
+        maxY = Math.max(maxY, box.top + box.height);
+      }
+      if (any && maxX > minX && maxY > minY) {
+        return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
+      }
+    }
+
     // Artboard-only selection: Kit keeps selectedArtboardId, not node selection.
     const abId = Number(
       (attached.renderer as { selectedArtboardId?: number | null }).selectedArtboardId ?? NaN
@@ -4151,18 +4969,19 @@ export function kitSelectionGestureActive(): boolean {
         isMouseDown?: boolean;
         dragMode?: string | null;
         didMove?: boolean;
+        resizeHandleType?: string | null;
+        resizeSnapshot?: unknown;
+        rotateHandleType?: string | null;
+        rotateSnapshot?: unknown;
       }
     | null
     | undefined;
   if (!im?.isMouseDown) return false;
+  if (im.resizeHandleType || im.resizeSnapshot || im.rotateHandleType || im.rotateSnapshot) {
+    return true;
+  }
   const mode = im.dragMode;
-  return (
-    mode === 'move' ||
-    mode === 'resize' ||
-    mode === 'rotate' ||
-    mode === 'marquee' ||
-    Boolean(im.didMove)
-  );
+  return mode === 'move' || mode === 'marquee' || Boolean(im.didMove);
 }
 
 /** True while Kit is mid move-drag (past press threshold). */
@@ -4173,6 +4992,120 @@ export function kitSelectionMoveActive(): boolean {
     | undefined;
   if (!im) return false;
   return im.dragMode === 'move' && Boolean(im.didMove);
+}
+
+/**
+ * True while Kit is resizing or rotating the selection (mouse still down).
+ * Kit does NOT set dragMode to 'resize'/'rotate' — those stay on
+ * resizeHandleType / rotateHandleType (+ snapshots).
+ */
+export function kitSelectionResizeOrRotateActive(): boolean {
+  const im = attached?.input as
+    | {
+        isMouseDown?: boolean;
+        resizeHandleType?: string | null;
+        resizeSnapshot?: unknown;
+        rotateHandleType?: string | null;
+        rotateSnapshot?: unknown;
+      }
+    | null
+    | undefined;
+  if (!im?.isMouseDown) return false;
+  return Boolean(
+    im.resizeHandleType ||
+      im.resizeSnapshot ||
+      im.rotateHandleType ||
+      im.rotateSnapshot
+  );
+}
+
+export type KitCornerRadiusChrome = {
+  /** Live corner radius (rounded). */
+  radius: number;
+  /** Active handle centre in scene space. */
+  x: number;
+  y: number;
+  mode: 'drag' | 'hover';
+};
+
+/**
+ * Live rect corner-radius chrome for the HTML 「圆角 N」 badge.
+ * Kit draws the four dots; product overlays the value tip (matches polygon/star).
+ */
+export function getKitCornerRadiusChrome(): KitCornerRadiusChrome | null {
+  const handle = attached;
+  if (!handle?.input || !handle.scene) return null;
+  const im = handle.input as {
+    ui?: { activeTool?: string };
+    editingNodeId?: number | null;
+    isMouseDown?: boolean;
+    currentPos?: { x: number; y: number };
+    cornerRadiusDragging?: {
+      nodeId: number;
+      startPos: { x: number; y: number };
+      startRadius: number;
+    } | null;
+    checkCornerRadiusHandle?: (pos: { x: number; y: number }) => { nodeId: number } | null;
+  };
+  if (String(im.ui?.activeTool || '') !== 'selection') return null;
+  if (im.editingNodeId != null) return null;
+
+  const drag = im.cornerRadiusDragging ?? null;
+  let nodeId: number | null = null;
+  let probe: { x: number; y: number } | null = null;
+  let mode: 'drag' | 'hover' = 'hover';
+
+  if (drag) {
+    nodeId = drag.nodeId;
+    probe = drag.startPos;
+    mode = 'drag';
+  } else if (!im.isMouseDown && im.currentPos && im.checkCornerRadiusHandle) {
+    const hit = im.checkCornerRadiusHandle(im.currentPos);
+    if (!hit) return null;
+    nodeId = hit.nodeId;
+    probe = im.currentPos;
+    mode = 'hover';
+  } else {
+    return null;
+  }
+
+  try {
+    const node = handle.scene.getNode(nodeId);
+    const rect = node?.geometry?.Rect;
+    if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+    const radius = Math.round(Number(node?.style?.corner_radius) || 0);
+    const zoom = Math.max(1e-6, Number(handle.renderer.zoom) || 1);
+    const handles = cornerRadiusHandles(rect.width, rect.height, radius, zoom);
+    if (!handles?.positions?.length || !probe) return null;
+
+    const t = handle.scene.getTransform(nodeId);
+    // Row-major: x = a*lx + b*ly + tx, y = c*lx + d*ly + ty
+    const a = t[0];
+    const b = t[1];
+    const tx = t[2];
+    const c = t[3];
+    const d = t[4];
+    const ty = t[5];
+    const toWorld = (lx: number, ly: number) => ({
+      x: a * lx + b * ly + tx,
+      y: c * lx + d * ly + ty,
+    });
+
+    let best = handles.positions[0];
+    let bestDist = Infinity;
+    for (const [hx, hy] of handles.positions) {
+      const w = toWorld(hx, hy);
+      const dist = Math.hypot(w.x - probe.x, w.y - probe.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = [hx, hy];
+      }
+    }
+    const world = toWorld(best[0], best[1]);
+    return { radius, x: world.x, y: world.y, mode };
+  } catch {
+    return null;
+  }
 }
 
 /**

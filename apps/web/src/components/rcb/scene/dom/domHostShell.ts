@@ -1,6 +1,6 @@
 /**
- * DomHost mount shell only — empty SVG group for HTML FO (lottie/group/media).
- * Kit paints all ink. No vector SVG paint path.
+ * DomHost mount shell — HTML FO (lottie/group/media). Kit paints vector / image ink
+ * and SoftGlow process plates (see processPlateKit + kitBridge overlay).
  */
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 import { isEmptyGeneratorPlate } from '@/components/rcb/scene/document/nodeCapabilities';
@@ -205,7 +205,7 @@ export function createDomHostBoard(
   return { root, layer, hostLayer: host, shared: false };
 }
 
-/** Empty `<g>` anchor for HTML FO — never draws Kit-owned vectors. */
+/** Empty `<g>` anchor for HTML FO (lottie / video / audio / group). */
 export function mountDomHostAnchor(
   parent: SVGElement,
   node: SceneNodeInput | null | undefined,
@@ -221,6 +221,13 @@ export function mountDomHostAnchor(
   g.sceneNodeId = nodeId;
   g.sceneNodeKey = String(node.key || '');
   append(parent, g);
+
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const w = Math.max(1, Number(node.width) || 1);
+  const h = Math.max(1, Number(node.height) || 1);
+  setAttrs(g, { transform: `translate(${x} ${y})` });
+
   if (nodeNeedsHtmlMediaMount(node, parent)) {
     ensureHtmlMediaMount(g, node, nodeId);
   }

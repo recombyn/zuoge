@@ -6,12 +6,12 @@
  * Edge ink uses the same Canvas miter closed-path recipe as plate hairlines
  * (`strokeCanvasPlateHairline`).
  */
-export const FRAME_PLATE_STROKE = 'color-mix(in srgb, var(--ink) 42%, transparent)';
+export const FRAME_PLATE_STROKE = '#c5c9d2';
 /**
- * Canvas / WebGL cannot resolve `var(--ink)` / color-mix — solid stand-in for
- * light theme plate hairlines (matches ~42% of #141414).
+ * Canvas / WebGL cannot resolve CSS vars — same cool light gray as
+ * {@link FRAME_PLATE_STROKE} / empty-gen plate edges.
  */
-export const FRAME_PLATE_STROKE_CANVAS = 'rgba(20, 20, 20, 0.55)';
+export const FRAME_PLATE_STROKE_CANVAS = 'rgba(197, 201, 210, 1)';
 /** Soft interior / context focus — same blue as selection chrome edge. */
 export const FRAME_HIGHLIGHT_STROKE = '#3388ff';
 /** Target hairline in CSS px after camera scale. */

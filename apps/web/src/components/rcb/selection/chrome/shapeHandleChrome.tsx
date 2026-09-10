@@ -37,12 +37,6 @@ export function radiusHandleParkScreenPx(): number {
   return CHROME_HANDLE_HIT_PX / 2 + CHROME_RADIUS_HIT_PX / 2 + CHROME_RADIUS_PARK_GAP_PX;
 }
 
-/** Small tuck from a vertex so the knob sits on-ink (star/polygon tips). */
-export function vertexHandleParkScene(zoom: number): number {
-  const z = Math.max(0.05, Number(zoom) || 1);
-  return (CHROME_HANDLE_VIS_PX / 2) / z;
-}
-
 export function radiusParkSceneForBox(
   boxW: number,
   boxH: number,
@@ -307,7 +301,11 @@ export function ShapeHandleKnob({
   const pad = hitR ?? Math.max(r * 3, r + stroke * 4);
   return (
     <>
-      <circle r={pad} fill="transparent" style={{ pointerEvents: 'all' }} />
+      <circle
+        r={pad}
+        fill="transparent"
+        style={{ pointerEvents: 'all', cursor: 'pointer' }}
+      />
       <circle
         r={Math.max(0.01, r)}
         fill={active ? SELECTION_ACCENT_HEX : '#ffffff'}

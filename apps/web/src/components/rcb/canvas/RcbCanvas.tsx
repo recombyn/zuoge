@@ -91,8 +91,6 @@ export type RcbCanvasProps = {
   className?: string;
   /** World-layer scene content (scaled with camera). */
   children: ReactNode;
-  /** @deprecated Stage-wide SVG removed; ignored. */
-  defs?: ReactNode;
   /** When false, skip HTML DomHost camera (Kit `#editor-canvas` only). Default true. */
   hostSurface?: boolean;
   /** Document grid pitch (snap). Live lattice is Kit; kept for host API. */
@@ -122,7 +120,6 @@ function RcbCanvas({
   panBlockSelector = '',
   className,
   children,
-  defs: _defs = null,
   hostSurface = true,
   gridSize: _gridSize = DEFAULT_GRID_SIZE,
   stageRef: stageRefProp,

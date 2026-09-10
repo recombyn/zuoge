@@ -43,7 +43,7 @@ const RCB_TO_ENGINE: Record<string, string> = {
   eyedropper: 'eyedropper',
   pipette: 'eyedropper',
   scissors: 'scissors',
-  'add-anchor': 'scissors',
+  'add-anchor': 'direct',
   mesh: 'mesh',
 };
 
@@ -61,6 +61,16 @@ export const ENGINE_DRAW_TOOLS = new Set([
 ]);
 
 export const ENGINE_SELECT_TOOLS = new Set(['selection', 'direct']);
+
+/** Pen / pencil (incl. brush) stay armed until the user clicks 退出编辑. */
+export const PERSISTENT_DRAW_TOOLS = new Set(['pen', 'pencil']);
+
+export function isPersistentDrawSessionTool(
+  tool: string | null | undefined
+): boolean {
+  const t = String(tool ?? '').toLowerCase();
+  return t === 'pen' || t === 'pencil' || t === 'brush';
+}
 
 /** Kit owns Live Paint / path-edit / eyedropper / mesh tools that are neither draw nor select. */
 export const ENGINE_EDIT_TOOLS = new Set(['paint-bucket', 'scissors', 'eyedropper', 'mesh']);

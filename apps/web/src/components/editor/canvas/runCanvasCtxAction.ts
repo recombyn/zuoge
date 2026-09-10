@@ -366,7 +366,10 @@ export function runCanvasCtxAction(action: CtxAction, deps: RunCanvasCtxActionDe
     return;
   }
   if (action === 'delete') {
-    let frameIds = selectedFrameIdsRef.current;
+    // Prefer the same frame resolution as copy/duplicate (menu plate when
+    // selection chrome is empty / soft). Falling back only when both are empty
+    // used to no-op artboard Delete while Kit still showed handles.
+    let frameIds = frameIdsForAction;
     if (!frameIds.length && !ids.length) {
       const fid = menuFrameId || activeFrameIdRef.current;
       if (fid) frameIds = [String(fid)];

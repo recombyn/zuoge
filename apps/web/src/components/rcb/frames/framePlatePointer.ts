@@ -4,6 +4,10 @@ import {
   isAnimationFrameHostNode,
   isNodeHiddenInDocument,
 } from '@/components/rcb/scene/document/nodeCapabilities';
+import {
+  isAnimationWorkbenchEditOpen,
+  isAnimationWorkbenchPreviewChild,
+} from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { getLiveArtboardFrameGeometry } from '@/components/rcb/frames/HtmlArtboardFrame';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 
@@ -45,14 +49,26 @@ export function getFrameBox(
  * True when this artboard has no real bound content.
  * Ownership is `attrs.frameId` only — geometric overlap from neighbors must not
  * steal empty-plate selection (full chrome / frame_move).
+ *
+ * 动画工作台: preview-isolated children (timeline closed) still occupy the plate
+ * for drag-mode so interior press marquees / soft-selects instead of moving the
+ * artboard. They stay unpickable via {@link isNodeMarqueeSkippable} until Keyframes
+ * opens. Full-bleed ink on an edit-open workbench also counts as content.
  */
 export function frameIsEmpty(doc: SceneDocument, frameId: string): boolean {
   return !nodeIdsBoundToFrames(doc, [frameId]).some((id) => {
     const node = doc.deltaSetLike?.[id];
     if (!node || isNodeHiddenInDocument(doc, node)) return false;
-    // Full-bleed background plate / Lottie host are chrome, not content.
-    if (frameForFullBleedPlate(doc, id) === frameId) return false;
+    // Invisible Lottie host is chrome, not content.
     if (isAnimationFrameHostNode(node, doc)) return false;
+    // Timeline-closed preview children: visible ink → occupied (marquee), not
+    // frame_move. frameForFullBleedPlate maps them to the plate as chrome.
+    if (isAnimationWorkbenchPreviewChild(doc, node)) return true;
+    // Full-bleed background plate is chrome on normal artboards.
+    if (frameForFullBleedPlate(doc, id) === frameId) {
+      // Edit-open workbench: full-bleed shapes / images are selectable content.
+      return isAnimationWorkbenchEditOpen(frameId);
+    }
     return true;
   });
 }

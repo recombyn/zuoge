@@ -89,7 +89,7 @@ type Props = {
   paintRaiseIds?: readonly string[];
   /** Single-selected artboard id — temporary front over world ink under the plate. */
   paintRaiseFrameIds?: readonly string[];
-  /** Active video/audio FO shells only — SoftGlow / selection stay Kit ink. */
+  /** Active video/audio FO shells + SoftGlow process plates. */
   forceFullIds?: readonly string[];
 };
 
@@ -140,6 +140,10 @@ export function pickFullAndCanvasIds(opts: {
           ? revealIds.has(id)
           : (revealIds as readonly string[]).includes(id))
     );
+    if (String(node?.attrs?.processStatus || '') === 'running') {
+      fullIds.push(id);
+      continue;
+    }
     if (
       paintIntentNeedsDomHost(document, id, node, {
         zoom,
