@@ -1,0 +1,3270 @@
+:root {
+    --bg-dark: #1e1e1e;
+    --bg-panel: #2b2b2b;
+    --bg-hover: #3c3c3c;
+    --bg-input: #1a1a1a;
+    --accent: #00a2ff;
+    --accent-dim: rgba(0, 162, 255, 0.15);
+    --text-main: #e0e0e0;
+    --text-dim: #808080;
+    --text-label: #999;
+    --border: #383838;
+    --border-light: #444;
+    --section-gap: 0px;
+    /* One fixed width for every color swatch (fill, stroke, gradient stop,
+       effect) so they line up across all inspector rows. */
+    --color-swatch-w: 48px;
+    --color-swatch-h: 24px;
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg-dark);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: var(--text-main);
+    touch-action: none;
+    overscroll-behavior: none;
+    font-size: 11px;
+}
+
+/* ─── App Shell ─── */
+
+/* The standalone app's mount point. Without an explicit height the whole
+   percentage chain below (#app-container → #main-layout → canvas) resolves
+   against an AUTO box, so the layout is sized by a feedback loop through the
+   canvas's pixel buffer instead of the viewport — it can lock at a stale
+   height after window resizes (dead strip under the app) and oscillate with
+   the canvas ResizeObserver (flickering redraws). Embedded hosts use their
+   own mount and size it themselves. */
+#app {
+    width: 100%;
+    height: 100%;
+}
+
+#app-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+}
+
+/* Embedded/headless mode: the host provides its own top bar (tabs, save, export,
+   zoom live elsewhere). See createEditor({ chrome: { header: false } }). */
+#app-container.no-chrome-header #header {
+    display: none;
+}
+
+/* Host with its own persistence (e.g. cloud autosave) can hide the Save button. */
+#app-container.no-save-btn #save-btn {
+    display: none;
+}
+
+/* Host injection slots — empty (zero-width) until the host mounts controls. */
+.header-slot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.header-slot:empty {
+    display: none;
+}
+/* A little breathing room when the leading slot has content. */
+#header-slot-leading:not(:empty) {
+    margin-right: 4px;
+    padding-right: 6px;
+    border-right: 1px solid var(--border);
+}
+#header-slot-trailing:not(:empty) {
+    margin-left: 4px;
+    padding-left: 8px;
+    border-left: 1px solid var(--border);
+}
+
+#header {
+    height: 36px;
+    min-height: 36px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    z-index: 10;
+}
+
+.header-spacer {
+    flex: 1;
+}
+
+/* ─── Header actions: Save (.vec) + Export ─── */
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+}
+
+/* Separates the view-controls group (zoom) from the document-actions group. */
+.header-divider {
+    width: 1px;
+    height: 18px;
+    margin: 0 8px;
+    background: var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.save-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.save-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+/* Unsaved changes → the save affordance becomes the emphasized action. */
+.save-btn.dirty {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.save-btn.dirty:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.icon-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.header-btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s;
+}
+
+.header-btn:hover {
+    opacity: 0.85;
+}
+
+.header-btn-secondary {
+    background: var(--bg-hover);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    margin-right: 8px;
+}
+
+.header-btn-primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    margin-right: 16px;
+}
+
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+}
+
+.zoom-display {
+    font-size: 11px;
+    color: #909090;
+    min-width: 36px;
+    text-align: center;
+    user-select: none;
+}
+
+.zoom-btn {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    padding: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.zoom-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.history-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 4px;
+}
+
+.history-controls .zoom-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* ─── App menu button ─── */
+
+.app-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+    margin-right: 6px;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.app-menu-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.app-menu-dropdown {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    min-width: 200px;
+    background: rgba(43, 43, 43, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 4px 0;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.25);
+    font-size: 12px;
+    color: var(--text-main);
+    user-select: none;
+}
+
+/* ─── Document tabs ─── */
+
+.tab-strip {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 100%;
+    flex-shrink: 0;
+    overflow-x: auto;
+    max-width: 45%;
+    margin-right: 6px;
+}
+
+.tab-strip::-webkit-scrollbar { height: 0; }
+
+.doc-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 8px 0 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: var(--text-dim);
+    background: transparent;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    max-width: 180px;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.doc-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.doc-tab.active {
+    background: var(--bg-dark);
+    color: var(--text-main);
+    box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.doc-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+}
+
+.doc-tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: transparent;
+}
+
+.doc-tab-dot.dirty {
+    background: var(--accent);
+}
+
+.doc-tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.doc-tab-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.doc-tab-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.doc-tab-add:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.doc-tab.renaming {
+    max-width: none;
+}
+
+/* The active tab's title is click-to-rename: signal it like an editable
+   field (text cursor + underline on hover) so a click is never a surprise. */
+.doc-tab-label.renamable {
+    cursor: text;
+}
+
+.doc-tab-label.renamable:hover {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 3px;
+}
+
+.doc-tab-rename {
+    min-width: 90px;
+    max-width: 280px;
+    background: var(--bg-input);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--text-main);
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    line-height: 1;
+    padding: 1px 4px;
+    margin: -1px 0;
+    outline: none;
+    /* Host apps may add a global :focus-visible ring (box-shadow); the accent
+       border is this field's focus treatment, so suppress any host ring. */
+    box-shadow: none;
+}
+
+/* ─── Modal dialog (export, etc.) ─── */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-card {
+    min-width: 320px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+    color: var(--text-main);
+}
+
+.modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.modal-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.modal-label {
+    font-size: 12px;
+    color: var(--text-label);
+}
+
+.modal-segment {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-input);
+    border-radius: 5px;
+    padding: 2px;
+}
+
+.modal-seg-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-family: inherit;
+    padding: 4px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.modal-seg-btn.active {
+    background: var(--accent);
+    color: #fff;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.modal-actions .header-btn {
+    margin: 0;
+}
+
+/* ─── Version history (backups) dialog ─── */
+
+.backup-card {
+    min-width: 380px;
+    max-width: 460px;
+}
+
+.backup-list {
+    max-height: 360px;
+    overflow-y: auto;
+    margin: 4px 0 8px;
+}
+
+.backup-empty {
+    color: var(--text-dim);
+    font-size: 12px;
+    padding: 16px 4px;
+    text-align: center;
+}
+
+.backup-group-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 2px 4px;
+}
+
+.backup-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 6px;
+    border-radius: 5px;
+    font-size: 12px;
+}
+
+.backup-row:hover {
+    background: var(--bg-hover);
+}
+
+.backup-when {
+    color: var(--text-main);
+}
+
+.backup-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.backup-btn {
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-main);
+    font-size: 11px;
+    font-family: inherit;
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.backup-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.backup-btn-danger:hover {
+    background: #b3261e;
+    border-color: #b3261e;
+}
+
+#main-layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Full-bleed canvas (⌘\ or Tab): everything but the canvas steps out of the
+   way. `display: none` rather than opacity, so the canvas actually reclaims the
+   space and the renderer's ResizeObserver re-fits it. */
+body.chrome-hidden #layers-panel,
+body.chrome-hidden #layers-panel-resizer,
+body.chrome-hidden #toolbar,
+body.chrome-hidden #side-panel,
+body.chrome-hidden #context-bar {
+    display: none;
+}
+
+/* ─── Layers Panel (Left) ─── */
+
+#layers-panel {
+    width: 200px;
+    min-width: 140px;
+    max-width: 500px;
+    flex-shrink: 0;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Drag handle on the panel's right edge to resize its width. */
+#layers-panel-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 20;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+#layers-panel-resizer:hover,
+#layers-panel-resizer.dragging {
+    background: var(--accent, #3b82f6);
+    opacity: 0.6;
+}
+
+/* ─── Toolbar ─── */
+
+#toolbar {
+    width: 40px;
+    min-width: 40px;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 0;
+    z-index: 10;
+}
+
+/* Divider between the toolbar's intent groups: select · create · modify */
+.toolbar-sep {
+    width: 20px;
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0 8px;
+    flex-shrink: 0;
+}
+
+.tool-btn {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background 0.15s;
+    user-select: none;
+}
+
+/* Corner marker on group buttons: long-press / right-click opens the flyout */
+.tool-flyout-indicator {
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-bottom: 4px solid currentColor;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+/* Flyout panel listing a group's member tools */
+.tool-flyout {
+    position: fixed;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    padding: 4px;
+    z-index: 300;
+    display: flex;
+    flex-direction: column;
+    min-width: 150px;
+}
+
+.tool-flyout-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text-main);
+    white-space: nowrap;
+}
+
+.tool-flyout-item:hover {
+    background: var(--bg-hover);
+}
+
+.tool-flyout-item.active {
+    color: var(--accent);
+}
+
+.tool-flyout-item svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.tool-flyout-shortcut {
+    margin-left: auto;
+    padding-left: 16px;
+    color: var(--text-dim);
+}
+
+.tool-btn:hover {
+    background: var(--bg-hover);
+}
+
+.tool-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* Locked (double-clicked): stays active after each draw. A ring signals the
+   tool is "pinned" so you can draw repeatedly without it reverting. */
+.tool-btn.locked {
+    box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 3px var(--accent);
+}
+
+.tool-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.tool-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* ─── Toolbar Tooltips (Figma-style) ─── */
+
+.tool-btn[data-tooltip] {
+    position: relative;
+}
+
+.tool-btn[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #1a1a1a;
+    color: #e8e8e8;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    letter-spacing: 0.01em;
+}
+
+/* Shortcut badge inside tooltip */
+.tool-btn[data-shortcut]::after {
+    content: attr(data-tooltip) "  " attr(data-shortcut);
+}
+
+/* Lockable tools add a second line explaining double-click-to-lock. Placed
+   after the shortcut rule so it wins for tools that have both. */
+.tool-btn[data-lockhint]::after {
+    content: attr(data-tooltip) "  " attr(data-shortcut) "\A" attr(data-lockhint);
+    white-space: pre;
+    line-height: 1.5;
+    text-align: left;
+}
+
+.tool-btn[data-tooltip]::before {
+    content: '';
+    position: absolute;
+    left: calc(100% + 5px);
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: #1a1a1a;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 1000;
+}
+
+.tool-btn[data-tooltip]:hover::after,
+.tool-btn[data-tooltip]:hover::before {
+    opacity: 1;
+}
+
+/* ─── Canvas ─── */
+
+#canvas-container {
+    flex: 1;
+    position: relative;
+    background: #333;
+}
+
+#editor-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* Match the renderer's clear color (Color(43,43,43) = #2b2b2b) so the canvas
+       shows the editor backdrop from the first paint, before CanvasKit's WASM
+       has initialized — no white flash on load. */
+    background: #2b2b2b;
+}
+
+/* ─── Rulers ─── */
+.ruler {
+    position: absolute;
+    z-index: 5;
+    background: #2b2b2b;
+    cursor: default;
+}
+.ruler-top {
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 20px;
+    border-bottom: 1px solid var(--border);
+    cursor: row-resize; /* drag down to pull a horizontal guide */
+}
+.ruler-left {
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 20px;
+    border-right: 1px solid var(--border);
+    cursor: col-resize; /* drag right to pull a vertical guide */
+}
+.ruler-corner {
+    position: absolute;
+    z-index: 6;
+    top: 0;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: #2b2b2b;
+    border: none;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 5px 5px;
+    background-position: 3px 3px;
+    opacity: 0.5;
+}
+.ruler-corner:hover {
+    opacity: 0.8;
+}
+.ruler-corner.active {
+    opacity: 1;
+    background-color: var(--accent-dim);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* When rulers are toggled off, hide all three strips. */
+#canvas-container.rulers-hidden .ruler,
+#canvas-container.rulers-hidden .ruler-corner {
+    display: none;
+}
+
+/* ─── Side Panel ─── */
+
+#side-panel {
+    width: 232px;
+    min-width: 232px;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    overflow: hidden;
+}
+
+.properties-scroll {
+    flex: 0 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+}
+
+.properties-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+.properties-scroll::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 2px;
+}
+
+.properties-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#side-panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+#side-panel::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 2px;
+}
+
+#side-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ─── Panel Sections (Collapsible Accordion) ─── */
+
+.panel-section {
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+/* Empty state shown in the inspector when nothing is selected. */
+.props-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px 24px;
+    min-height: 140px;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.panel-section-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    gap: 6px;
+    transition: background 0.15s;
+}
+
+.panel-section-header:hover {
+    background: rgba(255,255,255,0.03);
+}
+
+.panel-section-header .chevron {
+    font-size: 8px;
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+    width: 10px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.panel-section-header .chevron.collapsed {
+    transform: rotate(-90deg);
+}
+
+.panel-section-header .section-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    flex: 1;
+}
+
+.reveal-selection-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    margin: -2px 0;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.reveal-selection-btn:hover {
+    opacity: 1;
+    color: var(--text-main);
+    background: rgba(255,255,255,0.06);
+}
+
+.panel-section-body {
+    padding: 2px 10px 8px;
+    overflow: hidden;
+    transition: max-height 0.2s ease, padding 0.2s ease, opacity 0.15s ease;
+    max-height: 500px;
+    opacity: 1;
+}
+
+.panel-section-body.collapsed {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ─── Property Rows ─── */
+
+.prop-row {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    gap: 6px;
+}
+
+.prop-row + .prop-row {
+    margin-top: 3px;
+}
+
+.prop-row .label {
+    font-size: 10px;
+    color: var(--text-label);
+    min-width: 36px;
+    flex-shrink: 0;
+}
+
+.prop-row .label-short {
+    font-size: 10px;
+    color: var(--text-label);
+    min-width: 14px;
+    flex-shrink: 0;
+}
+
+/* ─── Inputs ─── */
+
+.prop-input {
+    width: 100%;
+    min-width: 0;
+    height: 26px;
+    background: var(--bg-input);
+    border: 1px solid transparent;
+    color: var(--text-main);
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 5px;
+    outline: none;
+    transition: border-color 0.1s, background-color 0.1s;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.prop-input:hover {
+    border-color: var(--border-light);
+}
+
+.prop-input:focus {
+    border-color: var(--accent);
+}
+
+textarea.prop-input {
+    height: auto;
+    padding: 6px 8px;
+    line-height: 1.4;
+}
+
+.prop-input::-webkit-inner-spin-button {
+    opacity: 0;
+}
+.prop-input:hover::-webkit-inner-spin-button,
+.prop-input:focus::-webkit-inner-spin-button {
+    opacity: 1;
+}
+
+.prop-select {
+    background: var(--bg-input);
+    border: 1px solid transparent;
+    color: var(--text-main);
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 5px;
+    height: 26px;
+    outline: none;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.1s, background-color 0.1s;
+    box-sizing: border-box;
+}
+
+.prop-select:hover {
+    border-color: var(--border-light);
+}
+
+.prop-select:focus {
+    border-color: var(--accent);
+}
+
+/* ─── Font Picker ─── */
+
+.fp-wrap {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Looks like the select it replaces, but left-aligned like a value and with
+   room for a long family name to elide rather than push the row wide. */
+.fp-trigger {
+    text-align: left;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 18px;
+}
+
+.fp-popover {
+    position: fixed;
+    z-index: 10000;
+    width: 260px;
+    padding: 8px;
+    box-sizing: border-box;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    font-size: 11px;
+    color: var(--text-main);
+}
+
+.fp-search {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-input);
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: var(--text-main);
+    font-family: inherit;
+    font-size: 11px;
+    height: 26px;
+    padding: 0 8px;
+    outline: none;
+}
+.fp-search:focus { border-color: var(--accent); }
+
+.fp-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin: 8px 0 6px;
+}
+.fp-filter {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    padding: 2px 6px;
+}
+.fp-filter:hover { color: var(--text-main); background: var(--bg-hover); }
+.fp-filter.active { color: var(--accent); background: var(--accent-dim); }
+
+/* The list is windowed: rows are positioned by index against a spacer sized to
+   the full result count, so two thousand fonts cost a dozen DOM nodes. */
+.fp-list {
+    position: relative;
+    height: 300px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.fp-spacer { width: 1px; }
+
+.fp-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.fp-row.current { color: var(--accent); }
+.fp-row.active { background: var(--bg-hover); }
+
+.fp-row.fp-header {
+    cursor: default;
+    color: var(--text-label);
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: none;
+}
+
+.fp-empty {
+    padding: 12px 8px;
+    color: var(--text-dim);
+    text-align: center;
+}
+
+/* ─── Color Swatch ─── */
+
+.color-input {
+    width: 32px;
+    height: 26px;
+    min-width: 32px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    cursor: pointer;
+    background: none;
+    transition: border-color 0.1s;
+    box-sizing: border-box;
+}
+
+.color-input:hover {
+    border-color: var(--border-light);
+}
+
+.color-input:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.color-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.color-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 4px;
+}
+
+/* ─── Toggle / Checkbox ─── */
+
+.toggle-label {
+    font-size: 10px;
+    color: var(--text-label);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.toggle-label input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 12px;
+    height: 12px;
+    margin: 0;
+}
+
+/* ─── Transform Grid ─── */
+
+.transform-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.transform-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.transform-cell label {
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.transform-cell .prop-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Input with unit suffix (e.g. ° for degrees) */
+.input-with-unit {
+    display: flex;
+    align-items: center;
+    position: relative;
+}
+
+.input-with-unit .prop-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding-right: 16px;
+}
+
+.input-with-unit .input-unit {
+    position: absolute;
+    right: 4px;
+    font-size: 9px;
+    color: var(--text-dim);
+    pointer-events: none;
+    line-height: 1;
+}
+
+/* ─── Dimension Inputs (Figma-style: label inside the field) ─── */
+
+.dim-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 22px;
+    gap: 6px 8px;
+    align-items: center;
+    padding-top: 4px;
+}
+
+.dim-input {
+    display: flex;
+    align-items: center;
+    height: 26px;
+    background: var(--bg-input);
+    border: 1px solid transparent;
+    border-radius: 5px;
+    min-width: 0;
+    transition: border-color 0.1s;
+}
+
+.dim-input:hover {
+    border-color: var(--border-light);
+}
+
+.dim-input:focus-within {
+    border-color: var(--accent);
+}
+
+.dim-input .dim-label {
+    min-width: 24px;
+    padding: 0 4px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-dim);
+    cursor: ew-resize;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+
+.dim-input .dim-label svg {
+    display: block;
+}
+
+.dim-input input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0;
+    color: var(--text-main);
+    font-size: 11px;
+    font-family: inherit;
+}
+
+.dim-input input::-webkit-inner-spin-button,
+.dim-input input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.dim-input input::placeholder {
+    color: var(--text-dim);
+}
+
+.dim-input .dim-unit {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding-right: 6px;
+    pointer-events: none;
+}
+
+.dim-input.disabled {
+    opacity: 0.45;
+}
+
+.dim-input.disabled .dim-label {
+    cursor: default;
+}
+
+.dim-input.disabled input {
+    pointer-events: none;
+}
+
+/* Quick transform actions row (rotate 90°, flip, flatten) */
+.dim-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 2px;
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+
+.dim-actions .dim-icon-btn {
+    flex: 1;
+    height: 24px;
+}
+
+.dim-icon-btn {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 0;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+}
+
+.dim-icon-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.dim-icon-btn.active {
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+/* Reference-point (9-anchor) selector — pivot for numeric rotate/scale. */
+.ref-anchor {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 1px;
+    width: 22px;
+    height: 22px;
+    justify-self: center;
+    align-self: center;
+    padding: 1px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.ref-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+.ref-dot::after {
+    content: '';
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.1s, transform 0.1s;
+}
+
+.ref-dot:hover::after {
+    background: var(--text-main);
+}
+
+.ref-dot.active::after {
+    background: var(--accent);
+    transform: scale(1.5);
+}
+
+/* While scrubbing a dim-label, keep the resize cursor everywhere */
+body.scrubbing,
+body.scrubbing * {
+    cursor: ew-resize !important;
+}
+
+/* Stands in for a panel list whose controls would be inert — says where the
+   property actually lives instead of showing a row that does nothing. */
+.panel-empty-note {
+    padding: 4px 6px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--text-dim);
+}
+
+/* ─── Fill / Stroke compact row ─── */
+
+.fill-stroke-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.fill-stroke-row:hover {
+    background: rgba(255,255,255,0.03);
+}
+
+.fill-stroke-row .color-input {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.fill-stroke-row .color-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.fill-stroke-row .color-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 4px;
+}
+
+.fill-stroke-row .prop-input {
+    height: 24px;
+    font-size: 11px;
+    padding: 0 6px;
+    border-radius: 5px;
+}
+
+/* Fixed-width color swatch, identical across every inspector row. Row-specific
+   controls sit to its right; the delete button is pinned to the far right. */
+.fill-stroke-row .cp-swatch {
+    flex: 0 0 var(--color-swatch-w);
+    width: var(--color-swatch-w);
+    min-width: var(--color-swatch-w);
+    height: var(--color-swatch-h);
+}
+
+/* Multi/group selection where targets disagree on this slot: the swatch keeps a
+   representative color but gets a diagonal slash to read as indeterminate, and a
+   "Mixed" caption. Picking a color overrides all targets. */
+.fill-stroke-row .cp-swatch--mixed {
+    position: relative;
+    overflow: hidden;
+}
+.fill-stroke-row .cp-swatch--mixed::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        135deg,
+        transparent calc(50% - 1px),
+        var(--text-dim, #888) calc(50% - 1px),
+        var(--text-dim, #888) calc(50% + 1px),
+        transparent calc(50% + 1px)
+    );
+    pointer-events: none;
+}
+.fill-stroke-row .mixed-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-style: italic;
+    margin-left: 2px;
+}
+
+.fill-stroke-row .prop-select {
+    height: 24px;
+    font-size: 11px;
+    padding: 0 4px;
+    border-radius: 5px;
+}
+
+/* Secondary stroke row: Join + Cap, each a small label beside a select that
+   flexes to share the row width. */
+.stroke-opts-row {
+    gap: 8px;
+    height: 26px;
+}
+.stroke-opts-row .stroke-opt {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+}
+.stroke-opts-row .stroke-opt-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    flex: 0 0 auto;
+}
+.stroke-opts-row .stroke-opt .prop-select {
+    flex: 1;
+    min-width: 0;
+}
+
+.fill-stroke-row .label-short {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-right: 2px;
+}
+
+/* ── Gradient fill editor ────────────────────────────────────────────── */
+.fill-type-select {
+    flex: 0 0 62px;
+    width: 62px;
+}
+/* Gradient preview swatch shown in place of the solid color input.
+   Click to activate gradient editing (ramp + on-canvas handles). */
+.gradient-preview {
+    flex: 1;
+    min-width: 40px;
+    height: 24px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    cursor: pointer;
+    /* checkerboard behind, so transparent stops read correctly
+       (gradient layer is set inline as the first background-image) */
+    background-color: #fff;
+    background-size: auto, 8px 8px;
+    transition: border-color 0.1s;
+}
+.gradient-preview:hover {
+    border-color: var(--border-light);
+}
+.gradient-preview.active {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+.gradient-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px 4px 6px 6px;
+}
+/* ── Ramp: the draggable stop strip (Figma-style) ── */
+.gradient-ramp {
+    position: relative;
+    height: 14px;
+    margin: 8px 6px 10px;
+    border-radius: 7px;
+    box-shadow: 0 0 0 1px var(--border-light);
+    background-color: #fff;
+    background-size: auto, 8px 8px;
+    cursor: copy; /* clicking an empty spot adds a stop */
+}
+.gradient-stop-chip {
+    position: absolute;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+    transform: translate(-50%, -50%);
+    cursor: grab;
+}
+.gradient-stop-chip:active {
+    cursor: grabbing;
+}
+.gradient-stop-chip.selected {
+    width: 14px;
+    height: 14px;
+    box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(0, 0, 0, 0.4);
+    z-index: 1;
+}
+.gradient-angle-row,
+.gradient-stop-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.gradient-sub-label {
+    font-size: 10px;
+    color: var(--text-dim);
+}
+.gradient-stop-row .color-input {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+/* Same fixed-width swatch as the fill/stroke rows; position and opacity fields
+   sit to its right. */
+.gradient-stop-row .cp-swatch {
+    flex: 0 0 var(--color-swatch-w);
+    width: var(--color-swatch-w);
+    min-width: var(--color-swatch-w);
+    height: var(--color-swatch-h);
+}
+.gradient-stop-row .prop-input,
+.gradient-angle-row .prop-input {
+    height: 24px;
+    font-size: 11px;
+    padding: 0 6px;
+    border-radius: 5px;
+}
+.gradient-stop-row .icon-toggle:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.fill-stroke-row .unit {
+    font-size: 9px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+/* ─── Effects panel ─── */
+
+#effects-list {
+    gap: 6px !important;
+}
+
+.effect-empty {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 2px 4px 4px;
+}
+
+.effect-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.effect-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.effect-head .prop-select {
+    flex: 1;
+    height: 24px;
+    font-size: 11px;
+    border-radius: 5px;
+}
+
+.effect-head .icon-toggle {
+    flex-shrink: 0;
+    font-size: 15px;
+    line-height: 1;
+    color: var(--text-dim);
+}
+
+.effect-head .icon-toggle:hover {
+    color: var(--text-main);
+}
+
+.effect-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.effect-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.effect-row .color-input {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    flex-shrink: 0;
+    align-self: flex-end;
+    margin-bottom: 1px;
+    border-radius: 5px;
+}
+
+/* Same fixed-width swatch as the fill/stroke/gradient rows. The effect row is
+   bottom-aligned, so match the color-input's alignment. */
+.effect-row .cp-swatch {
+    flex: 0 0 var(--color-swatch-w);
+    width: var(--color-swatch-w);
+    min-width: var(--color-swatch-w);
+    height: var(--color-swatch-h);
+    align-self: flex-end;
+    margin-bottom: 1px;
+}
+
+.effect-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.effect-field-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-dim);
+    padding-left: 1px;
+}
+
+.effect-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.effect-input-wrap .prop-input {
+    height: 24px;
+    font-size: 11px;
+    width: 100%;
+    border-radius: 5px;
+}
+
+.effect-unit {
+    position: absolute;
+    right: 6px;
+    font-size: 9px;
+    color: var(--text-dim);
+    pointer-events: none;
+}
+
+.effect-input-wrap:has(.effect-unit) .prop-input {
+    padding-right: 16px;
+}
+
+/* ─── Stroke sub-properties (indented) ─── */
+
+.stroke-details {
+    padding-left: 2px;
+    margin-top: 3px;
+}
+
+.stroke-details .prop-row {
+    height: 28px;
+}
+
+
+
+/* ─── Icon toggles (visibility/lock) ─── */
+
+.icon-toggle {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: none;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.icon-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.icon-toggle.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-dim);
+}
+
+/* Small labelled button for inspector rows (e.g. the mesh fill's "Edit").
+   Reads as an actionable control, unlike the muted .icon-toggle. */
+.panel-btn {
+    height: var(--color-swatch-h);
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-input, var(--bg-panel));
+    color: var(--text-main);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.panel-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+}
+
+.panel-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* ─── Pathfinder ─── */
+
+.pathfinder-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+}
+
+.op-btn {
+    height: 28px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 13px;
+    transition: all 0.15s;
+    padding: 0;
+}
+
+.op-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.op-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-light);
+}
+
+/* ─── Layers ─── */
+
+.panel-section.layers-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#layer-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2px 4px;
+    min-height: 0;
+}
+
+/* The list is focusable for keyboard navigation; selected rows already provide
+   the visual cue, so suppress the container's focus ring. */
+#layer-list:focus,
+#layer-list:focus-visible {
+    outline: none;
+}
+
+#layer-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+#layer-list::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 2px;
+}
+
+#layer-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.layer-item {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.layer-item-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 6px;
+    gap: 4px;
+    border-radius: 3px;
+    min-height: 22px;
+}
+
+.layer-item:hover > .layer-item-row {
+    background: var(--bg-hover);
+}
+
+.layer-item.selected > .layer-item-row {
+    background: var(--accent-dim);
+    color: var(--accent);
+}
+
+/* Artboard rows: top-level frames, slightly emphasized. */
+.layer-item.layer-artboard > .layer-item-row {
+    font-weight: 600;
+    color: var(--text-main);
+}
+.layer-item.layer-artboard > .layer-item-row .layer-icon {
+    opacity: 0.85;
+}
+.layer-item.layer-artboard.selected > .layer-item-row {
+    color: var(--accent);
+}
+
+/* ─── Frame (artboard) properties panel ─── */
+
+.artboard-panel .panel-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ab-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ab-name-input {
+    flex: 1;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-main);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    padding: 6px 8px;
+    outline: none;
+}
+
+.ab-name-input:focus {
+    border-color: var(--accent);
+}
+
+.ab-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.ab-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px 8px;
+}
+
+.ab-cell:focus-within {
+    border-color: var(--accent);
+}
+
+.ab-cell > span {
+    font-size: 11px;
+    color: var(--text-dim);
+    width: 10px;
+    flex-shrink: 0;
+}
+
+.ab-cell input {
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+}
+
+.ab-sublabel {
+    font-size: 11px;
+    color: var(--text-dim);
+    flex: 1;
+}
+
+.ab-preset {
+    flex: 1.4;
+}
+
+.ab-bg-row {
+    justify-content: space-between;
+}
+
+.ab-transparent {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.ab-bg-row .prop-color {
+    width: 30px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: none;
+    cursor: pointer;
+}
+
+.ab-bg-row .prop-color:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ab-delete-btn {
+    width: 100%;
+    padding: 7px;
+    margin-top: 2px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 5px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.ab-delete-btn:hover {
+    background: #b3261e;
+    border-color: #b3261e;
+    color: #fff;
+}
+
+.layer-item-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* Layer drag-and-drop reordering */
+.layer-item.dragging {
+    opacity: 0.4;
+}
+
+.layer-item-row.drop-above {
+    box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.layer-item-row.drop-below {
+    box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.layer-item-row.drop-into {
+    background: var(--accent-dim);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Chevron expand/collapse */
+.layer-chevron {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: var(--text-dim);
+    transition: transform 0.15s ease;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+.layer-chevron.expanded {
+    transform: rotate(90deg);
+}
+
+.layer-chevron:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.layer-chevron-spacer {
+    width: 12px;
+    flex-shrink: 0;
+}
+
+/* Layer icon */
+.layer-icon {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-dim);
+}
+
+/* Layer name */
+.layer-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+/* Mask badge on layer rows that act as a mask. Neutral + dim: the badge marks
+   the mask without competing with names or the selection highlight. */
+.layer-mask-badge {
+    flex: 0 0 auto;
+    margin-right: 4px;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--text-dim, #808080);
+    opacity: 0.8;
+}
+
+/* Live Paint group: a small pill so the special object reads at a glance. */
+.layer-lp-badge {
+    flex: 0 0 auto;
+    margin-right: 4px;
+    padding: 1px 5px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+    border-radius: 999px;
+    color: var(--accent, #6c8cff);
+    background: color-mix(in srgb, var(--accent, #6c8cff) 18%, transparent);
+    white-space: nowrap;
+}
+
+/* Figma-style mask wrapping: the masked rows plus the mask row that bounds
+   them are wrapped in ONE container. Deliberately quiet — no background tint,
+   just a single hairline guide in a neutral (non-accent) tone, aligned to the
+   rows' own indent (--mask-indent). The italic masked names + the mask badge
+   carry the meaning; the guide only hints at the grouping. */
+.layer-mask-span {
+    position: relative;
+}
+.layer-mask-span::before {
+    content: '';
+    position: absolute;
+    left: var(--mask-indent, 8px);
+    top: 2px;
+    bottom: 2px;
+    width: 1px;
+    background: var(--border-light, #444);
+    opacity: 0.7;
+}
+
+.layer-item.layer-masked .layer-name {
+    font-style: italic;
+    opacity: 0.75;
+}
+.layer-item.layer-mask-node .layer-name {
+    font-weight: 500;
+}
+.layer-item.layer-mask-node .layer-mask-badge {
+    opacity: 1;
+}
+
+/* Layer actions (visibility / lock). Hidden entirely — not just transparent —
+   when idle so they reserve no width and don't leave a gap; they only take
+   space on hover, or when the layer is hidden/locked (state worth surfacing). */
+.layer-actions {
+    display: none;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+.layer-item-row:hover .layer-actions,
+.layer-item.layer-hidden .layer-actions,
+.layer-item.layer-locked .layer-actions {
+    display: flex;
+}
+
+.layer-vis-btn,
+.layer-lock-btn {
+    font-size: 10px;
+    cursor: pointer;
+    padding: 1px 2px;
+    border-radius: 2px;
+    transition: background 0.1s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.layer-vis-btn:hover,
+.layer-lock-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Hidden/locked layer states */
+.layer-item.layer-hidden > .layer-item-row {
+    opacity: 0.4;
+}
+
+.layer-item.layer-locked > .layer-item-row .layer-name {
+    font-style: italic;
+    color: var(--text-dim);
+}
+
+/* Inline rename input */
+.layer-rename-input {
+    background: var(--bg-input);
+    border: 1px solid var(--accent);
+    color: var(--text-main);
+    font-size: 11px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    outline: none;
+    width: 100%;
+    font-family: inherit;
+}
+
+/* ─── Context Menu ─── */
+
+.context-menu {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    min-width: 200px;
+    background: rgba(43, 43, 43, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 4px 0;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.25);
+    font-size: 12px;
+    color: var(--text-main);
+    user-select: none;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.context-menu-item:hover .context-menu-shortcut {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.context-menu-shortcut {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-left: 24px;
+    flex-shrink: 0;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+}
+
+/* ─── Contextual Action Bar ─── */
+
+#context-bar {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(43, 43, 43, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.25);
+    padding: 5px 10px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+    white-space: nowrap;
+    transition: opacity 0.15s ease;
+    font-size: 11px;
+}
+
+#context-bar:empty {
+    display: none;
+}
+
+/* Separator */
+.cb-separator {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    flex-shrink: 0;
+}
+
+/* Buttons */
+.cb-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+
+.cb-btn:hover {
+    background: var(--bg-hover);
+}
+
+.cb-btn:active {
+    background: var(--accent);
+}
+
+.cb-btn-danger:hover {
+    background: rgba(255, 68, 68, 0.25);
+    color: #ff6b6b;
+}
+
+.cb-btn-danger:active {
+    background: #ff4444;
+    color: #fff;
+}
+
+.cb-btn-icon {
+    font-size: 13px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Compact icon-only buttons (align / boolean rows) */
+.cb-btn-icon-only {
+    padding: 3px 5px;
+    font-size: 14px;
+    line-height: 1;
+    min-width: 24px;
+    justify-content: center;
+}
+
+.cb-btn-text {
+    font-size: 11px;
+}
+
+/* ─── Context bar tooltips (fast, above the bar; shortcut appended) ─── */
+
+#context-bar [data-tooltip] {
+    position: relative;
+}
+
+#context-bar [data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    color: #e8e8e8;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+    /* Wrap longer explanatory tooltips instead of overflowing the screen. */
+    white-space: normal;
+    width: max-content;
+    max-width: 240px;
+    text-align: center;
+    line-height: 1.35;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    letter-spacing: 0.01em;
+}
+
+#context-bar [data-tooltip][data-shortcut]::after {
+    content: attr(data-tooltip) "  " attr(data-shortcut);
+}
+
+#context-bar [data-tooltip]::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 5px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #1a1a1a;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 1000;
+}
+
+#context-bar [data-tooltip]:hover::after,
+#context-bar [data-tooltip]:hover::before {
+    opacity: 1;
+}
+
+/* Color Swatch */
+.cb-swatch-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.cb-swatch-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    text-align: center;
+    display: block;
+    margin-top: 1px;
+    user-select: none;
+    line-height: 1;
+}
+
+.cp-swatch.cb-swatch {
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--border-light);
+    border-radius: 4px;
+    padding: 0;
+    cursor: pointer;
+}
+
+/* Two controls sharing one labelled slot in the bar (swatch + None, gap preset
+   + gap number). Keeps them under a single caption instead of repeating it. */
+.cb-inline-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* The Live Paint bucket loaded with None: the swatch still shows the remembered
+   colour underneath, struck through, so switching back is one click and it is
+   obvious what you are switching back TO. */
+.cp-swatch.cb-swatch-none {
+    position: relative;
+    opacity: 0.5;
+}
+
+.cp-swatch.cb-swatch-none::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    background: linear-gradient(
+        to top right,
+        transparent calc(50% - 1px),
+        #e5484d calc(50% - 1px),
+        #e5484d calc(50% + 1px),
+        transparent calc(50% + 1px)
+    );
+    border-radius: 3px;
+    pointer-events: none;
+}
+
+.cb-none-toggle {
+    height: 20px;
+    padding: 0 6px;
+    font-size: 10px;
+    font-family: inherit;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1.5px solid var(--border-light);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.cb-none-toggle:hover {
+    color: var(--text-main);
+    background: var(--bg-hover);
+}
+
+.cb-none-toggle.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Plain numeric entry beside a preset menu (gap size). */
+.cb-number {
+    width: 48px;
+    height: 22px;
+    border: 1.5px solid var(--border-light);
+    border-radius: 4px;
+    background: var(--bg-input, #1a1a1a);
+    color: var(--text-main, #eee);
+    font-family: inherit;
+    font-size: 11px;
+    padding: 0 4px;
+    text-align: right;
+}
+
+.cb-select {
+    height: 22px;
+    border: 1.5px solid var(--border-light);
+    border-radius: 4px;
+    background: var(--panel-bg, #2a2a2a);
+    color: var(--text, #eee);
+    font-size: 11px;
+    padding: 0 4px;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+/* Numeric field for context-bar controls (Offset, Blend). Reuses the panel's
+   .dim-input structure — a draggable .dim-label handle + text input — so the
+   scrub "slider" is identical everywhere; this only sets the bar sizing. */
+.cb-dim-input {
+    height: 24px;
+    border-color: var(--border-light);
+}
+.cb-dim-input input {
+    flex: 0 0 46px;
+    text-align: right;
+    padding-right: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.cb-dim-input input::-webkit-inner-spin-button,
+.cb-dim-input input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Small value popover a context-bar command opens to collect a number
+   (e.g. Offset Copy…), Illustrator-dialog style — not a permanent bar field. */
+.cb-value-popover {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--bg-panel, #2b2b2b);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    z-index: 1000;
+}
+/* Badge */
+.cb-badge {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    user-select: none;
+}
+
+/* Hint text */
+.cb-hint {
+    color: var(--text-dim);
+    font-size: 11px;
+    max-width: 500px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: none;
+}
+
+
+/* Editing mode accent border on canvas */
+#canvas-container.editing-mode {
+    box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Text input overlay */
+.text-input-overlay {
+    position: absolute;
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    color: var(--text-main);
+    font-family: inherit;
+    outline: none;
+    padding: 2px 4px;
+    z-index: 200;
+    min-width: 60px;
+}
+
+/* ─── Typography Panel ─────────────────────────────────────── */
+#typography-section .prop-select {
+    font-size: 11px;
+}
+
+.cb-btn-active {
+    background: rgba(74, 158, 255, 0.25) !important;
+    color: #4a9eff !important;
+}
+
+/* ─── Context bar dropdown (Figma-style split control) ─── */
+.cb-dropdown {
+    display: inline-flex;
+}
+
+.cb-dropdown-btn .cb-caret {
+    font-size: 9px;
+    opacity: 0.7;
+    margin-left: 2px;
+}
+
+/* Popup menu (appended to <body>, opens upward above the bar) */
+.cb-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 150px;
+    padding: 4px;
+    background: rgba(43, 43, 43, 0.98);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3);
+    z-index: 200;
+}
+
+.cb-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 0.12s;
+}
+
+.cb-menu-item:hover {
+    background: var(--bg-hover);
+}
+
+.cb-menu-item-active {
+    background: rgba(74, 158, 255, 0.2);
+    color: #4a9eff;
+}
+
+.cb-menu-item-label {
+    flex: 1;
+}
+
+.cb-menu-item-shortcut {
+    font-size: 10px;
+    opacity: 0.6;
+}
+
+.cb-menu-item-danger:hover {
+    background: rgba(255, 68, 68, 0.25);
+    color: #ff6b6b;
+}
+
+.add-property-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+
+.add-property-btn:hover {
+    background: rgba(255,255,255,0.08);
+    color: var(--text-main);
+}
+
+/* Sidebar Export Panel Button */
+.export-pane-btn {
+    width: 100%;
+    padding: 7px;
+    margin-top: 2px;
+    border: 1px solid var(--border);
+    background: var(--bg-hover);
+    color: var(--text-main);
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.export-pane-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* ─── Color Picker ─────────────────────────────────────────────────────── */
+
+/* Swatch button — replaces <input type="color">. Sized to slot into the
+   existing .color-input / .cb-swatch layouts. */
+.cp-swatch {
+    width: 32px;
+    height: 26px;
+    min-width: 32px;
+    padding: 0;
+    border: 1px solid var(--border-light);
+    border-radius: 5px;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: border-color 0.1s, transform 0.05s;
+}
+.cp-swatch:hover { border-color: var(--text-dim); }
+.cp-swatch:active { transform: scale(0.96); }
+
+.cp-popover {
+    position: fixed;
+    z-index: 10000;
+    width: 244px;
+    padding: 12px;
+    box-sizing: border-box;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    font-size: 11px;
+    color: var(--text-main);
+    user-select: none;
+}
+
+/* Saturation / value square */
+.cp-sv {
+    position: relative;
+    width: 100%;
+    height: 150px;
+    border-radius: 6px;
+    cursor: crosshair;
+    touch-action: none;
+}
+.cp-sv-thumb {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+/* Slider row: hue + alpha on the left, eyedropper + preview on the right */
+.cp-sliders {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+}
+.cp-slider-col { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.cp-slider-row { display: flex; }
+
+.cp-hue, .cp-alpha {
+    position: relative;
+    flex: 1;
+    height: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    touch-action: none;
+}
+.cp-hue {
+    background: linear-gradient(to right,
+        #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+}
+.cp-alpha {
+    background: repeating-conic-gradient(#bdbdbd 0% 25%, #fff 0% 50%) 0 0 / 12px 12px;
+}
+.cp-alpha-fill { position: absolute; inset: 0; border-radius: 6px; }
+.cp-slider-thumb {
+    position: absolute;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.cp-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.cp-eyedropper {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-input);
+    color: var(--text-dim);
+    border: 1px solid var(--border-light);
+    border-radius: 5px;
+    cursor: pointer;
+}
+.cp-eyedropper:hover { color: var(--accent); border-color: var(--accent); }
+.cp-preview {
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    border: 1px solid var(--border-light);
+}
+
+/* Numeric fields */
+.cp-inputs {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+}
+.cp-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+}
+.cp-field:first-child { flex: 1.6; }
+.cp-field-label { color: var(--text-label); font-size: 9px; letter-spacing: 0.03em; }
+.cp-hex, .cp-num {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-main);
+    font-size: 11px;
+    text-align: center;
+    padding: 4px 2px;
+    outline: none;
+    font-family: inherit;
+}
+.cp-hex { text-transform: uppercase; }
+.cp-hex:focus, .cp-num:focus { border-color: var(--accent); }
+
+/* Recent + saved sections */
+.cp-section { margin-top: 12px; }
+.cp-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.cp-section-title {
+    color: var(--text-label);
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+.cp-swatch-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-height: 18px;
+}
+.cp-chip {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+.cp-chip:hover { border-color: var(--accent); transform: scale(1.08); }
+.cp-empty { color: var(--text-dim); font-size: 11px; }
+.cp-add-swatch {
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+    padding: 0;
+    background: var(--bg-input);
+    color: var(--text-dim);
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.cp-add-swatch:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ─── About Dialog ─── */
+.about-card {
+    min-width: 320px;
+    max-width: 360px;
+    text-align: center;
+    padding: 24px;
+    border-radius: 12px;
+}
+.about-logo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+.about-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+.about-tagline {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+}
+.about-version {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 20px;
+}
+.about-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 16px 0;
+}
+.about-credit {
+    font-size: 12px;
+    color: var(--text-main);
+    margin-bottom: 8px;
+}
+.about-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.15s;
+}
+.about-link:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+.about-contact {
+    margin-bottom: 14px;
+}
+.about-legal {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    font-size: 11px;
+}
+.about-legal-sep {
+    color: var(--text-faint, #7a7a7a);
+}
+.about-email {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+.about-email:hover {
+    color: var(--accent);
+}
+.about-actions {
+    justify-content: center;
+    margin-top: 24px;
+}
+.about-actions .header-btn-primary {
+    margin-right: 0;
+    padding: 6px 24px;
+    font-size: 12px;
+}
+
+/* Screen Reader Only utility for accessibility & SEO */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+
+
+/* ── Keyboard shortcuts dialog ─────────────────────────────────────────── */
+.kb-card {
+    width: min(720px, 92vw);
+    max-width: 720px;
+    padding: 0;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    max-height: min(78vh, 760px);
+}
+.kb-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+}
+.kb-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+.kb-sub {
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    margin-top: 5px;
+    max-width: 54ch;
+}
+.kb-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    border-radius: 4px;
+}
+.kb-close:hover { color: var(--text-main); }
+.kb-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.kb-body {
+    overflow-y: auto;
+    padding: 4px 24px 24px;
+    /* Grid, not CSS columns: columns flow the whole list down one side and back
+       up the other, so you read Tools, scroll to the bottom, then scroll back up
+       for the next section. A grid keeps each section whole and in reading
+       order, left to right. */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 22px 32px;
+    align-items: start;
+}
+.kb-section {
+    min-width: 0;
+}
+.kb-section-title {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-label);
+    margin: 0 0 8px;
+}
+.kb-blurb {
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    margin: 0 0 10px;
+}
+.kb-rows { display: flex; flex-direction: column; }
+.kb-row {
+    display: grid;
+    /* Capped, not `auto`: a row listing four chords would otherwise take the
+       width and wrap its description one word per line. */
+    grid-template-columns: minmax(64px, 44%) 1fr;
+    gap: 12px;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+}
+.kb-row:last-child { border-bottom: none; }
+.kb-keys { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.kb-or {
+    font-size: 9.5px;
+    color: var(--text-dim);
+    margin: 0 3px;
+}
+.kb-card kbd {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    min-width: 20px;
+    text-align: center;
+    background: var(--bg-input, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--border-light);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 5px;
+    color: var(--text-main);
+    white-space: nowrap;
+}
+.kb-action-main { font-size: 12.5px; color: var(--text-main); line-height: 1.45; }
+.kb-note {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-top: 2px;
+}
+.kb-mode {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-top: 3px;
+    padding-left: 9px;
+    border-left: 2px solid var(--border-light);
+}
+.kb-mode-where {
+    display: block;
+    color: var(--text-label);
+    font-size: 10px;
+    letter-spacing: 0.03em;
+}

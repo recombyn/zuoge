@@ -47,7 +47,12 @@ function registerAliasesFromSource(): void {
   }> = [];
   for (const family of APP_FONT_ALIASES) {
     faces.push({ family, weight: 400, italic: false, bytes: regular });
-    if (bold) faces.push({ family, weight: 700, italic: false, bytes: bold });
+    if (bold) {
+      faces.push({ family, weight: 700, italic: false, bytes: bold });
+      // Catalog Bold button uses "Alibaba PuHuiTi Bold" + CSS weight normal.
+      faces.push({ family: `${family} Bold`, weight: 400, italic: false, bytes: bold });
+      faces.push({ family: `${family} Bold`, weight: 700, italic: false, bytes: bold });
+    }
   }
   registerEmbeddedFaces(faces);
 }

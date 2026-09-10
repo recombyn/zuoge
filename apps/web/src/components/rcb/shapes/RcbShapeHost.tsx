@@ -59,7 +59,8 @@ function hostNodePaintIdentityEqual(prev: unknown, next: unknown): boolean {
   const pb = b.attrs || {};
   const keys = new Set([...Object.keys(pa), ...Object.keys(pb)]);
   for (const k of keys) {
-    if (k === 'angle' || k === 'flipX' || k === 'flipY') continue;
+    // Keep angle/flip in equality so DomHost FO syncHtmlMediaMountGeometry runs.
+    // Paint remount tokens still omit them (boolean/outline paths).
     if (pa[k] !== pb[k]) return false;
   }
   return true;
@@ -194,8 +195,9 @@ function RcbShapeHost({
     node?.attrs?.textFrame,
     node?.attrs?.path,
     node?.attrs?.shapeType,
-    // Angle / flip are transform-only — DomHost preview noop / Kit TransformPreview
-    // without remounting (full rebuild corrupts boolean / outlined compound paths).
+    // Angle / flip: no paint remount (boolean / outlined compounds). Kit gets
+    // TransformPreview via syncKitGeometryFromDocument; DomHost FO updates via
+    // syncHtmlMediaMountGeometry when host memo sees attrs change.
     node?.attrs?.brushStyle,
     node?.attrs?.pathPressure,
     // All effects share the SVG paint path. Include their complete input so a

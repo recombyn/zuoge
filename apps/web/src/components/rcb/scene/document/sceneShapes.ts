@@ -440,7 +440,7 @@ export function polygonPoints(
   return points;
 }
 
-/** Scale/translate points so their AABB exactly fills width 闁?height. */
+/** Scale/translate points so their AABB exactly fills width × height. */
 export function fitPointsToBox(
   points: Array<[number, number]>,
   width: number,
@@ -518,6 +518,118 @@ export function shapeVertexPoints(
     return fitPointsToBox(polygonPoints(0, 0, n, 1), w, h);
   }
   return [];
+}
+
+/** Inward unit from a vertex toward the box centre (radius-park axis). */
+function vertexInwardSite(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number
+): { x: number; y: number; ix: number; iy: number } {
+  let ix = cx - x;
+  let iy = cy - y;
+  const len = Math.hypot(ix, iy) || 1;
+  return { x, y, ix: ix / len, iy: iy / len };
+}
+
+function pickTopmostVertex(
+  pts: Array<[number, number]>
+): [number, number] | null {
+  if (!pts.length) return null;
+  let best = pts[0];
+  for (const p of pts) {
+    if (p[1] < best[1] - 1e-6 || (Math.abs(p[1] - best[1]) <= 1e-6 && p[0] < best[0])) {
+      best = p;
+    }
+  }
+  return best;
+}
+
+function pickRightmostVertex(
+  pts: Array<[number, number]>
+): [number, number] | null {
+  if (!pts.length) return null;
+  let best = pts[0];
+  for (const p of pts) {
+    if (p[0] > best[0] + 1e-6 || (Math.abs(p[0] - best[0]) <= 1e-6 && p[1] < best[1])) {
+      best = p;
+    }
+  }
+  return best;
+}
+
+/**
+ * Star handle seats on true outline corners (same vertices as getShapeBaselineD).
+ * - radius: topmost outer tip (even index)
+ * - inner: valley adjacent to that tip (next odd index)
+ * - sides: rightmost outer tip
+ */
+export function starCornerHandleSites(
+  width: number,
+  height: number,
+  sides: number,
+  innerRatio: number
+): {
+  cx: number;
+  cy: number;
+  outerDist: number;
+  radius: { x: number; y: number; ix: number; iy: number };
+  inner: { x: number; y: number; ix: number; iy: number };
+  sides: { x: number; y: number; ix: number; iy: number };
+} | null {
+  const pts = shapeVertexPoints('star', width, height, sides, innerRatio);
+  if (pts.length < 2) return null;
+  const cx = width / 2;
+  const cy = height / 2;
+  // Outer tips are even indices in starPoints().
+  const outers: Array<{ p: [number, number]; i: number }> = [];
+  for (let i = 0; i < pts.length; i += 2) {
+    outers.push({ p: pts[i], i });
+  }
+  if (!outers.length) return null;
+  const outerPts = outers.map((o) => o.p);
+  const topP = pickTopmostVertex(outerPts);
+  const rightP = pickRightmostVertex(outerPts);
+  if (!topP || !rightP) return null;
+  const top = outers.find((o) => o.p === topP) ?? outers[0];
+  const right = outers.find((o) => o.p === rightP) ?? outers[0];
+  const valleyIdx = (top.i + 1) % pts.length;
+  const valley = pts[valleyIdx];
+  const outerDist = Math.hypot(top.p[0] - cx, top.p[1] - cy) || 1;
+  return {
+    cx,
+    cy,
+    outerDist,
+    radius: vertexInwardSite(top.p[0], top.p[1], cx, cy),
+    inner: vertexInwardSite(valley[0], valley[1], cx, cy),
+    sides: vertexInwardSite(right.p[0], right.p[1], cx, cy),
+  };
+}
+
+/**
+ * Polygon / triangle seats: radius on topmost vertex, sides on rightmost.
+ */
+export function polygonCornerHandleSites(
+  shapeType: string,
+  width: number,
+  height: number,
+  sides: number
+): {
+  radius: { x: number; y: number; ix: number; iy: number };
+  sides: { x: number; y: number };
+} | null {
+  const pts = shapeVertexPoints(shapeType, width, height, sides);
+  if (!pts.length) return null;
+  const cx = width / 2;
+  const cy = height / 2;
+  const top = pickTopmostVertex(pts);
+  const right = pickRightmostVertex(pts);
+  if (!top || !right) return null;
+  return {
+    radius: vertexInwardSite(top[0], top[1], cx, cy),
+    sides: { x: right[0], y: right[1] },
+  };
 }
 
 /** Stored line/arrow thickness. */

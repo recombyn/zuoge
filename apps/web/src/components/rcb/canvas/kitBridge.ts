@@ -49,11 +49,14 @@ import {
 } from '@/components/rcb/scene/document/sceneDocument';
 import {
   buildMarkdownTextAttrs,
+  isTextBold,
+  isTextItalic,
   measurePlainTextSize,
   measureWrappedTextSize,
   parseNodeMarkdown,
   parseNodeTextStyle,
   toFabricFontFamily,
+  type TextStyle,
 } from '@/components/rcb/scene/document/sceneText';
 import { ensureKitFontFamily, KIT_APP_TEXT_FONT } from './kitTextFonts';
 import {
@@ -70,11 +73,15 @@ import {
   type FillImageAdjust,
   type FillImageFit,
 } from '@/components/rcb/scene/document/sceneFill';
-import { normalizeColor } from '@/components/rcb/scene/document/sceneEffects';
+import { normalizeColor, resolveStrokeLinecap, resolveStrokeLinejoin, resolveStrokeMiterlimit } from '@/components/rcb/scene/document/sceneEffects';
 import { strokeDashForStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
 import { store } from '@/store';
 import type { CanvasEngineHandle } from './mountCore';
-import { stripKitSeedArtboards } from './mountCore';
+import {
+  discardKitArtboardNoHistory,
+  isKitEngineSeedArtboard,
+  stripKitSeedArtboards,
+} from './mountCore';
 import { isPersistentDrawSessionTool } from './toolMap';
 import {
   isNodeProcessRunning,
@@ -89,6 +96,7 @@ import { cornerRadiusHandles } from '@rcb-vector/corner_handles';
 import { FRAME_SEL_PREFIX, frameSelId } from '@/components/rcb/frames/frameSceneQuery';
 import { frameForNodeIntersectPlacement } from '@/components/rcb/frames/frameNodeBinding';
 import { frameIsEmpty } from '@/components/rcb/frames/framePlatePointer';
+import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
 import {
   isAnimationFrameHostNode,
   isArtboardVisibleInDocument,
@@ -98,11 +106,21 @@ import {
   isImageGeneratorNode,
   isLottieGeneratorNode,
   isNodeMarqueeSkippable,
+  isNodePickableInDocument,
+  isNodeStructurallyHiddenInDocument,
   isVideoGeneratorNode,
 } from '@/components/rcb/scene/document/nodeCapabilities';
+import {
+  isAnimationWorkbenchPreviewChild,
+  tagCreatedNodeForWorkbenchSurround,
+} from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { nodeSceneAabb } from '@/components/rcb/scene/layout/nodeAabb';
 import { storedOriginForSceneResult } from '@/components/rcb/scene/layout/coords';
-import { frameSceneBounds, nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
+import {
+  frameSceneBounds,
+  isFrameLocalCoordSpace,
+  nodeLeftTop,
+} from '@/components/rcb/scene/layout/nodeLayout';
 import {
   getLiveArtboardFrameGeometry,
   previewArtboardFrameGeometry,
@@ -138,6 +156,12 @@ import {
   sidesFromAttrs,
   starInnerRatioFromAttrs,
 } from '@/components/rcb/scene/document/sceneShapes';
+import {
+  isRadiusLinked,
+  maxRadius,
+  radiiFromAttrs,
+  uniformCornerRadii,
+} from '@/components/rcb/scene/document/sceneRadii';
 
 /** Kit→SceneDocument mirror — never triggers Kit re-hydrate / geom push-back. */
 function mirrorKitDocument(doc: SceneDocument) {
@@ -593,6 +617,48 @@ function kitTextAlignFromStyle(textAlign: string | undefined): number {
   return 0;
 }
 
+/**
+ * Map RCB / catalog text style → Kit face + weight.
+ * Catalog Bold often uses a dedicated family ("Alibaba PuHuiTi Bold") with CSS
+ * weight normal — Kit CJK aliases are registered on the base name at weight 700.
+ */
+function kitTextTypoFromStyle(style: Partial<TextStyle> | null | undefined): {
+  family: string;
+  weight: number;
+  italic: boolean;
+  letterSpacing: number;
+} {
+  const raw = toFabricFontFamily(style?.fontFamily) || KIT_APP_TEXT_FONT;
+  const italic = isTextItalic(style);
+  const letterSpacing = Number(style?.letterSpacing) || 0;
+  const bold = isTextBold(style);
+  let weight = 400;
+  if (bold) {
+    const n = Number(style?.fontWeight);
+    weight = Number.isFinite(n) && n >= 600 ? Math.round(n) : 700;
+  } else {
+    const n = Number(style?.fontWeight);
+    if (Number.isFinite(n) && n > 0) weight = Math.round(n);
+  }
+  // "… Bold" dedicated faces → base family @ 700 (Kit paint lookup).
+  const family = raw.replace(/\s+Bold$/i, '').trim() || raw;
+  return { family, weight, italic, letterSpacing };
+}
+
+function applyKitTextStyleNoHistory(
+  scene: WasmScene,
+  kitId: number,
+  weight: number,
+  italic: boolean,
+  letterSpacing: number
+) {
+  try {
+    scene.engine?.set_text_style(kitId, weight, italic, letterSpacing);
+  } catch {
+    /* optional on older wasm */
+  }
+}
+
 /** Push SceneDocument text content / family into Kit (paste, hydrate, panel edits). */
 function applyKitTextProps(scene: WasmScene, kitId: number, node: SceneNodeInput): boolean {
   if (String(node.key || '') !== 'text') return false;
@@ -600,19 +666,21 @@ function applyKitTextProps(scene: WasmScene, kitId: number, node: SceneNodeInput
   const style = parseNodeTextStyle(attrs);
   const content = parseNodeMarkdown(attrs);
   const fontSize = Number(attrs.fontSize || attrs['font-size'] || style.fontSize || 16) || 16;
-  const family = toFabricFontFamily(style.fontFamily) || KIT_APP_TEXT_FONT;
+  const typo = kitTextTypoFromStyle(style);
   const align = kitTextAlignFromStyle(style.textAlign);
   const lh = Number(style.lineHeight) || 1.2;
-  const sig = `${content}\0${fontSize}\0${family}\0${align}\0${lh}`;
+  const sig = `${content}\0${fontSize}\0${typo.family}\0${typo.weight}\0${typo.italic ? 1 : 0}\0${typo.letterSpacing}\0${align}\0${lh}`;
   if (lastKitTextSig.get(kitId) === sig) return false;
-  ensureKitFontFamily(family);
+  ensureKitFontFamily(typo.family);
   try {
     scene.engine?.set_text_content(kitId, content, fontSize);
   } catch {
     /* ignore */
   }
+  // Weight/italic before setTextPropertiesNoHistory so its invalidateCache sees them.
+  applyKitTextStyleNoHistory(scene, kitId, typo.weight, typo.italic, typo.letterSpacing);
   try {
-    scene.setTextPropertiesNoHistory(kitId, family, align, lh);
+    scene.setTextPropertiesNoHistory(kitId, typo.family, align, lh);
   } catch {
     /* ignore */
   }
@@ -895,7 +963,7 @@ function kitNodeToCreated(
     const rh = Number(g.Rect.height);
     const w = Number.isFinite(rw) && rw > 0 ? rw : 1;
     const h = Number.isFinite(rh) && rh > 0 ? rh : 1;
-    return createShapeNode({
+    const created = createShapeNode({
       x: Number(t.x) || 0,
       y: Number(t.y) || 0,
       width: w,
@@ -906,6 +974,16 @@ function kitNodeToCreated(
       borderWidth: paint.borderWidth,
       angle: Number(t.rotation_deg) || 0,
     });
+    // Kit duplicate/paste copies style.corner_radius; createShapeNode seeds 0.
+    // Mirror into attrs so reconcile / 副本 keep the same roundness.
+    const kitCorner = Math.round(Number(node.style?.corner_radius) || 0);
+    if (kitCorner > 0) {
+      applyUniformCornerRadiusAttrs(
+        (created.node.attrs || (created.node.attrs = {})) as Record<string, unknown>,
+        kitCorner
+      );
+    }
+    return created;
   }
   if (g.Ellipse) {
     const rx = Math.max(1e-6, Number(g.Ellipse.radius_x) || 1);
@@ -1076,11 +1154,9 @@ function flushCreates(
   // Consume once per flush; restore below if we bail before import.
   pendingCreateTool = null;
 
-  // Always import unmapped Kit artboards (create / duplicate / paste). Gating on
-  // frame-tool or selectedArtboardId used to drop duplicates: selection sync
-  // cleared selectedArtboardId before this microtask, so the copy was treated as
-  // an orphan and only reappeared after the next create flush. Seed boards are
-  // stripped at mount — do not delete "orphans" here.
+  // Import Kit-created artboards (frame tool / duplicate / paste). Never promote
+  // Engine seed / empty-deserialize "Artwork 1" — undo-to-empty and resize used
+  // to call addArtboardFrame and leave a ghost board on the canvas.
   for (const ab of [...scene.getArtboards()]) {
     if (kitArtboardToFrame.has(ab.id)) continue;
     const frameId = `kit${ab.id}`;
@@ -1088,6 +1164,15 @@ function flushCreates(
     const framesNow = Array.isArray(doc.frames) ? doc.frames : [];
     if (frameToKitArtboard.has(frameId) || framesNow.some((f) => String(f?.id) === frameId)) {
       rememberFrame(ab.id, frameId);
+      continue;
+    }
+    const createIsArtboard =
+      String(createTool || '').toLowerCase() === 'artboard' ||
+      String(hintedTool || '').toLowerCase() === 'artboard';
+    // Engine::new / empty-artboards deserialize mint Artwork 1 at the origin.
+    // Keep user-drawn frames (artboard tool) and Kit duplicate/paste boards.
+    if (!createIsArtboard && isKitEngineSeedArtboard(ab)) {
+      discardKitArtboardNoHistory(scene, ab.id);
       continue;
     }
     addArtboardFrame({
@@ -1137,12 +1222,30 @@ function flushCreates(
       created.node
     );
     if (owner) {
-      created.node = {
+      let nextNode = {
         ...created.node,
         attrs: { ...(created.node.attrs || {}), frameId: owner },
       };
+      // Kit create is world-absolute; frameLocal store must keep plate-local xy
+      // or the next geom sync parks ink outside the workbench clip.
+      if (isFrameLocalCoordSpace(doc)) {
+        const frame = (Array.isArray(doc.frames) ? doc.frames : []).find(
+          (f) => String(f?.id) === owner
+        );
+        if (frame) {
+          nextNode = {
+            ...nextNode,
+            x: (Number(nextNode.x) || 0) - (Number(frame.x) || 0),
+            y: (Number(nextNode.y) || 0) - (Number(frame.y) || 0),
+          };
+        }
+      }
+      created.node = nextNode;
     }
     doc = addNodeToDocument(doc, created.id, created.node);
+    // Timeline open: bind overlapping ink to the plate; off-plate → surround
+    // (hidden when timeline closes). Never leave a free world orphan.
+    doc = tagCreatedNodeForWorkbenchSurround(doc, created.id);
     remember(rootId, created.id);
     rememberParametricSig(created.id, created.node);
     lastCreated = created.id;
@@ -1155,6 +1258,8 @@ function flushCreates(
   // frameId lands after Kit already recorded the scene picture — re-record so
   // clipContent applies on the first post-create paint (not only after a later mutation).
   refreshKitArtboardClipPaint();
+  // New creates may pick up workbench surround / plate bind — refresh Kit hide set.
+  syncKitWorkbenchIsolation();
   // Figma-style finish: select the new object and return to the select tool.
   // Pen/pencil stay armed until 退出编辑 — skip select + one-shot revert so
   // continuous strokes do not flash a transform box after every mouse-up.
@@ -1450,10 +1555,19 @@ function flushMappedGeometry(scene: WasmScene) {
         toFabricFontFamily(kn.geometry.Text.font_family || KIT_APP_TEXT_FONT) || KIT_APP_TEXT_FONT;
       const prevPlain = parseNodeMarkdown((rn.attrs || {}) as Record<string, unknown>);
       const prevStyle = parseNodeTextStyle((rn.attrs || {}) as Record<string, unknown>);
+      const kitWeight = Math.round(Number(kn.geometry.Text.font_weight) || 400);
+      const kitItalic = Boolean(kn.geometry.Text.italic);
+      const kitLetter = Number(kn.geometry.Text.letter_spacing) || 0;
+      const prevWeight = isTextBold(prevStyle)
+        ? Math.round(Number(prevStyle.fontWeight) >= 600 ? Number(prevStyle.fontWeight) : 700)
+        : Math.round(Number(prevStyle.fontWeight) || 400) || 400;
       const textChanged =
         content !== prevPlain ||
         Math.abs(fontSize - prevStyle.fontSize) > 0.01 ||
-        family !== prevStyle.fontFamily;
+        family !== prevStyle.fontFamily ||
+        kitWeight !== prevWeight ||
+        kitItalic !== isTextItalic(prevStyle) ||
+        Math.abs(kitLetter - (Number(prevStyle.letterSpacing) || 0)) > 0.01;
       const layoutW = (
         scene.renderer as { getTextLayoutWidth?: (id: number) => number | undefined } | null
       )?.getTextLayoutWidth?.(kitId);
@@ -1467,18 +1581,27 @@ function flushMappedGeometry(scene: WasmScene) {
         fontSize,
         fontFamily: family,
         lineHeight: Number(kn.geometry.Text.line_height) || prevStyle.lineHeight || 1.2,
-        letterSpacing: Number(kn.geometry.Text.letter_spacing) || prevStyle.letterSpacing || 0,
-        fontWeight: String(kn.geometry.Text.font_weight || prevStyle.fontWeight || '400'),
-        fontStyle: kn.geometry.Text.italic ? 'italic' : 'normal',
+        letterSpacing: kitLetter || prevStyle.letterSpacing || 0,
+        fontWeight: String(kitWeight || prevStyle.fontWeight || '400'),
+        fontStyle: kitItalic ? 'italic' : 'normal',
       };
       let nextW = w;
       let nextH = h;
       let nextAuto = String((rn.attrs as Record<string, unknown>)?.autoSize || 'true') !== 'false';
       if (wrapMode) {
-        nextAuto = false;
-        nextW = Math.max(8, layoutW);
-        const measured = measureWrappedTextSize(content || ' ', styleForMeasure, nextW);
-        nextH = Math.max(1, Math.round(tb?.h ?? measured.height));
+        // Layout width is a wrap *max* — hug when glyphs are narrower (short lines).
+        const measured = measureWrappedTextSize(content || ' ', styleForMeasure, layoutW);
+        const glyphW = Math.max(8, Math.round(tb?.w ?? measured.width));
+        if (glyphW + 1 < layoutW && !/\n/.test(content)) {
+          nextAuto = true;
+          nextW = glyphW;
+          nextH = Math.max(1, Math.round(tb?.h ?? measured.height));
+          clearKitTextLayoutWidth(scene, kitId);
+        } else {
+          nextAuto = false;
+          nextW = Math.max(8, layoutW);
+          nextH = Math.max(1, Math.round(tb?.h ?? measured.height));
+        }
       } else if (textChanged || nextAuto) {
         const measured = measurePlainTextSize(content || 'M', styleForMeasure);
         nextW = Math.max(2, Math.round(tb?.w ?? measured.width));
@@ -1496,6 +1619,16 @@ function flushMappedGeometry(scene: WasmScene) {
         Math.abs((Number(rn.height) || 0) - nextH) >= 0.01 ||
         Math.abs(Number((rn.attrs as Record<string, unknown>)?.angle || 0) - angle) >= 0.01
       ) {
+        const stylePatch = textChanged
+          ? buildMarkdownTextAttrs(content, {
+              ...prevStyle,
+              fontSize,
+              fontFamily: family,
+              fontWeight: kitWeight >= 600 ? String(kitWeight) : prevStyle.fontWeight || 'normal',
+              fontStyle: kitItalic ? 'italic' : 'normal',
+              letterSpacing: kitLetter,
+            })
+          : {};
         doc = updateNodeInDocument(doc, rcbId, {
           x,
           y,
@@ -1504,13 +1637,7 @@ function flushMappedGeometry(scene: WasmScene) {
           attrs: {
             ...(rn.attrs || {}),
             angle,
-            ...(textChanged
-              ? buildMarkdownTextAttrs(content, {
-                  ...prevStyle,
-                  fontSize,
-                  fontFamily: family,
-                })
-              : {}),
+            ...stylePatch,
             autoSize: autoAttr,
           },
         });
@@ -1601,10 +1728,21 @@ function flushMappedStyle(scene: WasmScene) {
         nextColor !== prevColor ||
         (nextGrad || '') !== (prevGrad || '');
     }
-    if (!fillChanged && !strokeChanged && !widthChanged) continue;
+    // Kit rect corner handles mutate style.corner_radius only — mirror into attrs
+    // so duplicate / toolbar / rehydrate keep the same roundness.
+    const shapeType = String(attrs.shapeType || rn.key || '').toLowerCase();
+    const kitCorner =
+      kn.geometry?.Rect && shapeType !== 'polygon' && shapeType !== 'star' && shapeType !== 'triangle'
+        ? Math.round(Number(kn.style?.corner_radius) || 0)
+        : null;
+    const docCorner =
+      kitCorner != null ? kitStyleCornerRadius(shapeType, attrs) : null;
+    const radiusChanged = kitCorner != null && docCorner != null && kitCorner !== docCorner;
+    if (!fillChanged && !strokeChanged && !widthChanged && !radiusChanged) continue;
     if (fillChanged && fillPatch) Object.assign(attrs, fillPatch);
     if (strokeChanged) attrs['border-color'] = paint.stroke;
     if (widthChanged) attrs['border-width'] = paint.borderWidth;
+    if (radiusChanged && kitCorner != null) applyUniformCornerRadiusAttrs(attrs, kitCorner);
     doc = updateNodeInDocument(doc, rcbId, { attrs });
     dirty = true;
   }
@@ -1726,6 +1864,33 @@ function flushSelectionToStore(
     }
     pushRcb(resolveRcbForKitId(kitId));
   }
+
+  // Timeline-closed 动画工作台: never keep preview children / host in selection —
+  // promote to the plate (preview unit) and clear Kit node picks.
+  const editorDocSel = store.getState().editor.document;
+  const docSel = editorDocSel ? normalizeDocument(editorDocSel) : null;
+  const promotePreviewFrames = new Set<string>();
+  if (docSel?.deltaSetLike && nodeIds.length) {
+    const kept: string[] = [];
+    for (const id of nodeIds) {
+      const node = docSel.deltaSetLike[id];
+      if (!node) continue;
+      if (isAnimationFrameHostNode(node, docSel) || isAnimationWorkbenchPreviewChild(docSel, node)) {
+        const fid = String(node.attrs?.frameId || '').trim();
+        if (fid) promotePreviewFrames.add(fid);
+        continue;
+      }
+      kept.push(id);
+    }
+    if (kept.length !== nodeIds.length) {
+      nodeIds.length = 0;
+      seen.clear();
+      for (const id of kept) {
+        seen.add(id);
+        nodeIds.push(id);
+      }
+    }
+  }
   // Union DomHost-only plates (lottie / group / empty generators) Kit never maps.
   // Prefer the rect captured before mouseup — `input.marqueeRect` is already cleared.
   const marquee =
@@ -1759,6 +1924,47 @@ function flushSelectionToStore(
   const frameIds: string[] = [];
   if (Number.isFinite(abId) && kitArtboardToFrame.has(abId)) {
     frameIds.push(kitArtboardToFrame.get(abId)!);
+  }
+  for (const fid of promotePreviewFrames) {
+    if (!frameIds.includes(fid)) frameIds.push(fid);
+  }
+  // Drop only remapped Kit picks; keep pasteboard / other selectable nodes.
+  if (promotePreviewFrames.size) {
+    const skipKit = new Set<number>();
+    for (const [kitId, rcbId] of kitToRcb.entries()) {
+      const node = docSel?.deltaSetLike?.[rcbId];
+      if (!node || !docSel) continue;
+      if (isAnimationFrameHostNode(node, docSel) || isAnimationWorkbenchPreviewChild(docSel, node)) {
+        skipKit.add(kitId);
+      }
+    }
+    if (skipKit.size) {
+      withSuppress(() => {
+        try {
+          const keep = Array.from(handle.scene.getSelection?.() || [])
+            .map(Number)
+            .filter((id) => Number.isFinite(id) && !skipKit.has(id));
+          handle.scene.engine?.clear_selection();
+          for (const id of keep) {
+            try {
+              handle.scene.selectNode(id, true);
+            } catch {
+              /* ignore */
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        if (!nodeIds.length) {
+          try {
+            (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId =
+              null;
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+    }
   }
   const editorDocForSoft = store.getState().editor.document;
   const softParent =
@@ -1856,6 +2062,14 @@ function flushSelectionToStore(
 
   lastSelKey = key;
   selectionMirrorGeneration += 1;
+  // Preview-child remaps → plate unit with full chrome (play / open timeline toolbar).
+  if (promotePreviewFrames.size && !nodeIds.length && frameIds.length) {
+    setSelectedNodeIds([]);
+    setSelectedFrameIds(frameIds);
+    setActiveFrameId(frameIds[0]);
+    if (attached) syncKitArtboardChromeHighlight(attached);
+    return;
+  }
   // Prefer setSelectedNodeIds only — setSelectedNodeId resets selectedNodeIds to [id]
   // and was wiping Kit multi-select (boolean / align toolbar never appeared).
   setSelectedNodeIds(nodeIds);
@@ -2080,9 +2294,21 @@ function finalizeMarqueeSelection(
       (!marqueeSignificant || (!shiftKey && !frameSel.length));
     if (allowSoft) {
       selectionMirrorGeneration += 1;
-      setMixedSelection({ nodeIds: [], frameIds: [softPending] });
-      setSoftFrameContext(softPending);
-      lastSelKey = `|${softPending}|soft:${softPending}`;
+      const doc = ed.document ? normalizeDocument(ed.document) : null;
+      const plate = (Array.isArray(doc?.frames) ? doc!.frames : []).find(
+        (f) => String(f?.id) === softPending
+      );
+      if (isAnimationArtboardKind(plate?.kind)) {
+        // Occupied 动画工作台 preview: full chrome so play / open-timeline mount.
+        setSelectedNodeIds([]);
+        setSelectedFrameIds([softPending]);
+        setActiveFrameId(softPending);
+        lastSelKey = `|${softPending}|`;
+      } else {
+        setMixedSelection({ nodeIds: [], frameIds: [softPending] });
+        setSoftFrameContext(softPending);
+        lastSelKey = `|${softPending}|soft:${softPending}`;
+      }
     }
   }
 }
@@ -2397,20 +2623,30 @@ export function styleJsonFromRcbNode(node: SceneNodeInput): string {
   const shapeType = String(attrs.shapeType || node.key || '').toLowerCase();
   const fill_rule = kitStyleFillRule(shapeType, attrs);
   const corner_radius = kitStyleCornerRadius(shapeType, attrs);
-  const strokes = stroke
-    ? [
-        {
-          paint: stroke,
-          width,
-          cap: 0,
-          join: 0,
-          dash_array,
-          dash_offset: 0,
-          miter_limit: 4,
-          alignment,
-        },
-      ]
-    : [];
+  // Kit Stroke.cap / join: 0/1/2 = Butt|Round|Square and Miter|Round|Bevel.
+  const cap = kitStrokeCapIndex(resolveStrokeLinecap(attrs));
+  const join = kitStrokeJoinIndex(resolveStrokeLinejoin(attrs));
+  const miter_limit = resolveStrokeMiterlimit(attrs);
+  const strokeOpacityPct = Number(attrs['stroke-opacity'] ?? 100);
+  const strokeA =
+    Number.isFinite(strokeOpacityPct)
+      ? Math.max(0, Math.min(1, strokeOpacityPct / 100))
+      : 1;
+  const strokes =
+    stroke && width > 0
+      ? [
+          {
+            paint: { ...stroke, a: (stroke.a ?? 1) * strokeA },
+            width,
+            cap,
+            join,
+            dash_array,
+            dash_offset: 0,
+            miter_limit,
+            alignment,
+          },
+        ]
+      : [];
 
   return JSON.stringify({
     fills,
@@ -2421,6 +2657,20 @@ export function styleJsonFromRcbNode(node: SceneNodeInput): string {
     corner_radius,
     effects: [],
   });
+}
+
+/** Kit StrokeCap enum indices (CanvasKit Butt/Round/Square). */
+function kitStrokeCapIndex(cap: ReturnType<typeof resolveStrokeLinecap>): number {
+  if (cap === 'round') return 1;
+  if (cap === 'square') return 2;
+  return 0;
+}
+
+/** Kit StrokeJoin enum indices (CanvasKit Miter/Round/Bevel). */
+function kitStrokeJoinIndex(join: ReturnType<typeof resolveStrokeLinejoin>): number {
+  if (join === 'round') return 1;
+  if (join === 'bevel') return 2;
+  return 0;
 }
 
 function kitStyleFillRule(shapeType: string, attrs: Record<string, unknown>): number {
@@ -2435,7 +2685,25 @@ function kitStyleCornerRadius(shapeType: string, attrs: Record<string, unknown>)
   if (shapeType === 'polygon' || shapeType === 'star' || shapeType === 'triangle') {
     return 0;
   }
-  return Number(attrs.cornerRadius || attrs.rx || 0) || 0;
+  // Prefer radiiFromAttrs so radiusTL / radius / cornerRadius / rx stay in sync
+  // (factories often seed radiusTL=0 with a positive uniform cornerRadius).
+  const r = radiiFromAttrs(attrs);
+  return Math.round(isRadiusLinked(attrs) ? r.tl : maxRadius(r));
+}
+
+/** Write Kit's uniform corner_radius into the RCB attr surface used by duplicate/toolbar. */
+function applyUniformCornerRadiusAttrs(
+  attrs: Record<string, unknown>,
+  radius: number
+): void {
+  const r = uniformCornerRadii(radius);
+  attrs.cornerRadius = r.tl;
+  attrs.radius = r.tl;
+  attrs.radiusTL = r.tl;
+  attrs.radiusTR = r.tr;
+  attrs.radiusBR = r.br;
+  attrs.radiusBL = r.bl;
+  attrs.radiusLinked = 'true';
 }
 
 /**
@@ -2509,10 +2777,19 @@ function applyKitNodeGeom(
   }
   scene.engine?.resize_node(kitId, w, h);
   const angle = Number(attrs.angle) || 0;
+  const flipX = attrs.flipX === true || attrs.flipX === 'true';
+  const flipY = attrs.flipY === true || attrs.flipY === 'true';
   try {
     scene.engine?.set_node_rotation(kitId, angle);
   } catch {
     /* optional */
+  }
+  // RCB stores flip as attrs; Kit paints via transform scale (±1 about center).
+  // Must run after resize/rotation so product Flip & rotate toolbar updates ink.
+  try {
+    scene.engine?.set_node_scale(kitId, flipX ? -1 : 1, flipY ? -1 : 1);
+  } catch {
+    /* optional on older wasm */
   }
 }
 
@@ -2611,7 +2888,57 @@ function applyKitNodeStyle(scene: WasmScene, kitId: number, node: SceneNodeInput
   } catch {
     /* ignore */
   }
+  // Timeline focus isolation: hide Kit ink that SceneDocument already treats as
+  // structurally hidden (outside workbench / surround-only when dock closed).
+  try {
+    const doc = store.getState().editor.document as SceneDocument | null;
+    const visible = !isNodeStructurallyHiddenInDocument(doc, node);
+    if (scene.getNodeVisible(kitId) !== visible) {
+      scene.setNodeVisibleNoHistory(kitId, visible);
+      changed = true;
+    }
+  } catch {
+    /* ignore */
+  }
   return changed;
+}
+
+/**
+ * Re-apply workbench timeline isolation to every mapped Kit node + artboard.
+ * Call when timeline opens/closes — focus is module state, not a document patch.
+ */
+export function syncKitWorkbenchIsolation(handle?: CanvasEngineHandle | null) {
+  const h = handle ?? attached;
+  if (!h) return;
+  const raw = store.getState().editor.document;
+  const doc = raw ? normalizeDocument(raw) : null;
+  if (!doc) return;
+  withSuppress(() => {
+    for (const [rcbId, kitId] of rcbToKit.entries()) {
+      const node = doc.deltaSetLike?.[rcbId];
+      if (!node) continue;
+      try {
+        const visible = !isNodeStructurallyHiddenInDocument(doc, node);
+        if (h.scene.getNodeVisible(kitId) !== visible) {
+          h.scene.setNodeVisibleNoHistory(kitId, visible);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    for (const [frameId, kitId] of frameToKitArtboard.entries()) {
+      const frame = (Array.isArray(doc.frames) ? doc.frames : []).find(
+        (f) => String(f?.id) === frameId
+      );
+      if (!frame) continue;
+      applyKitArtboardFromFrame(h.scene, kitId, frame);
+    }
+  });
+  try {
+    h.renderer.requestRender();
+  } catch {
+    /* ignore */
+  }
 }
 
 const imageBytesCache = new Map<string, { bytes: Uint8Array; mime: string }>();
@@ -2853,20 +3180,21 @@ function pushNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInput) {
     const text = String(attrs.text || attrs.markdown || attrs.content || 'Text');
     const style = parseNodeTextStyle(attrs);
     const fontSize = Number(attrs.fontSize || attrs['font-size'] || style.fontSize || 16) || 16;
-    const family = toFabricFontFamily(style.fontFamily) || KIT_APP_TEXT_FONT;
-    ensureKitFontFamily(family);
+    const typo = kitTextTypoFromStyle(style);
+    ensureKitFontFamily(typo.family);
     kitId = scene.addText(x, y, text, fontSize);
     if (kitId != null) {
       const align = kitTextAlignFromStyle(style.textAlign);
       const lh = Number(style.lineHeight) || 1.2;
+      applyKitTextStyleNoHistory(scene, kitId, typo.weight, typo.italic, typo.letterSpacing);
       try {
-        scene.setTextPropertiesNoHistory(kitId, family, align, lh);
+        scene.setTextPropertiesNoHistory(kitId, typo.family, align, lh);
       } catch {
         /* optional */
       }
       lastKitTextSig.set(
         kitId,
-        `${parseNodeMarkdown(attrs)}\0${fontSize}\0${family}\0${align}\0${lh}`
+        `${parseNodeMarkdown(attrs)}\0${fontSize}\0${typo.family}\0${typo.weight}\0${typo.italic ? 1 : 0}\0${typo.letterSpacing}\0${align}\0${lh}`
       );
       applyKitTextLayoutWidth(scene, kitId, node);
     }
@@ -2889,20 +3217,14 @@ function pushNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInput) {
     shapeType === 'triangle' ||
     shapeType === 'star'
   ) {
+    // Always Path from shapeVertexPoints — never Kit addStar/addPolygon (circular
+    // radius in max(w,h)/2). Handles and ink must share the same fitted corners.
     const d = getShapeBaselineD(node);
     if (d) {
       kitId = scene.addPath(svgDToSubpathsJson(translatePathData(d, -w / 2, -h / 2)));
       if (kitId != null) {
         scene.engine?.set_node_position(kitId, x + w / 2, y + h / 2);
       }
-    } else if (shapeType === 'star') {
-      const points = Math.max(3, Number(attrs.sides) || 5);
-      const r = Math.max(w, h) / 2;
-      const inner = r * starInnerRatioFromAttrs(attrs);
-      kitId = scene.addStar(x + w / 2, y + h / 2, r, Math.max(0.5, inner), points);
-    } else {
-      const sides = shapeType === 'triangle' ? 3 : Math.max(3, Number(attrs.sides) || 6);
-      kitId = scene.addPolygon(x + w / 2, y + h / 2, Math.max(w, h) / 2, sides);
     }
   } else if (
     shapeType === 'path' ||
@@ -2930,6 +3252,7 @@ function applyKitArtboardFromFrame(
   scene: WasmScene,
   kitId: number,
   frame: {
+    id?: unknown;
     x?: number;
     y?: number;
     width?: number;
@@ -2937,12 +3260,28 @@ function applyKitArtboardFromFrame(
     backgroundColor?: string;
     backgroundOpacity?: number;
     name?: string;
+    hidden?: unknown;
+    kind?: unknown;
   }
 ) {
   const x = Number(frame.x) || 0;
   const y = Number(frame.y) || 0;
   const w = Math.max(1, Number(frame.width) || 1);
   const h = Math.max(1, Number(frame.height) || 1);
+  // Timeline focus: collapse non-focused Kit plates (HTML already gated).
+  if (!isArtboardVisibleInDocument(frame)) {
+    try {
+      scene.engine?.set_artboard_bounds(kitId, x, y, 0, 0);
+    } catch {
+      /* ignore */
+    }
+    try {
+      scene.engine?.set_artboard_background(kitId, 0, 0, 0, 0);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
   try {
     scene.engine?.set_artboard_bounds(kitId, x, y, w, h);
   } catch {
@@ -3976,29 +4315,46 @@ function pointInClip(
   return x >= clip.x && x <= clip.x + clip.w && y >= clip.y && y <= clip.y + clip.h;
 }
 
-/** Kit select must match clipped ink — ignore hits on overflow outside the plate. */
+/** Kit select must match clipped ink — ignore hits on overflow outside the plate.
+ * Also skip 动画工作台 preview children / host (timeline closed) so clicks soft-select
+ * the plate instead of editing insides. */
 function wrapKitHitTestForArtboardClip(handle: CanvasEngineHandle) {
   const scene = handle.scene as unknown as KitHitScene;
   if (scene.__rcbClipHitWrapped) return;
-  scene.__rcbOrigHitTest = scene.hitTest.bind(scene);
-  scene.hitTest = (x, y) => {
-    const id = scene.__rcbOrigHitTest?.(x, y);
+
+  const gateHit = (
+    id: number | undefined | null,
+    x: number,
+    y: number
+  ): number | undefined => {
     // Must return `undefined` (not `null`) on miss — Kit uses `!== undefined`
     // for empty pasteboard → marquee. `null` was treated as a hit (id 0).
     if (id == null) return undefined;
     const clip = kitNodeArtboardClipRect(handle, id);
     if (clip && !pointInClip(clip, x, y)) return undefined;
+    const rcbId = kitToRcb.get(id);
+    if (!rcbId) return id;
+    const raw = store.getState().editor.document;
+    const doc = raw ? normalizeDocument(raw) : null;
+    const node = doc?.deltaSetLike?.[rcbId];
+    if (!doc || !node) return id;
+    // Timeline-closed workbench: ink is preview-only — not pickable.
+    if (
+      isAnimationFrameHostNode(node, doc) ||
+      isAnimationWorkbenchPreviewChild(doc, node) ||
+      !isNodePickableInDocument(doc, node)
+    ) {
+      return undefined;
+    }
     return id;
   };
+
+  scene.__rcbOrigHitTest = scene.hitTest.bind(scene);
+  scene.hitTest = (x, y) => gateHit(scene.__rcbOrigHitTest?.(x, y), x, y);
   if (typeof scene.hitTestGrouped === 'function') {
     scene.__rcbOrigHitTestGrouped = scene.hitTestGrouped.bind(scene);
-    scene.hitTestGrouped = (x, y) => {
-      const id = scene.__rcbOrigHitTestGrouped?.(x, y);
-      if (id == null) return undefined;
-      const clip = kitNodeArtboardClipRect(handle, id);
-      if (clip && !pointInClip(clip, x, y)) return undefined;
-      return id;
-    };
+    scene.hitTestGrouped = (x, y) =>
+      gateHit(scene.__rcbOrigHitTestGrouped?.(x, y), x, y);
   }
   scene.__rcbClipHitWrapped = true;
 }
@@ -4187,7 +4543,7 @@ function enqueueKitMutateFlush() {
 
 function scheduleKitMutateFlush() {
   if (suppressDepth > 0) return;
-  // Capture while draw tool is still active (onMutate runs inside addPolygon,
+  // Capture while draw tool is still active (onMutate runs inside create,
   // before maybeRevertTool → selection).
   capturePendingCreateTool();
   enqueueKitMutateFlush();
@@ -4485,6 +4841,12 @@ function syncAfterKitHistory() {
   mutateFlushQueued = false;
   try {
     flushKitSceneToDocument({ preserveKitStyle: true, skipHistory: true });
+    // Empty-artboards deserialize synthesizes Artwork 1 — drop if still unmapped.
+    for (const ab of [...handle.scene.getArtboards()]) {
+      if (kitArtboardToFrame.has(ab.id)) continue;
+      if (!isKitEngineSeedArtboard(ab)) continue;
+      discardKitArtboardNoHistory(handle.scene, ab.id);
+    }
     flushSelectionToStore(handle);
     handle.ui.syncWithSelection?.();
     handle.renderer.requestRender();

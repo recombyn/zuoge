@@ -1,0 +1,30 @@
+node_modules
+.DS_Store
+dist
+.idea
+packages/editor/engine/target/
+packages/editor/engine/wasm-pack-v0.12.1-x86_64-apple-darwin/
+tests/svg-suite/report/
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+
+# Local editor/agent config — machine-specific paths, not part of the project
+.claude/
+
+# The built wasm in engine/pkg/ IS committed, so a clone runs without the Rust
+# toolchain. wasm-pack rewrites a `.gitignore` containing `*` into that folder
+# on every build; ignore that file itself so it stops re-hiding the output.
+# (Already-tracked files stay tracked regardless — this only silences the noise.)
+packages/editor/engine/pkg/.gitignore
+
+# Nested online app — its own separate git repo
+/cloud/
+
+# Second worktree of the same online app repo — also its own checkout
+/cloud-main/
+packages/mcp/LICENSE
+packages/editor/LICENSE

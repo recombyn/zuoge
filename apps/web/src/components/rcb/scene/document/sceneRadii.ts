@@ -486,6 +486,34 @@ export function clampCornerRadii(r: CornerRadii, width: number, height: number):
   };
 }
 
+/** Linked uniform radii (polygon / star chrome + Kit rect flush). */
+export function uniformCornerRadii(r: number): CornerRadii {
+  const v = Math.max(0, Math.round(r));
+  return { tl: v, tr: v, br: v, bl: v };
+}
+
+/** Attr patch for committing a linked uniform corner radius. */
+export function linkedCornerRadiusCommitAttrs(
+  node: SceneNodeInput,
+  radius: number
+): Record<string, unknown> {
+  const w = Math.max(1, Number(node.width) || 1);
+  const h = Math.max(1, Number(node.height) || 1);
+  const clamped = clampCornerRadii(uniformCornerRadii(radius), w, h);
+  const count = Math.max(1, cornerVertexCount(node));
+  const vertices = Array.from({ length: count }, () => Math.round(clamped.tl));
+  return {
+    radiusTL: clamped.tl,
+    radiusTR: clamped.tr,
+    radiusBR: clamped.br,
+    radiusBL: clamped.bl,
+    radiusLinked: 'true',
+    radiusVertices: serializeRadiusVertices(vertices),
+    radius: Math.round(clamped.tl),
+    cornerRadius: Math.round(clamped.tl),
+  };
+}
+
 /** SVG path for a rect with independent corner radii (local 0,0). */
 export function roundedRectPath(w: number, h: number, r: CornerRadii) {
   const width = Math.max(w, 1);

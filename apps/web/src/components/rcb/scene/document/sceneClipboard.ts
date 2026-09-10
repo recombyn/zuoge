@@ -316,16 +316,44 @@ export function pasteClipboardIntoDocument(
   const prepared: Array<{ id: string; node: SceneNode }> = [];
   const newIds: string[] = [];
   const frameLocal = String(next.coordSpace || '') === 'frameLocal';
+  const liveFrameIds = new Set(
+    (Array.isArray(next.frames) ? next.frames : [])
+      .map((f) => String(f?.id || '').trim())
+      .filter(Boolean)
+  );
+  const frameOriginById = (frameId: string): { x: number; y: number } | null => {
+    const fromDoc = (Array.isArray(next.frames) ? next.frames : []).find(
+      (f) => String(f?.id || '') === frameId
+    );
+    if (fromDoc) {
+      return { x: Number(fromDoc.x) || 0, y: Number(fromDoc.y) || 0 };
+    }
+    const fromClip = (clip.frames || []).find(({ id }) => String(id) === frameId)?.frame;
+    if (fromClip) {
+      return { x: Number(fromClip.x) || 0, y: Number(fromClip.y) || 0 };
+    }
+    return null;
+  };
   (clip.nodes || []).forEach(({ id, node: raw }) => {
     const node = cloneSceneValue(raw);
     const newId = idMap.get(id)!;
     node.id = newId;
     const sourceFrameId = String(node.attrs?.frameId || '').trim();
     const mappedFrameId = sourceFrameId ? frameIdMap.get(sourceFrameId) : undefined;
-    // Duplicating an artboard: children stay plate-local. Offsetting them again
-    // (on top of moving the frame) pushes ink outside clipContent — empty copies.
-    const keepPlateLocal = Boolean(mappedFrameId) && frameLocal;
-    if (!keepPlateLocal) {
+    // Artboard duplicate: children stay plate-local on the *new* frame (frame moves).
+    // Node-only duplicate on an existing board: offset plate-local, keep frameId.
+    // Clearing frameId while leaving plate-local xy parks ink near scene origin —
+    // empty-looking copies on the artboard the user is staring at.
+    const artboardChildDupe = Boolean(mappedFrameId) && frameLocal;
+    const sameBoardDupe =
+      Boolean(sourceFrameId) &&
+      !mappedFrameId &&
+      liveFrameIds.has(sourceFrameId) &&
+      frameLocal;
+    if (artboardChildDupe) {
+      node.x = Number(node.x) || 0;
+      node.y = Number(node.y) || 0;
+    } else {
       node.x = (Number(node.x) || 0) + ox;
       node.y = (Number(node.y) || 0) + oy;
       const outset = strokeVisualOutset(node);
@@ -345,9 +373,14 @@ export function pasteClipboardIntoDocument(
         node.x = snapCoordToGrid(node.x, gridSize);
         node.y = snapCoordToGrid(node.y, gridSize);
       }
-    } else {
-      node.x = Number(node.x) || 0;
-      node.y = Number(node.y) || 0;
+      // Orphaned clip (source artboard gone): promote plate-local → world before unbind.
+      if (sourceFrameId && !mappedFrameId && !sameBoardDupe && frameLocal) {
+        const origin = frameOriginById(sourceFrameId);
+        if (origin) {
+          node.x = (Number(node.x) || 0) + origin.x;
+          node.y = (Number(node.y) || 0) + origin.y;
+        }
+      }
     }
     const gid = String(node.attrs?.groupId || '').trim();
     if (gid) {
@@ -355,9 +388,10 @@ export function pasteClipboardIntoDocument(
       node.attrs = { ...(node.attrs || {}), groupId: groupMap.get(gid) };
     }
     if (sourceFrameId) {
+      const nextFrameId = mappedFrameId || (sameBoardDupe ? sourceFrameId : undefined);
       node.attrs = {
         ...(node.attrs || {}),
-        ...(mappedFrameId ? { frameId: mappedFrameId } : { frameId: undefined }),
+        ...(nextFrameId ? { frameId: nextFrameId } : { frameId: undefined }),
       };
     }
     prepared.push({ id: newId, node });
