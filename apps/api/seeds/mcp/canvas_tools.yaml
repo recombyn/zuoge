@@ -1,5 +1,11 @@
 # MCP canvas — expose full canvas_actions catalog to external MCP clients.
-# live_only ops require an open editor (queued → FE designTools apply).
+#
+# Headless-capable ops (API document patch, no editor):
+#   create_shape, create_path, create_text, update_node, delete_nodes,
+#   hide_nodes, create_frame, update_frame, delete_frame, set_canvas_background
+# Everything else in the canvas catalog is treated as live_only (queued for FE).
+# `live_only` below is an explicit force-list (union with the auto-derived set).
+
 expose_all_canvas_ops: true
 
 expose:
@@ -10,7 +16,7 @@ expose:
   batch:
     - apply_tool_ops
 
-# UI / async / viewport — validated then queued for live editor apply only.
+# Force live-editor apply (also auto-includes all non-headless catalog ops).
 live_only:
   - set_viewport
   - set_active_tool
@@ -18,6 +24,8 @@ live_only:
   - export_canvas
   - image_process
   - outline_text
+  - boolean_op
+  - align_nodes
 
 allowlist_only: false
 max_ops_per_call: 32

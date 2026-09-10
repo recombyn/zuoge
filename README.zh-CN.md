@@ -35,7 +35,7 @@
 
 🤖 **Design Agent** — 同一张画布上的流式对话：规划 → 挂 Skill → 产出 `tool_ops` → 落笔。LangGraph 内核固定；行为由 AgentProfile YAML、阶段提示词、Skills 与工具注册表配置。
 
-🔌 **MCP 画布** — 外部客户端使用与内置 Agent 相同的 `tool_ops` 合约。Live：编辑器打开时在浏览器 apply；Headless：编辑器关闭时由 API 直接 patch 文档。
+🔌 **MCP 画布** — 外部客户端使用与内置 Agent 相同的 `tool_ops` 合约。Live：编辑器打开时浏览器 apply；Headless：基础 CRUD/画板 API 直接 patch；含 boolean 等 live-only 时离线排队（`queued_offline`，不静默丢弃）。
 
 🧩 **插件** — Skill 包在 `plugins/skills/`，画布插件在 `plugins/canvas/`，可打包为 `.recombyn-plugin`。
 
@@ -172,8 +172,9 @@ RECOMBYN_TOKEN = "<token>"
 RECOMBYN_PROJECT_ID = "<project-id>"
 ```
 
-**Live**：编辑器打开，浏览器实时 apply。  
-**Headless**：编辑器关闭，API 直接 patch 项目文档。
+**Live**：编辑器打开，浏览器实时 apply（`queued_live`）。  
+**Headless**：编辑器关闭时，基础 CRUD/画板由 API patch（`applied_headless`）。  
+**离线排队**：含 boolean/align 等 live-only 时整批排队，打开项目后再 apply（`queued_offline`，不静默丢弃）。
 
 详情：[docs/mcp-canvas.md](docs/mcp-canvas.md)。
 

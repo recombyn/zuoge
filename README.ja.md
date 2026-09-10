@@ -36,7 +36,7 @@
 
 🤖 **Design Agent** — 同一キャンバス上のストリーミング会話：計画 → Skill → `tool_ops` → 適用。LangGraph カーネル固定；挙動は AgentProfile YAML、段階プロンプト、Skills、ツール登録で設定。
 
-🔌 **MCP キャンバス** — 外部クライアントは内蔵 Agent と同じ `tool_ops` 契約。Live：エディタ起動中にブラウザで apply。Headless：エディタ未起動時は API がドキュメントを patch。
+🔌 **MCP キャンバス** — 外部クライアントは内蔵 Agent と同じ `tool_ops` 契約。Live：エディタ起動中にブラウザで apply。Headless：基本 CRUD/フレームは API がドキュメントを patch。live-only を含む場合はオフライン待ち行列（`queued_offline`、黙って破棄しない）。
 
 🧩 **プラグイン** — Skill パックは `plugins/skills/`、キャンバスプラグインは `plugins/canvas/`。`.recombyn-plugin` にパック可能。
 
@@ -173,8 +173,9 @@ RECOMBYN_TOKEN = "<token>"
 RECOMBYN_PROJECT_ID = "<project-id>"
 ```
 
-**Live** — エディタ起動中、ブラウザで apply。  
-**Headless** — エディタ未起動、API がプロジェクトを patch。
+**Live** — エディタ起動中、ブラウザで apply（`queued_live`）。  
+**Headless** — 未起動時、基本 CRUD/フレームは API が patch（`applied_headless`）。  
+**オフライン待ち** — live-only（boolean など）を含むとエディタ起動まで待ち行列（`queued_offline`）。
 
 詳細：[docs/mcp-canvas.md](docs/mcp-canvas.md)。
 

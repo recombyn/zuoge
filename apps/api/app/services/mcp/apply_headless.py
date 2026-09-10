@@ -12,7 +12,6 @@ from app.services.design.ops.text_node_attrs import (
     style_from_create_text_args,
     validate_headless_patch,
 )
-from app.services.mcp.tool_registry import is_live_only_tool
 
 _TEXT_UPDATE_KEYS = (
     "text",
@@ -26,17 +25,26 @@ _TEXT_UPDATE_KEYS = (
     "textDecoration",
 )
 
-_TEXT_UPDATE_KEYS = (
-    "text",
-    "fill",
-    "fontSize",
-    "fontWeight",
-    "fontFamily",
-    "fontStyle",
-    "textAlign",
-    "lineHeight",
-    "textDecoration",
+# Ops that `ops_to_document_patch` can apply without a live editor.
+# Everything else in the canvas catalog is live-only (queued for FE apply).
+HEADLESS_OP_NAMES = frozenset(
+    {
+        "create_shape",
+        "create_path",
+        "create_text",
+        "update_node",
+        "delete_nodes",
+        "hide_nodes",
+        "create_frame",
+        "update_frame",
+        "delete_frame",
+        "set_canvas_background",
+    }
 )
+
+
+def is_headless_op(name: str) -> bool:
+    return str(name or "").strip() in HEADLESS_OP_NAMES
 
 
 def _bool_attr(value: Any) -> str:
@@ -568,7 +576,7 @@ def ops_to_document_patch(
         if not isinstance(op, dict):
             continue
         name = str(op.get("name") or "").strip()
-        if is_live_only_tool(name):
+        if not is_headless_op(name):
             continue
         args = op.get("args") if isinstance(op.get("args"), dict) else {}
 

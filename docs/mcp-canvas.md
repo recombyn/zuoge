@@ -18,10 +18,24 @@ Restart API and web after changing env vars.
 
 | Mode | When | What happens |
 |------|------|----------------|
-| **Live** | Editor open + heartbeat | Ops queue to Redis → `McpCanvasBridge` applies via `designTools` (full op set) |
-| **Headless** | Editor closed | API validates ops and patches the project document directly |
+| **Live** (`queued_live`) | Editor open + heartbeat | Ops queue to Redis → `McpCanvasBridge` applies via `designTools` (full op set) |
+| **Headless** (`applied_headless`) | Editor closed + only headless-capable ops | API validates and patches the project document |
+| **Offline queue** (`queued_offline`) | Editor closed + any live-only op | Entire batch is queued until the project is opened in the web editor — **never silently dropped** |
 
-Complex ops (`boolean_op`, `align_nodes`, `image_process`, …) need **Live** mode. Basic create/update/delete work headless.
+### Headless-capable ops
+
+These apply without an open editor (`apps/api/.../apply_headless.py`):
+
+- `create_shape`, `create_path`, `create_text`
+- `update_node`, `delete_nodes`, `hide_nodes`
+- `create_frame`, `update_frame`, `delete_frame`
+- `set_canvas_background`
+
+### Live-only ops
+
+Everything else in the canvas catalog (e.g. `boolean_op`, `align_nodes`, `image_process`, `set_viewport`, `export_canvas`, …) is **live-only**. Catalog tool descriptions are prefixed with `[live editor]` or `[headless ok]`.
+
+Seed / force list: `apps/api/seeds/mcp/canvas_tools.yaml` (`live_only` ∪ auto-derived non-headless op keys).
 
 ## API
 
@@ -72,9 +86,21 @@ SUPER_ADMIN_TEST_CODE=888888 node scripts/ci-mint-token.mjs
 
 Full catalog: `GET /api/v1/mcp/canvas/tools` or MCP `tools/list` via the stdio bridge.
 
+## Design Agent integration
+
+When `MCP_CANVAS_ENABLED=true`, the LangGraph agent also gets server-side canvas tools (same dispatch):
+
+- `canvas_get_scene_summary`, `canvas_list_nodes`, `canvas_list_frames`
+- `canvas_apply_tool_ops`
+- `canvas_create_shape`, `canvas_create_text`, `canvas_update_node`, `canvas_delete_nodes`
+
+The primary Agent paint path remains SSE `tool_ops` → FE `applyAgentToolOps`. MCP tools are an optional react-mode side channel (useful when the editor is closed or for read-back).
+
 ## Related
 
 - Tool registry seed: `apps/api/seeds/mcp/canvas_tools.yaml`
+- Headless patch: `apps/api/app/services/mcp/apply_headless.py`
+- Dispatch: `apps/api/app/services/mcp/dispatch.py`
 - Stdio bridge: `scripts/mcp/recombyn_canvas_stdio.mjs`
 - FE bridge: `apps/web/src/components/editor/mcp/McpCanvasBridge.tsx`
 - Agent react tools: `apps/api/app/services/llm/mcp_canvas_tools.py`
