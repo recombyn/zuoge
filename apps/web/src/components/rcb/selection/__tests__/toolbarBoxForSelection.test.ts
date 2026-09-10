@@ -37,4 +37,14 @@ describe('toolbarBoxForSelection — line/arrow outer AABB', () => {
     const box = { left: 10, top: 20, width: 80, height: 60 };
     expect(toolbarBoxForSelection(box, { lineChrome: false })).toEqual(box);
   });
+
+  it('does not collapse a Kit world AABB with attrs.angle (mid-box bug)', () => {
+    // Diagonal line's oriented control-box corner AABB — already outer bounds.
+    const world = { left: 0, top: 0, width: 700, height: 700 };
+    const dock = toolbarBoxForSelection(world, {
+      lineChrome: true,
+      node: { attrs: { angle: 45, shapeType: 'line' }, height: 2, width: 992 },
+    });
+    expect(dock).toEqual(world);
+  });
 });

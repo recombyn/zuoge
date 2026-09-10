@@ -165,15 +165,25 @@ export function frameForFullBleedPlate(doc: SceneDocument, nodeId: string): stri
  * Line/arrow nodes use a tall hit AABB (`STROKE_HIT` ≈ 24). Docking the
  * floating toolbar to that slab's top puts it half a hit-height above the shaft
  * — huge on screen at high zoom. Prefer the shaft's axis-aligned outer bounds
- * (endpoint AABB) so the pill clears both knobs instead of sitting on mid-shaft
- * and covering the higher endpoint on diagonal strokes.
+ * (endpoint AABB). Skip remap when `box` is already a world corner-AABB
+ * (Kit selection frame): treating that width as shaft length + `attrs.angle`
+ * collapses the dock to mid-box.
  */
+/** Above STROKE_HIT≈24: both axes large ⇒ already a Kit/world corner AABB. */
+const LINE_HIT_AABB_MAX_SHORT_AXIS = 40;
+
 export function toolbarBoxForSelection(
   box: SceneBox | null | undefined,
   opts: { lineChrome: boolean; node?: any }
 ): SceneBox | null {
   if (!box) return null;
   if (!opts.lineChrome) return box;
+  if (
+    box.width > LINE_HIT_AABB_MAX_SHORT_AXIS &&
+    box.height > LINE_HIT_AABB_MAX_SHORT_AXIS
+  ) {
+    return box;
+  }
   const angle = Number(opts.node?.attrs?.angle) || 0;
   const ep = strokeEndpointsFromBox(box, angle);
   const minX = Math.min(ep.x0, ep.x1);
@@ -206,9 +216,10 @@ export function selectionToolbarDock(
   const edgePadScene = Math.max(0, Number(opts?.edgePadScene) || 0);
   if (!chromeUnion) return { box: null, angle, edgePadScene };
   if (!opts?.lineChrome) return { box: chromeUnion, angle, edgePadScene };
+  // Endpoint AABB is axis-aligned — do not re-orient in SelectionToolbarShell.
   return {
     box: toolbarBoxForSelection(chromeUnion, { lineChrome: true, node: opts.node }),
-    angle,
+    angle: 0,
     edgePadScene,
   };
 }

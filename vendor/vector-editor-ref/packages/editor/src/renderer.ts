@@ -4755,13 +4755,11 @@ export class Renderer {
                 op.selHandleFill.setAntiAlias(false);
                 op.selOutline.setAntiAlias(false);
 
-                const z = Math.max(0.05, this.zoom);
-                const snapX = (v: number) => (Math.round(v * z + this.pan.x) - this.pan.x) / z;
-                const snapY = (v: number) => (Math.round(v * z + this.pan.y) - this.pan.y) / z;
-
-                for (const { x: hx0, y: hy0 } of handlePositions) {
-                    const hx = snapX(hx0);
-                    const hy = snapY(hy0);
+                // Keep handles on the same world points as the control-box /
+                // silhouette stroke. CSS-pixel snap used to drift off those
+                // corners after scale/zoom so opaque white fills punched gaps
+                // in the blue border at every handle.
+                for (const { x: hx, y: hy } of handlePositions) {
                     canvas.save();
                     canvas.rotate(angleDeg, hx, hy);
                     canvas.drawRect(

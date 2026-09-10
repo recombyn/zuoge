@@ -94,11 +94,10 @@ export function computeBooleanSubpaths(
     // fill. Exclude (XOR) may still report EvenOdd — honour that for holes.
     let fillRule = 0;
     try {
-        if (op === 'exclude' && result.getFillType() === ck.FillType.EvenOdd) {
-            fillRule = 1;
-        }
+        fillRule =
+            op === 'exclude' && result.getFillType() === ck.FillType.EvenOdd ? 1 : 0;
     } catch {
-        fillRule = 0;
+        /* keep Winding */
     }
     result.delete();
     // subpaths may be empty (e.g. intersect of disjoint shapes). That's a real
@@ -371,6 +370,18 @@ function isCollocatedHandle(
     return Math.hypot(hx - ax, hy - ay) < eps;
 }
 
+/** Degenerate cubics on polygon edges are a PathOps footgun — emit a line. */
+function appendCubicOrLine(path: Path, from: PathPoint, to: PathPoint) {
+    if (
+        isCollocatedHandle(from.cp2[0], from.cp2[1], from.x, from.y) &&
+        isCollocatedHandle(to.cp1[0], to.cp1[1], to.x, to.y)
+    ) {
+        path.lineTo(to.x, to.y);
+    } else {
+        path.cubicTo(from.cp2[0], from.cp2[1], to.cp1[0], to.cp1[1], to.x, to.y);
+    }
+}
+
 /** Append engine subpaths (cubic beziers via cp1/cp2) onto a CanvasKit path. */
 export function appendSubpathsToPath(path: Path, subpaths: Subpath[]) {
     for (const sp of subpaths) {
@@ -378,37 +389,10 @@ export function appendSubpathsToPath(path: Path, subpaths: Subpath[]) {
         if (pts.length < 2) continue;
         path.moveTo(pts[0].x, pts[0].y);
         for (let i = 1; i < pts.length; i++) {
-            const prev = pts[i - 1];
-            const p = pts[i];
-            // Degenerate cubics on polygon edges are a PathOps footgun at
-            // curve/line junctions — emit a real line when handles collapse.
-            if (
-                isCollocatedHandle(prev.cp2[0], prev.cp2[1], prev.x, prev.y) &&
-                isCollocatedHandle(p.cp1[0], p.cp1[1], p.x, p.y)
-            ) {
-                path.lineTo(p.x, p.y);
-            } else {
-                path.cubicTo(prev.cp2[0], prev.cp2[1], p.cp1[0], p.cp1[1], p.x, p.y);
-            }
+            appendCubicOrLine(path, pts[i - 1], pts[i]);
         }
         if (sp.closed) {
-            const last = pts[pts.length - 1];
-            const first = pts[0];
-            if (
-                isCollocatedHandle(last.cp2[0], last.cp2[1], last.x, last.y) &&
-                isCollocatedHandle(first.cp1[0], first.cp1[1], first.x, first.y)
-            ) {
-                path.lineTo(first.x, first.y);
-            } else {
-                path.cubicTo(
-                    last.cp2[0],
-                    last.cp2[1],
-                    first.cp1[0],
-                    first.cp1[1],
-                    first.x,
-                    first.y,
-                );
-            }
+            appendCubicOrLine(path, pts[pts.length - 1], pts[0]);
             path.close();
         }
     }

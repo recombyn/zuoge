@@ -441,7 +441,8 @@ function SelectionContextToolbar(props: Props): ReactNode {
   // Timeline host under 动画工作——select frame instead; no node chrome.
   if (isAnimationFrameHostNode(node, document)) return null;
 
-  const placementAngle = angleProp ?? (Number(node?.attrs?.angle) || 0);
+  // Dock passes 0 for Kit world AABB; fall back to node angle otherwise.
+  const placementAngle = Number(angleProp ?? node?.attrs?.angle) || 0;
   const genBox = { x: box.left, y: box.top, width: box.width, height: box.height };
 
   // 动画工作台内子元素：对齐 / 人偶 / 属性（含嵌套 LOT；点 LOT 页签才进内部编辑）。

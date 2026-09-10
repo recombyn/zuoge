@@ -1599,9 +1599,8 @@ function flushMappedGeometry(scene: WasmScene) {
       const kitWeight = Math.round(Number(kn.geometry.Text.font_weight) || 400);
       const kitItalic = Boolean(kn.geometry.Text.italic);
       const kitLetter = Number(kn.geometry.Text.letter_spacing) || 0;
-      const prevWeight = isTextBold(prevStyle)
-        ? Math.round(Number(prevStyle.fontWeight) >= 600 ? Number(prevStyle.fontWeight) : 700)
-        : Math.round(Number(prevStyle.fontWeight) || 400) || 400;
+      let prevWeight = Math.round(Number(prevStyle.fontWeight) || 400) || 400;
+      if (isTextBold(prevStyle) && prevWeight < 600) prevWeight = 700;
       const textChanged =
         content !== prevPlain ||
         Math.abs(fontSize - prevStyle.fontSize) > 0.01 ||
@@ -3028,12 +3027,10 @@ async function fetchImageBytes(
  * syncKitSelectionFromStore is not no-op'd by suppressDepth.
  */
 function resyncKitSelectionIfStoreSelected(rcbId: string) {
-  if (!attached) return;
-  if (rcbToKit.get(rcbId) == null) return;
-  const ed = store.getState().editor;
-  const selected = (ed.selectedNodeIds || []).map(String);
-  if (!selected.includes(String(rcbId))) return;
   const handle = attached;
+  const id = String(rcbId);
+  if (!handle || rcbToKit.get(rcbId) == null) return;
+  if (!(store.getState().editor.selectedNodeIds || []).map(String).includes(id)) return;
   const run = () => {
     if (!attached || attached !== handle) return;
     if (suppressDepth > 0) {
@@ -3042,8 +3039,7 @@ function resyncKitSelectionIfStoreSelected(rcbId: string) {
     }
     if (rcbToKit.get(rcbId) == null) return;
     const live = store.getState().editor;
-    const selected = (live.selectedNodeIds || []).map(String);
-    if (!selected.includes(String(rcbId))) return;
+    if (!(live.selectedNodeIds || []).map(String).includes(id)) return;
     syncKitSelectionFromStore(
       handle,
       live.selectedNodeIds || [],
@@ -4921,7 +4917,10 @@ export function isDomHostOnlyRcbNode(node: SceneNodeInput | null | undefined): b
 }
 
 /**
- * Kit owns clipboard when selection has no DomHost-only ids (lottie/group).
+ * Kit owns clipboard when selection has no DomHost-only ids and no empty
+ * generator plates. Empty gens stay Kit-mapped for paint/hit, but generator
+ * flags live only in RCB attrs — Kit duplicate → kitNodeToCreated(rect) drops
+ * them and the center Lucide glyph never paints.
  * Empty node selection still lets Kit handle artboard / engine clipboard.
  */
 export function selectionUsesKitClipboard(
@@ -4930,7 +4929,10 @@ export function selectionUsesKitClipboard(
 ): boolean {
   const ids = (nodeIds || []).map((id) => String(id || '').trim()).filter(Boolean);
   if (!ids.length) return true;
-  return !ids.some((id) => isDomHostOnlyRcbNode(document?.deltaSetLike?.[id]));
+  return !ids.some((id) => {
+    const node = document?.deltaSetLike?.[id];
+    return isEmptyGeneratorPlate(node) || isDomHostOnlyRcbNode(node);
+  });
 }
 
 /** Mirror Kit Group parents into SceneDocument attrs.groupId (product chrome). */
