@@ -1,0 +1,32 @@
+[package]
+name = "engine"
+version = "1.0.0-beta.3"
+edition = "2021"
+description = "Geometry and scene-graph core for RCB vector kit, compiled to WebAssembly."
+repository = ""
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+rstar = "0.12"
+serde-wasm-bindgen = "0.6"
+glam = { version = "0.25", features = ["serde"] }
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.2", features = ["js"] }
+geo = "0.28"
+ordered-float = "4"
+prost = "0.13"
+base64 = "0.22"
+# Pure-Rust backend: the C/zlib backends do not build for wasm32.
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.4"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

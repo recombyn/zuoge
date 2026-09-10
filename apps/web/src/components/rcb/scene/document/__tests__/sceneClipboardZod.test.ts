@@ -337,6 +337,53 @@ describe('scene clipboard Zod', () => {
     expect(String(newChild.attrs?.frameId)).toBe(out.frameIds[0]);
   });
 
+  it('frameLocal node-only duplicate keeps frameId and offsets plate-local', () => {
+    let doc = createEmptyDocument({ emptyWorld: true });
+    doc = {
+      ...doc,
+      coordSpace: 'frameLocal',
+      frames: [
+        {
+          id: 'frame-src',
+          name: 'Frame',
+          kind: 'artboard',
+          x: 120,
+          y: 80,
+          width: 800,
+          height: 600,
+          backgroundColor: '#fff',
+          clipContent: true,
+        },
+      ],
+      stackOrder: ['frame:frame-src'],
+    };
+    doc = addNodeToDocument(doc, 'child', {
+      id: 'child',
+      key: 'rect',
+      x: 40,
+      y: 50,
+      width: 80,
+      height: 60,
+      attrs: { frameId: 'frame-src', 'fill-color': '#888' },
+      children: [],
+    } as any);
+
+    const out = pasteClipboardIntoDocument(
+      doc,
+      { nodes: [{ id: 'child', node: doc.deltaSetLike!.child as any }] },
+      { offsetX: 90, offsetY: 0, trusted: true }
+    );
+
+    expect(out.frameIds).toHaveLength(0);
+    expect(out.ids).toHaveLength(1);
+    const copy = out.document.deltaSetLike![out.ids[0]]!;
+    expect(String(copy.attrs?.frameId)).toBe('frame-src');
+    expect(Number(copy.x)).toBe(130);
+    expect(Number(copy.y)).toBe(50);
+    // Must not land at plate-local-as-world (near 130,50) while the plate is at 120,80.
+    expect(Number(copy.x)).not.toBe(40);
+  });
+
   it('clipboardNodesBounds ignores overflowing children of clipped frames', () => {
     const bounds = clipboardNodesBounds({
       frames: [

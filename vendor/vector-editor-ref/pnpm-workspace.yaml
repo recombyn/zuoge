@@ -1,0 +1,12 @@
+packages:
+  - packages/*
+
+allowBuilds:
+  # esbuild resolves its platform binary through an optional dependency; its
+  # install script is not needed, and skipping it keeps the install clean.
+  esbuild: false
+  # Puppeteer's install script downloads a ~150 MB Chrome. Only the SVG
+  # conformance suite and the scripts/ helpers need a browser, so the clone
+  # does not pay for one: install it once, on demand, with
+  # `./node_modules/.bin/puppeteer browsers install chrome`.
+  puppeteer: false

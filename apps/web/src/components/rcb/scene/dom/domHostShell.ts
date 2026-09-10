@@ -40,7 +40,7 @@ export function findHtmlMediaMount(host: Element | null | undefined): Element | 
   return host.querySelector(`[${HTML_MEDIA_MOUNT_ATTR}]`);
 }
 
-/** Keep FO + parent translate in sync with SceneDocument geometry. */
+/** Keep FO + parent transform in sync with SceneDocument geometry / flip / angle. */
 export function syncHtmlMediaMountGeometry(
   parent: SVGElement,
   node: SceneNodeInput
@@ -51,10 +51,42 @@ export function syncHtmlMediaMountGeometry(
   if (!(fo instanceof SVGForeignObjectElement) && !(fo instanceof SVGElement)) return;
   const w = Math.max(1, Number(node.width) || 1);
   const h = Math.max(1, Number(node.height) || 1);
+  setAttrs(parent, { transform: nodeHostTransform(node) });
+  setAttrs(fo, { x: 0, y: 0, width: w, height: h });
+}
+
+function attrFlagTrue(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+/**
+ * Video/audio FO flip lives on media pixels (chrome stays upright).
+ * Lottie/group apply flip on the host transform with angle.
+ */
+function hostIsolatesHtmlMediaFlip(node: SceneNodeInput): boolean {
+  const key = String(node.key || '');
+  return key === 'video' || key === 'audio';
+}
+
+/** Scene translate + optional rotate/flip about the local box center. */
+function nodeHostTransform(node: SceneNodeInput): string {
   const x = Number(node.x) || 0;
   const y = Number(node.y) || 0;
-  setAttrs(parent, { transform: `translate(${x} ${y})` });
-  setAttrs(fo, { x: 0, y: 0, width: w, height: h });
+  const w = Math.max(1, Number(node.width) || 1);
+  const h = Math.max(1, Number(node.height) || 1);
+  const attrs = (node.attrs || {}) as Record<string, unknown>;
+  const angle = Number(attrs.angle) || 0;
+  const isolateFlip = hostIsolatesHtmlMediaFlip(node);
+  const flipX = !isolateFlip && attrFlagTrue(attrs.flipX);
+  const flipY = !isolateFlip && attrFlagTrue(attrs.flipY);
+  if (!angle && !flipX && !flipY) return `translate(${x} ${y})`;
+  const cx = w / 2;
+  const cy = h / 2;
+  const parts = [`translate(${x} ${y})`, `translate(${cx} ${cy})`];
+  if (angle) parts.push(`rotate(${angle})`);
+  if (flipX || flipY) parts.push(`scale(${flipX ? -1 : 1} ${flipY ? -1 : 1})`);
+  parts.push(`translate(${-cx} ${-cy})`);
+  return parts.join(' ');
 }
 
 /**
@@ -74,10 +106,8 @@ export function ensureHtmlMediaMount(
 
   const w = Math.max(1, Number(node.width) || 1);
   const h = Math.max(1, Number(node.height) || 1);
-  const x = Number(node.x) || 0;
-  const y = Number(node.y) || 0;
   setAttrs(parent, {
-    transform: `translate(${x} ${y})`,
+    transform: nodeHostTransform(node),
   });
 
   const fo = svgEl('foreignObject', {

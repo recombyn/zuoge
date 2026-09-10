@@ -102,6 +102,51 @@ describe('styleJsonFromRcbNode', () => {
     expect(s.corner_radius).toBe(8);
   });
 
+  it('maps radiusTL (without cornerRadius) into Kit corner_radius', () => {
+    const s = styleOf({
+      attrs: {
+        radiusLinked: 'true',
+        radiusTL: 24,
+        radiusTR: 24,
+        radiusBR: 24,
+        radiusBL: 24,
+      },
+    });
+    expect(s.corner_radius).toBe(24);
+  });
+
+  it('maps strokeLinejoin / strokeLinecap into Kit join / cap indices', () => {
+    const round = styleOf({
+      attrs: {
+        'border-color': '#000000',
+        'border-width': 12,
+        strokeLinejoin: 'round',
+        strokeLinecap: 'round',
+      },
+    });
+    expect(round.strokes[0]).toMatchObject({ join: 1, cap: 1 });
+
+    const bevel = styleOf({
+      attrs: {
+        'border-color': '#000000',
+        'border-width': 12,
+        strokeLinejoin: 'bevel',
+        strokeLinecap: 'square',
+      },
+    });
+    expect(bevel.strokes[0]).toMatchObject({ join: 2, cap: 2 });
+
+    const miter = styleOf({
+      attrs: {
+        'border-color': '#000000',
+        'border-width': 12,
+        strokeLinejoin: 'miter',
+        strokeLinecap: 'butt',
+      },
+    });
+    expect(miter.strokes[0]).toMatchObject({ join: 0, cap: 0 });
+  });
+
   it('does not push Kit corner_radius for path-baked polygon fillets', () => {
     const s = styleOf({
       attrs: {

@@ -1203,6 +1203,11 @@ export const editorReducers = {
       state.dirty = true;
       state.lastPatchedNodeIds = patched;
       state.lastPatchTransformOnly = false;
+      // Same sticky-flag trap as commitSpawnedGenerator: after Kit→doc flushes,
+      // lastPatchFromKitCanvas stays true and KitCanvasHost skips reconcile —
+      // paste/duplicate then adds SceneDocument nodes that never map into Kit
+      // (selection chrome may move; ink stays invisible).
+      state.lastPatchFromKitCanvas = false;
       state.documentPatchToken += 1;
       if (
         state.pendingImageProcessId &&
@@ -1391,6 +1396,8 @@ export const editorReducers = {
       // survivor (audio WaveSurfer flash on delete / select-clear).
       state.documentPatchToken += 1;
       state.lastPatchedNodeIds = nodeIds;
+      // RCB membership shrink must reconcile Kit (same sticky-flag trap as paste).
+      state.lastPatchFromKitCanvas = false;
       // LayerPanel / docks (not sceneReloadToken remount).
       bumpDocumentRevision(state);
       syncLibraryOnEdit(state);
@@ -1821,7 +1828,15 @@ export const editorReducers = {
             state.selectedNodeIds = [];
             state.selectedNodeId = null;
             state.selectedFrameIds = [fid];
-            state.frameChromeMode = frameIsEmpty(doc, fid) ? 'full' : 'soft';
+            // Animation preview unit needs full chrome so play / open-timeline toolbar mounts
+            // (EditorStageWorld gates AnimationFrameContextToolbar on frameChromeMode === 'full').
+            const plate = (Array.isArray(doc.frames) ? doc.frames : []).find(
+              (f) => String(f?.id) === fid
+            );
+            state.frameChromeMode =
+              isAnimationArtboardKind(plate?.kind) || frameIsEmpty(doc, fid)
+                ? 'full'
+                : 'soft';
             pauseLottieIfPlaying(state);
             queueEnsureAnimationFrame(fid);
             return;

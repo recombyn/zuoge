@@ -6,17 +6,15 @@ import { useTranslation } from 'react-i18next';
 import { useRcbCamera } from '@/components/rcb/camera/context';
 import {
   clampCornerRadii,
-  cornerVertexCount,
   isRadiusLinked,
+  linkedCornerRadiusCommitAttrs,
   radiiFromAttrs,
-  serializeRadiusVertices,
   setLiveCornerRadiusPreview,
-  type CornerRadii,
+  uniformCornerRadii,
 } from '@/components/rcb/scene/document/sceneRadii';
 import {
   clampShapeSides,
-  DEFAULT_SHAPE_SIDES,
-  shapeVertexPoints,
+  polygonCornerHandleSites,
   sidesFromAttrs,
 } from '@/components/rcb/scene/document/sceneShapes';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
@@ -42,77 +40,9 @@ const KNOB_STROKE_PX = CHROME_STROKE_PX;
 
 type TopSite = { x: number; y: number; ix: number; iy: number };
 
-function topRadiusSite(
-  shapeType: string,
-  width: number,
-  height: number,
-  sides: number
-): TopSite | null {
-  const pts = shapeVertexPoints(shapeType, width, height, sides);
-  if (!pts.length) return null;
-  let top = pts[0];
-  for (const p of pts) {
-    if (p[1] < top[1] - 1e-6 || (Math.abs(p[1] - top[1]) <= 1e-6 && p[0] < top[0])) {
-      top = p;
-    }
-  }
-  const cx = width / 2;
-  const cy = height / 2;
-  let ix = cx - top[0];
-  let iy = cy - top[1];
-  const len = Math.hypot(ix, iy) || 1;
-  return { x: top[0], y: top[1], ix: ix / len, iy: iy / len };
-}
-
-function sidesHandleLocal(
-  shapeType: string,
-  width: number,
-  height: number,
-  sides: number
-): { x: number; y: number } {
-  const pts = shapeVertexPoints(shapeType, width, height, sides);
-  if (!pts.length) {
-    return { x: width, y: height / 2 };
-  }
-  let best = pts[0];
-  for (const p of pts) {
-    if (p[0] > best[0] + 1e-6 || (Math.abs(p[0] - best[0]) <= 1e-6 && p[1] < best[1])) {
-      best = p;
-    }
-  }
-  return { x: best[0], y: best[1] };
-}
-
-function uniformRadii(r: number): CornerRadii {
-  const v = Math.max(0, Math.round(r));
-  return { tl: v, tr: v, br: v, bl: v };
-}
-
-function radiusAttrsForCommit(
-  node: SceneNodeInput,
-  radius: number
-): Record<string, unknown> {
-  const w = Math.max(1, Number(node.width) || 1);
-  const h = Math.max(1, Number(node.height) || 1);
-  const clamped = clampCornerRadii(uniformRadii(radius), w, h);
-  const count = Math.max(1, cornerVertexCount(node));
-  const vertices = Array.from({ length: count }, () => Math.round(clamped.tl));
-  return {
-    radiusTL: clamped.tl,
-    radiusTR: clamped.tr,
-    radiusBR: clamped.br,
-    radiusBL: clamped.bl,
-    radiusLinked: 'true',
-    radiusVertices: serializeRadiusVertices(vertices),
-    radius: Math.round(clamped.tl),
-    cornerRadius: Math.round(clamped.tl),
-  };
-}
-
 type DragState =
   | {
       mode: 'radius';
-      startR: number;
       site: TopSite;
       startX: number;
       startY: number;
@@ -174,41 +104,12 @@ function PolygonShapeHandlesOverlay({
   );
   const radius = dragValue != null && activeKey === 'radius' ? dragValue : baseR;
 
-  // Radius knob rides the fillet; at 0 it sits on the vertex (no forced tuck).
-  const insetFor = (r: number) => {
-    const along = Math.max(0, Number(r) || 0);
-    return Math.min(along, Math.max(0, maxR - 1));
-  };
-
-  const topSite = topRadiusSite(shapeType, w, h, sides);
-  const radiusLocal = topSite
-    ? {
-        x: topSite.x + topSite.ix * insetFor(radius),
-        y: topSite.y + topSite.iy * insetFor(radius),
-      }
-    : { x: w / 2, y: insetFor(radius) };
-  const sidesLocal = sidesHandleLocal(shapeType, w, h, sides);
-  const radiusPos = localPointToScene(radiusLocal.x, radiusLocal.y, box, angle);
-  const sidesPos = localPointToScene(sidesLocal.x, sidesLocal.y, box, angle);
-
   const previewRadii = (r: number, nextSides?: number) => {
-    const radii = uniformRadii(r);
     previewShapeParamsToKit(
       nodeId,
       node,
       {
-        radiusTL: radii.tl,
-        radiusTR: radii.tr,
-        radiusBR: radii.br,
-        radiusBL: radii.bl,
-        radiusLinked: 'true',
-        radiusVertices: serializeRadiusVertices(
-          Array.from({ length: Math.max(1, cornerVertexCount(node)) }, () =>
-            Math.round(radii.tl)
-          )
-        ),
-        radius: Math.round(radii.tl),
-        cornerRadius: Math.round(radii.tl),
+        ...linkedCornerRadiusCommitAttrs(node, r),
         ...(nextSides != null ? { sides: nextSides } : {}),
       },
       nextSides != null ? { sides: nextSides } : undefined
@@ -243,7 +144,7 @@ function PolygonShapeHandlesOverlay({
       const local = scenePointToLocal(sc.x, sc.y, box, angle);
       const rounded = Math.round(radiusAlongSite(d.site, local));
       setDragValue(rounded);
-      setLiveCornerRadiusPreview({ nodeId, display: rounded, radii: uniformRadii(rounded) });
+      setLiveCornerRadiusPreview({ nodeId, display: rounded, radii: uniformCornerRadii(rounded) });
       previewRadii(rounded, sides);
     };
 
@@ -265,16 +166,14 @@ function PolygonShapeHandlesOverlay({
       if (d.mode === 'sides') {
         const delta = Math.round((d.startY - e.clientY) / SIDES_DRAG_STEP_PX);
         const next = clampShapeSides(d.startSides + delta, d.startSides);
-        commitShapeParamsToKit(nodeId, node, {
-          sides: clampShapeSides(next, DEFAULT_SHAPE_SIDES),
-        });
+        commitShapeParamsToKit(nodeId, node, { sides: next });
         return;
       }
 
       const sc = toScene(e.clientX, e.clientY);
       const local = scenePointToLocal(sc.x, sc.y, box, angle);
       const rounded = Math.round(radiusAlongSite(d.site, local));
-      commitShapeParamsToKit(nodeId, node, radiusAttrsForCommit(node, rounded));
+      commitShapeParamsToKit(nodeId, node, linkedCornerRadiusCommitAttrs(node, rounded));
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -311,6 +210,23 @@ function PolygonShapeHandlesOverlay({
     maxR,
   ]);
 
+  const sites = polygonCornerHandleSites(shapeType, w, h, sides);
+  if (!sites) return null;
+  const topSite = sites.radius;
+
+  // Radius knob rides the fillet; at 0 it sits on the vertex (no forced tuck).
+  const insetFor = (r: number) => {
+    const along = Math.max(0, Number(r) || 0);
+    return Math.min(along, Math.max(0, maxR - 1));
+  };
+  const radiusLocal = {
+    x: topSite.x + topSite.ix * insetFor(radius),
+    y: topSite.y + topSite.iy * insetFor(radius),
+  };
+  const sidesLocal = sites.sides;
+  const radiusPos = localPointToScene(radiusLocal.x, radiusLocal.y, box, angle);
+  const sidesPos = localPointToScene(sidesLocal.x, sidesLocal.y, box, angle);
+
   const visualSize = KNOB_VIS_PX * k;
   const stroke = KNOB_STROKE_PX * k;
   const halfVis = visualSize / 2;
@@ -325,8 +241,6 @@ function PolygonShapeHandlesOverlay({
     activeKey === 'sides'
       ? `${sidesLabel} ${dragValue ?? sides}`
       : `${radiusLabel} ${dragValue ?? radius}`;
-
-  if (!topSite) return null;
 
   type KnobSpec = {
     key: 'radius' | 'sides';
@@ -343,12 +257,11 @@ function PolygonShapeHandlesOverlay({
       ly: radiusLocal.y,
       label: radiusLabel,
       onDown: (e) => {
-        if (e.button !== 0 || !topSite) return;
+        if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
         dragRef.current = {
           mode: 'radius',
-          startR: baseR,
           site: topSite,
           startX: e.clientX,
           startY: e.clientY,

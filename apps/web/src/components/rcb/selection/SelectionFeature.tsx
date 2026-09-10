@@ -30,6 +30,7 @@ import { listImageVariantUrls } from '@/components/rcb/scene/document/mediaLifec
 import {
   inflateSelectionBox,
 } from '@/components/rcb/scene/document/sceneEffects';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { patchDocumentNode } from '@/store/modules/editor';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 import { subscribeShapeHosts } from '@/components/rcb/shapes/shapeHostRegistry';
@@ -238,10 +239,21 @@ function SelectionFeature({
   const paramShapeType = String(singleNodeData?.attrs?.shapeType || '');
   const shapeHandleAngle =
     singleId && singleNodeData ? readNodeAngle(document, singleId) : 0;
-  // Always document geometry — Kit dock AABB can differ by a few px and regenerating
-  // vertices in that box mis-seats polygon/star knobs off the true corners.
-  // Handles are hidden during Kit resize/rotate, so dock "liveness" is unused here.
-  const shapeHandleBox = chromeGeomBox;
+  // Document plate box only — Kit dock AABB can differ by a few px; regenerating
+  // star/polygon vertices in that box parks knobs off the true corners (same
+  // path AABB as getShapeBaselineD / Kit parametric path).
+  const shapeHandleBox =
+    singleId && singleNodeData
+      ? (() => {
+          const { left, top } = nodeLeftTop(document, singleNodeData);
+          return {
+            left,
+            top,
+            width: Math.max(1, Number(singleNodeData.width) || 1),
+            height: Math.max(1, Number(singleNodeData.height) || 1),
+          };
+        })()
+      : null;
   const shapeHandlesIdle = chromeIdle && !readOnly && !kitMoving && !kitResizeOrRotate;
   const showCircleHandles =
     shapeHandlesIdle &&

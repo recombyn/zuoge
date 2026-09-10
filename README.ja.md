@@ -32,7 +32,7 @@
 
 ## ✨ Features
 
-🎨 **無限アートボード** — `SceneDocument` + CanvasKit アイドルインク（`KitCanvasHost` / `@rcb-vector`）；ズーム 5%–10000%。幾何ヒット；DOM はキャレット / メディア / SoftGlow / パス編集のみ。
+🎨 **無限アートボード** — `SceneDocument` + CanvasKit アイドルインク（`KitCanvasHost` / `@rcb-vector`）。幾何ヒット；DOM はキャレット / メディア / SoftGlow / パス編集のみ。
 
 🤖 **Design Agent** — 同一キャンバス上のストリーミング会話：計画 → Skill → `tool_ops` → 適用。LangGraph カーネル固定；挙動は AgentProfile YAML、段階プロンプト、Skills、ツール登録で設定。
 

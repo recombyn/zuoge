@@ -19,19 +19,55 @@ import {
 } from './toolMap';
 
 /**
+ * Engine::new + empty-artboards deserialize always mint "Artwork 1" at the origin.
+ * Product must not promote that seed into SceneDocument (undo-to-empty / resize).
+ */
+export function isKitEngineSeedArtboard(ab: {
+  name?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+}): boolean {
+  const name = String(ab?.name || '').trim();
+  if (!/^Artwork\s+1$/i.test(name)) return false;
+  const x = Number(ab?.x) || 0;
+  const y = Number(ab?.y) || 0;
+  // Seed is always placed at the origin (size may follow document_width/height).
+  return Math.abs(x) < 0.5 && Math.abs(y) < 0.5;
+}
+
+/**
+ * Remove a Kit artboard without pushing undo (unlike WasmScene.removeArtboard).
+ * Pass `invalidate: false` when batching removals (e.g. stripKitSeedArtboards).
+ */
+export function discardKitArtboardNoHistory(
+  scene: WasmScene,
+  artboardId: number,
+  opts?: { invalidate?: boolean }
+): void {
+  try {
+    scene.engine?.remove_artboard(artboardId);
+  } catch {
+    /* ignore */
+  }
+  if (opts?.invalidate === false) return;
+  try {
+    scene.invalidateCache?.(false);
+  } catch {
+    /* optional */
+  }
+}
+
+/**
  * Engine::new seeds "Artwork 1". Strip it WITHOUT WasmScene.removeArtboard
  * (that saveHistory's the seed and Undo resurrects the board while resizing).
  * Also reset Kit history so the seed cannot come back via undo.
  */
 export function stripKitSeedArtboards(scene: WasmScene, opts?: { resetHistory?: boolean }) {
-  const eng = scene.engine;
-  if (!eng) return;
+  if (!scene.engine) return;
   for (const ab of [...scene.getArtboards()]) {
-    try {
-      eng.remove_artboard(ab.id);
-    } catch {
-      /* ignore */
-    }
+    discardKitArtboardNoHistory(scene, ab.id, { invalidate: false });
   }
   try {
     scene.invalidateCache?.(false);

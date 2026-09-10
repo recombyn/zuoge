@@ -1,0 +1,418 @@
+    <div id="app-container">
+        <header id="header">
+            <!-- Host injection slot (leading). Empty by default; a host app can
+                 mount its own controls here (e.g. a back button). -->
+            <div id="header-slot-leading" class="header-slot"></div>
+            <button id="app-menu-btn" class="app-menu-btn" title="Menu">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
+            </button>
+            <div id="tab-strip" class="tab-strip">
+                <!-- Document tabs injected by JS -->
+            </div>
+            <div class="history-controls">
+                <button id="undo-btn" class="zoom-btn" title="Undo (⌘Z)"><i data-lucide="undo-2"></i></button>
+                <button id="redo-btn" class="zoom-btn" title="Redo (⌘⇧Z)"><i data-lucide="redo-2"></i></button>
+            </div>
+            <div class="header-spacer"></div>
+            <div class="zoom-controls">
+                <button id="zoom-out" class="zoom-btn" title="Zoom Out (−)">−</button>
+                <div id="zoom-level" class="zoom-display">100%</div>
+                <button id="zoom-in" class="zoom-btn" title="Zoom In (+)">+</button>
+                <button id="zoom-fit" class="zoom-btn" title="Fit to Artboard (Shift+1)">⊡</button>
+            </div>
+            <div class="header-divider"></div>
+            <div class="header-actions">
+                <button id="export-btn" class="icon-btn" title="Export…">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                </button>
+                <button id="save-btn" class="save-btn" title="Save (⌘S)">
+                    <svg class="save-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                    <span class="save-label">Save</span>
+                </button>
+            </div>
+            <!-- Host injection slot (trailing). Empty by default; a host app can
+                 mount its own controls here (e.g. sync status, account menu). -->
+            <div id="header-slot-trailing" class="header-slot"></div>
+        </header>
+
+        <main id="main-layout">
+            <aside id="layers-panel">
+                <div class="panel-section layers-section">
+                    <div class="panel-section-header" data-section="layers">
+                        <span class="chevron">▾</span>
+                        <span class="section-title">Objects</span>
+                        <button id="reveal-selection-btn" class="reveal-selection-btn" title="Scroll to selection">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg>
+                        </button>
+                    </div>
+                    <div id="layer-list" data-section-body="layers">
+                        <!-- Layers injected by JS -->
+                    </div>
+                </div>
+                <div id="layers-panel-resizer" title="Drag to resize"></div>
+            </aside>
+
+            <nav id="toolbar">
+                <!-- Tool rail rendered by src/toolbar.ts -->
+            </nav>
+
+            <section id="canvas-container">
+                <canvas id="editor-canvas"></canvas>
+                <canvas id="ruler-top" class="ruler ruler-top"></canvas>
+                <canvas id="ruler-left" class="ruler ruler-left"></canvas>
+                <button id="ruler-corner" class="ruler-corner" title="Snap to grid: off"></button>
+            </section>
+
+            <aside id="side-panel">
+                <div class="properties-scroll">
+                <!-- ARTBOARD (shown only when an artboard is selected) -->
+                <div class="panel-section artboard-panel" id="artboard-section" style="display:none;">
+                    <div class="panel-section-header">
+                        <span class="section-title">Artwork</span>
+                    </div>
+                    <div class="panel-section-body">
+                        <div class="ab-field">
+                            <input type="text" id="ab-name" class="ab-name-input" placeholder="Artwork name">
+                        </div>
+                        <div class="ab-row">
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="ab-x" title="Artwork X">X</span>
+                                <input type="number" id="ab-x" value="0" step="1">
+                            </div>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="ab-y" title="Artwork Y">Y</span>
+                                <input type="number" id="ab-y" value="0" step="1">
+                            </div>
+                        </div>
+                        <div class="ab-row" style="margin-top: 6px;">
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="ab-w" title="Artwork Width">W</span>
+                                <input type="number" id="ab-w" value="0" step="1" min="1">
+                            </div>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="ab-h" title="Artwork Height">H</span>
+                                <input type="number" id="ab-h" value="0" step="1" min="1">
+                            </div>
+                        </div>
+                        <div class="ab-field">
+                            <span class="ab-sublabel">Presets</span>
+                            <select id="ab-preset" class="prop-select ab-preset">
+                                <option value="">Custom…</option>
+                                <option value="1080x1080">Square · 1080×1080</option>
+                                <option value="1920x1080">Desktop · 1920×1080</option>
+                                <option value="1440x1024">Web · 1440×1024</option>
+                                <option value="390x844">iPhone · 390×844</option>
+                                <option value="360x800">Android · 360×800</option>
+                                <option value="1200x630">Social · 1200×630</option>
+                                <option value="595x842">A4 · 595×842</option>
+                            </select>
+                        </div>
+                        <div class="ab-field ab-bg-row">
+                            <span class="ab-sublabel">Background</span>
+                            <label class="ab-transparent"><input type="checkbox" id="ab-transparent"> Transparent</label>
+                            <input type="color" id="ab-bg" class="prop-color" value="#ffffff">
+                        </div>
+                        <button id="ab-delete" class="ab-delete-btn">Delete artwork</button>
+                    </div>
+                </div>
+
+                <div id="node-props" style="display:none;">
+                <!-- TRANSFORM -->
+                <div class="panel-section">
+                    <div class="panel-section-header" data-section="transform">
+                        <span class="chevron">▾</span>
+                        <span class="section-title">Transform</span>
+                    </div>
+                    <div class="panel-section-body" data-section-body="transform">
+                        <div class="dim-grid">
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-x" title="X position">X</span>
+                                <input type="number" id="prop-x" value="0" step="1">
+                            </div>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-y" title="Y position">Y</span>
+                                <input type="number" id="prop-y" value="0" step="1">
+                            </div>
+                            <span></span>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-w" title="Width">W</span>
+                                <input type="number" id="prop-w" value="0" step="1" min="0">
+                            </div>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-h" title="Height">H</span>
+                                <input type="number" id="prop-h" value="0" step="1" min="0">
+                            </div>
+                            <button id="aspect-lock" class="dim-icon-btn" title="Constrain proportions">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                            </button>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-rotation" title="Rotation">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><path d="M2.5 1.5v8h8"/><path d="M6.7 9.5a4.2 4.2 0 0 0-4.2-4.2"/></svg>
+                                </span>
+                                <input type="number" id="prop-rotation" value="0" step="1">
+                                <span class="dim-unit">°</span>
+                            </div>
+                            <div class="dim-input" id="corner-radius-cell">
+                                <span class="dim-label" data-scrub="prop-corner-radius" title="Corner radius">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><path d="M2.5 10.5V7A4.5 4.5 0 0 1 7 2.5h3.5"/></svg>
+                                </span>
+                                <input type="number" id="prop-corner-radius" value="0" step="1" min="0">
+                            </div>
+                            <span></span>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-skew-x" title="Skew X">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><path d="M4.5 3h6l-3 6h-6z"/></svg>
+                                </span>
+                                <input type="number" id="prop-skew-x" value="0" step="1">
+                                <span class="dim-unit">°</span>
+                            </div>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-skew-y" title="Skew Y">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"><path d="M3 7.5v-6l6 3v6z"/></svg>
+                                </span>
+                                <input type="number" id="prop-skew-y" value="0" step="1">
+                                <span class="dim-unit">°</span>
+                            </div>
+                            <span></span>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-scale-x" title="Scale X (negative = flipped)">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 6h9M3.5 4l-2 2 2 2M8.5 4l2 2-2 2"/></svg>
+                                </span>
+                                <input type="number" id="prop-scale-x" value="100" step="1">
+                                <span class="dim-unit">%</span>
+                            </div>
+                            <div class="dim-input">
+                                <span class="dim-label" data-scrub="prop-scale-y" title="Scale Y (negative = flipped)">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1.5v9M4 3.5l2-2 2 2M4 8.5l2 2 2-2"/></svg>
+                                </span>
+                                <input type="number" id="prop-scale-y" value="100" step="1">
+                                <span class="dim-unit">%</span>
+                            </div>
+                            <div class="ref-anchor" id="ref-anchor" title="Reference point for rotate &amp; scale">
+                                <button class="ref-dot" data-ax="0" data-ay="0" title="Top left"></button>
+                                <button class="ref-dot" data-ax="0.5" data-ay="0" title="Top"></button>
+                                <button class="ref-dot" data-ax="1" data-ay="0" title="Top right"></button>
+                                <button class="ref-dot" data-ax="0" data-ay="0.5" title="Left"></button>
+                                <button class="ref-dot active" data-ax="0.5" data-ay="0.5" title="Center"></button>
+                                <button class="ref-dot" data-ax="1" data-ay="0.5" title="Right"></button>
+                                <button class="ref-dot" data-ax="0" data-ay="1" title="Bottom left"></button>
+                                <button class="ref-dot" data-ax="0.5" data-ay="1" title="Bottom"></button>
+                                <button class="ref-dot" data-ax="1" data-ay="1" title="Bottom right"></button>
+                            </div>
+                            <div class="dim-actions">
+                                <button id="rotate-ccw-btn" class="dim-icon-btn" title="Rotate 90° counterclockwise"></button>
+                                <button id="rotate-cw-btn" class="dim-icon-btn" title="Rotate 90° clockwise"></button>
+                                <button id="flip-h-btn" class="dim-icon-btn" title="Flip horizontal"></button>
+                                <button id="flip-v-btn" class="dim-icon-btn" title="Flip vertical"></button>
+                                <button id="flatten-btn" class="dim-icon-btn" title="Flatten transform into geometry (⌘E)"></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TYPOGRAPHY (Text nodes only) -->
+                <div class="panel-section" id="typography-section" style="display:none;">
+                    <div class="panel-section-header" data-section="typography">
+                        <span class="chevron">▾</span>
+                        <span class="section-title">Typography</span>
+                    </div>
+                    <div class="panel-section-body" data-section-body="typography">
+                        <div class="prop-row" style="align-items:stretch;">
+                            <textarea id="text-content" class="prop-input" rows="2" placeholder="Text…" style="flex:1; resize:vertical; font-family:inherit; line-height:1.3;"></textarea>
+                        </div>
+                        <div class="prop-row">
+                            <span class="label">Font</span>
+                            <select id="text-font-family" class="prop-select" style="flex:1;">
+                                <!-- Populated on demand by FontPicker: the whole Google
+                                     Fonts catalog lives in font_catalog.ts, not here. -->
+                                <option value="">Default</option>
+                            </select>
+                        </div>
+                        <div class="transform-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                            <div class="dim-input" title="Font size">
+                                <span class="dim-label" data-scrub="text-font-size">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><path d="M2 2.5h8M6 2.5v7.5"/></svg>
+                                </span>
+                                <input type="number" id="text-font-size" value="32" min="1" step="1">
+                            </div>
+                            <div class="dim-input" title="Line height">
+                                <span class="dim-label" data-scrub="text-line-height">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><path d="M1.5 2.5h5M1.5 6h5M1.5 9.5h5M9.5 2v7.5M8 3.5l1.5-1.5 1.5 1.5M8 8l1.5 1.5 1.5-1.5"/></svg>
+                                </span>
+                                <input type="number" id="text-line-height" value="1.2" min="0.5" max="5" step="0.1">
+                            </div>
+                            <div class="transform-cell">
+                                <select id="text-align" class="prop-select" style="height: 26px;">
+                                    <option value="0">Left</option>
+                                    <option value="1">Center</option>
+                                    <option value="2">Right</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="transform-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 6px;">
+                            <div class="transform-cell">
+                                <select id="text-weight" class="prop-select" style="height: 26px;">
+                                    <option value="300">Light</option>
+                                    <option value="400">Regular</option>
+                                    <option value="500">Medium</option>
+                                    <option value="600">SemiBold</option>
+                                    <option value="700">Bold</option>
+                                </select>
+                            </div>
+                            <div class="transform-cell">
+                                <select id="text-italic" class="prop-select" style="height: 26px;">
+                                    <option value="0">Normal</option>
+                                    <option value="1">Italic</option>
+                                </select>
+                            </div>
+                            <div class="dim-input" title="Letter spacing">
+                                <span class="dim-label" data-scrub="text-letter-spacing">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 2.5v7M10.5 2.5v7M3.5 6h5M5 4.5L3.5 6l1.5 1.5M7 4.5L8.5 6l-1.5 1.5"/></svg>
+                                </span>
+                                <input type="number" id="text-letter-spacing" value="0" step="0.5">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- FILL -->
+                <div class="panel-section">
+                    <div class="panel-section-header" data-section="fill">
+                        <span class="chevron">▾</span>
+                        <span class="section-title" style="flex:1;">Fill</span>
+                        <button id="add-fill-btn" class="add-property-btn" title="Add Fill">+</button>
+                    </div>
+                    <div class="panel-section-body" id="fills-list" data-section-body="fill" style="display:flex; flex-direction:column; gap:4px;">
+                        <!-- Dynamically populated by ui.ts -->
+                    </div>
+                </div>
+
+                <!-- STROKE -->
+                <div class="panel-section">
+                    <div class="panel-section-header" data-section="stroke">
+                        <span class="chevron">▾</span>
+                        <span class="section-title" style="flex:1;">Stroke</span>
+                        <button id="add-stroke-btn" class="add-property-btn" title="Add Stroke">+</button>
+                    </div>
+                    <div class="panel-section-body" id="strokes-list" data-section-body="stroke" style="display:flex; flex-direction:column; gap:4px;">
+                        <!-- Dynamically populated by ui.ts -->
+                    </div>
+                </div>
+
+                <!-- EFFECTS -->
+                <div class="panel-section">
+                    <div class="panel-section-header" data-section="effects">
+                        <span class="chevron">▾</span>
+                        <span class="section-title" style="flex:1;">Effects</span>
+                        <button id="add-effect-btn" class="add-property-btn" title="Add Effect">+</button>
+                    </div>
+                    <div class="panel-section-body" id="effects-list" data-section-body="effects" style="display:flex; flex-direction:column; gap:4px;">
+                        <!-- Dynamically populated by ui.ts -->
+                    </div>
+                </div>
+
+                <!-- APPEARANCE -->
+                <div class="panel-section">
+                    <div class="panel-section-header" data-section="appearance">
+                        <span class="chevron">▾</span>
+                        <span class="section-title">Appearance</span>
+                    </div>
+                    <div class="panel-section-body" data-section-body="appearance">
+                        <div class="prop-row" style="gap: 8px;">
+                            <div class="dim-input" style="flex: 1;" title="Layer Opacity">
+                                <span class="dim-label" data-scrub="opacity">
+                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="6" cy="6" r="4.5"/><path d="M6 1.5A4.5 4.5 0 0 1 6 10.5V1.5z" fill="currentColor"/></svg>
+                                </span>
+                                <input type="number" id="opacity" value="100" min="0" max="100">
+                                <span class="dim-unit">%</span>
+                            </div>
+                            <span class="header-spacer"></span>
+                            <button class="icon-toggle active" id="toggle-visible" title="Visibility"><i data-lucide="eye" style="width:14px;height:14px;"></i></button>
+                            <button class="icon-toggle" id="toggle-locked" title="Lock"><i data-lucide="lock" style="width:14px;height:14px;"></i></button>
+                        </div>
+                        <div class="prop-row">
+                            <span class="label">Blend</span>
+                            <select id="blend-mode" class="prop-select">
+                                <option value="0">Normal</option>
+                                <option value="1">Multiply</option>
+                                <option value="2">Screen</option>
+                                <option value="3">Overlay</option>
+                                <option value="4">Darken</option>
+                                <option value="5">Lighten</option>
+                                <option value="6">Color Dodge</option>
+                                <option value="7">Color Burn</option>
+                                <option value="8">Hard Light</option>
+                                <option value="9">Soft Light</option>
+                                <option value="10">Difference</option>
+                                <option value="11">Exclusion</option>
+                                <option value="12">Hue</option>
+                                <option value="13">Saturation</option>
+                                <option value="14">Color</option>
+                                <option value="15">Luminosity</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                </div><!-- #node-props -->
+
+                <!-- Shown when nothing is selected -->
+                <div id="props-empty" class="props-empty" style="display:block;">
+                    <span>Select an object to edit its properties</span>
+                </div>
+
+                <!-- Export Panel -->
+                <div class="panel-section" id="export-pane-section">
+                    <div class="panel-section-header" data-section="export">
+                        <span class="chevron">▾</span>
+                        <span class="section-title">Export</span>
+                    </div>
+                    <div class="panel-section-body" data-section-body="export">
+                        <div class="prop-row">
+                            <span class="label">Scale</span>
+                            <select id="export-pane-scale" class="prop-select" style="width: 60px; flex: 0 0 60px;">
+                                <option value="0.5">0.5×</option>
+                                <option value="1" selected>1×</option>
+                                <option value="1.5">1.5×</option>
+                                <option value="2">2×</option>
+                                <option value="3">3×</option>
+                                <option value="4">4×</option>
+                                <option value="custom">Custom…</option>
+                            </select>
+                            <span class="header-spacer"></span>
+                            <span class="label" style="margin-left: 10px;">Format</span>
+                            <select id="export-pane-format" class="prop-select" style="width: 70px; flex: 0 0 70px;">
+                                <option value="png">PNG</option>
+                                <option value="svg">SVG</option>
+                            </select>
+                        </div>
+                        <div class="prop-row" id="export-pane-size-row" style="display: none;">
+                            <span class="label">W</span>
+                            <input type="number" id="export-pane-width" class="prop-input" min="1" max="8192" step="1" style="width: 62px; flex: 0 0 62px;">
+                            <button id="export-pane-ratio-lock" class="dim-icon-btn active" title="Lock aspect ratio" style="margin: 0 4px;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                            </button>
+                            <span class="label">H</span>
+                            <input type="number" id="export-pane-height" class="prop-input" min="1" max="8192" step="1" style="width: 62px; flex: 0 0 62px;">
+                            <span class="label" style="margin-left: 4px;">px</span>
+                        </div>
+                        <div class="prop-row" id="export-pane-options-row">
+                            <span class="label">Suffix</span>
+                            <input type="text" id="export-pane-suffix" class="prop-input" placeholder="e.g. @2x" style="width: 70px; flex: 0 0 70px;">
+                            <span class="header-spacer"></span>
+                            <label class="ab-transparent" style="display: flex; align-items: center; gap: 4px; font-size: 11px;">
+                                <input type="checkbox" id="export-pane-transparent" checked style="margin: 0; accent-color: var(--accent);"> Transparent
+                            </label>
+                        </div>
+                        <div class="prop-row" style="margin-top: 8px;">
+                            <button id="export-pane-btn" class="export-pane-btn">Export selection</button>
+                        </div>
+                    </div>
+                </div>
+
+                </div><!-- .properties-scroll -->
+
+            </aside>
+        </main>
+        <!-- Context Menu -->
+        <div id="context-menu" class="context-menu"></div>
+    </div>

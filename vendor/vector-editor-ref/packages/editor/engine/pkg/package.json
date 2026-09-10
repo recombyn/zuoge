@@ -1,0 +1,18 @@
+{
+  "name": "engine",
+  "type": "module",
+  "description": "Geometry and scene-graph core for RCB vector kit, compiled to WebAssembly.",
+  "version": "1.0.0-beta.3",
+  "license": "MIT",
+  "private": true,
+  "files": [
+    "engine_bg.wasm",
+    "engine.js",
+    "engine.d.ts"
+  ],
+  "main": "engine.js",
+  "types": "engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

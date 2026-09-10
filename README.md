@@ -32,7 +32,7 @@ An open-source AI design workspace. Document-backed infinite artboard (CanvasKit
 
 ## ✨ Features
 
-🎨 **Infinite artboard** — `SceneDocument` + CanvasKit idle ink (`KitCanvasHost` / `@rcb-vector`); zoom 5%–10000%. Geometry hit-test; DOM only for caret / media / SoftGlow / path edit.
+🎨 **Infinite artboard** — `SceneDocument` + CanvasKit idle ink (`KitCanvasHost` / `@rcb-vector`). Geometry hit-test; DOM only for caret / media / SoftGlow / path edit.
 
 🤖 **Design Agent** — Streaming chat on the same canvas: plan → Skills → `tool_ops` → apply. Fixed LangGraph kernel; behavior from AgentProfile YAML, stage prompts, Skills, and the tool registry.
 

@@ -20,6 +20,7 @@ import {
   setAnimationWorkbenchTimelineFocus,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { getCanvasEngine } from '@/components/rcb/canvas/KitCanvasHost';
+import { syncKitWorkbenchIsolation } from '@/components/rcb/canvas/kitBridge';
 import {
   RCB_TIMELINE_CAMERA_FIT,
   RCB_TIMELINE_CAMERA_RELEASE,
@@ -149,11 +150,13 @@ function AnimationTimelineFocusHost({
   // document ref; re-running on each swap froze Keyframes open for large LOT plates.
   useLayoutEffect(() => {
     setAnimationWorkbenchTimelineFocus(focusFrameId);
-    getCanvasEngine()?.renderer.requestRender();
+    // Focus is module state — must push Kit visibility immediately (no doc patch).
+    syncKitWorkbenchIsolation(getCanvasEngine());
     return () => {
       // Always clear module focus when leaving an open focus (not only when
       // the next focusFrameId is already null — that skipped cleanup before).
       setAnimationWorkbenchTimelineFocus(null);
+      syncKitWorkbenchIsolation(getCanvasEngine());
     };
   }, [focusFrameId]);
 
