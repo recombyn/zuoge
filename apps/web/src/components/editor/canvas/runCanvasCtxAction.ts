@@ -102,7 +102,11 @@ export function runCanvasCtxAction(action: CtxAction, deps: RunCanvasCtxActionDe
   const ctxMenu = getCtxMenu();
 
   let ids = selectedIdsRef.current;
-  if (!ids.length && ctxMenu?.nodeId) ids = [ctxMenu.nodeId];
+  if (ctxMenu?.selectionNodeIds?.length) {
+    ids = [...ctxMenu.selectionNodeIds];
+  } else if (!ids.length && ctxMenu?.nodeId) {
+    ids = [ctxMenu.nodeId];
+  }
 
   let placeAt: { x: number; y: number } | null = null;
   if (ctxMenu && Number.isFinite(ctxMenu.sceneX) && Number.isFinite(ctxMenu.sceneY)) {
@@ -111,10 +115,13 @@ export function runCanvasCtxAction(action: CtxAction, deps: RunCanvasCtxActionDe
 
   const hitNodeId = ctxMenu?.nodeId ?? null;
   const menuFrameId = ctxMenu?.frameId || activeFrameIdRef.current;
-  // Artboards for mutations: only real selection. Soft activeFrameId must not
-  // ride in via ctxMenu.frameId when nodes are the action target (duplicate
-  // would otherwise snapshot the whole board).
-  let frameIdsForAction = selectedFrameIdsRef.current;
+  // Artboards for mutations: prefer menu snapshot (multi-select at open), then
+  // live selection. Soft activeFrameId must not ride in via ctxMenu.frameId when
+  // nodes are the action target (duplicate would otherwise snapshot the whole board).
+  let frameIdsForAction =
+    ctxMenu?.selectionFrameIds?.length
+      ? [...ctxMenu.selectionFrameIds]
+      : selectedFrameIdsRef.current;
   if (!frameIdsForAction.length && !ids.length && ctxMenu?.frameId) {
     frameIdsForAction = [String(ctxMenu.frameId)];
   }

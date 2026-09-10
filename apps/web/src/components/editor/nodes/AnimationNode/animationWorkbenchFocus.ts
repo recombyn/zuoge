@@ -16,6 +16,8 @@ export const WORKBENCH_SURROUND_ATTR = 'animationWorkbenchSurround';
 
 let timelineFocusFrameId: string | null = null;
 let timelinePlayheadSec = 0;
+/** Kit bridge registers here so focus changes push isolation without import cycles. */
+let workbenchIsolationSync: (() => void) | null = null;
 /** True while 动画工作台 plate is mid-drag (blocks ensure/sync / collab). */
 let geometryPreviewActive = false;
 /**
@@ -48,9 +50,23 @@ export function isPlayheadScenePoseBlocked(): boolean {
 }
 
 export function setAnimationWorkbenchTimelineFocus(frameId: string | null) {
-  const next = String(frameId || '').trim();
-  timelineFocusFrameId = next || null;
+  const next = String(frameId || '').trim() || null;
+  const changed = timelineFocusFrameId !== next;
+  timelineFocusFrameId = next;
   if (!timelineFocusFrameId) timelinePlayheadSec = 0;
+  // Always notify — Kit may attach after focus was already set.
+  if (changed || workbenchIsolationSync) {
+    try {
+      workbenchIsolationSync?.();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Register Kit isolation sync (avoid kitBridge ↔ focus import cycle). */
+export function registerWorkbenchIsolationSync(fn: (() => void) | null) {
+  workbenchIsolationSync = fn;
 }
 
 export function getAnimationWorkbenchTimelineFocus(): string | null {

@@ -17,7 +17,6 @@ import {
 import {
   addArtboardFrame,
   pushEditorHistory,
-  removeArtboardFrames,
   removeDocumentNodes,
   setActiveFrameId,
   setActiveTool,
@@ -112,7 +111,9 @@ import {
 } from '@/components/rcb/scene/document/nodeCapabilities';
 import {
   isAnimationWorkbenchPreviewChild,
+  registerWorkbenchIsolationSync,
   tagCreatedNodeForWorkbenchSurround,
+  getAnimationWorkbenchTimelineFocus,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { nodeSceneAabb } from '@/components/rcb/scene/layout/nodeAabb';
 import { storedOriginForSceneResult } from '@/components/rcb/scene/layout/coords';
@@ -1334,12 +1335,13 @@ function flushDeletesFromKit(scene: WasmScene, opts?: { skipHistory?: boolean })
     return;
   }
 
-  if (dropNodes.length) {
-    removeDocumentNodes({ nodeIds: dropNodes });
-  }
-  if (dropFrames.length) {
-    removeArtboardFrames(dropFrames);
-  }
+  // One mutator for nodes+frames. Splitting removeDocumentNodes(nodes) then
+  // removeArtboardFrames(frames) queued ensure for animation plates that were
+  // about to die — multi artboard Delete could resurrect / leave one board.
+  removeDocumentNodes({
+    nodeIds: dropNodes,
+    frameIds: dropFrames,
+  });
 }
 
 /** Full Kit → SceneDocument membership/geometry/style sync (creates+deletes+maps). */
@@ -2919,9 +2921,8 @@ export function syncKitWorkbenchIsolation(handle?: CanvasEngineHandle | null) {
       if (!node) continue;
       try {
         const visible = !isNodeStructurallyHiddenInDocument(doc, node);
-        if (h.scene.getNodeVisible(kitId) !== visible) {
-          h.scene.setNodeVisibleNoHistory(kitId, visible);
-        }
+        // Always write — getNodeVisible can lag after hydrate/remap.
+        h.scene.setNodeVisibleNoHistory(kitId, visible);
       } catch {
         /* ignore */
       }
@@ -2934,11 +2935,9 @@ export function syncKitWorkbenchIsolation(handle?: CanvasEngineHandle | null) {
       applyKitArtboardFromFrame(h.scene, kitId, frame);
     }
   });
-  try {
-    h.renderer.requestRender();
-  } catch {
-    /* ignore */
-  }
+  // Collapse/show plates + node visibility must re-record retained picture
+  // (requestRender alone can replay a stale scene with other-workbench strokes).
+  refreshKitArtboardClipPaint(true);
 }
 
 const imageBytesCache = new Map<string, { bytes: Uint8Array; mime: string }>();
@@ -4211,16 +4210,18 @@ function drawGeneratorEmptyFilledOnCk(
 function artboardClipPaintSig(): string {
   const doc = store.getState().editor.document as SceneDocument | null;
   if (!doc?.deltaSetLike) return '';
+  const focus = getAnimationWorkbenchTimelineFocus() || '';
   const frames = Array.isArray(doc.frames) ? doc.frames : [];
   const frameById = new Map(
     frames.map((f) => [String(f?.id || ''), f] as const).filter(([id]) => Boolean(id))
   );
-  const parts: string[] = [];
+  const parts: string[] = [`focus:${focus}`];
   for (const frame of frames) {
     const id = String(frame?.id || '').trim();
     if (!id) continue;
+    const shown = isArtboardVisibleInDocument(frame) ? 1 : 0;
     const on = frame.clipContent !== false && !frame.hidden ? 1 : 0;
-    parts.push(`f:${id}:${on}`);
+    parts.push(`f:${id}:${on}:${shown}`);
   }
   for (const rcbId of rcbToKit.keys()) {
     const node = doc.deltaSetLike[rcbId] as
@@ -4231,7 +4232,8 @@ function artboardClipPaintSig(): string {
     const frame = frameById.get(frameId);
     const on =
       frame && frame.clipContent !== false && !frame.hidden ? 1 : 0;
-    parts.push(`n:${rcbId}:${frameId}:${on}`);
+    const shown = frame && isArtboardVisibleInDocument(frame) ? 1 : 0;
+    parts.push(`n:${rcbId}:${frameId}:${on}:${shown}`);
   }
   parts.sort();
   return parts.join('|');
@@ -4277,6 +4279,16 @@ function kitNodeArtboardClipRect(
   if (!node) return null;
   const frame = findClippingFrameForNode(doc, node);
   if (!frame) return null;
+  // Timeline focus: never fall back to full plate bounds for a hidden workbench —
+  // collapsed Kit artboards (0×0) used to miss this check and unclip other plates' paths.
+  if (!isArtboardVisibleInDocument(frame)) {
+    return {
+      x: Number(frame.x) || 0,
+      y: Number(frame.y) || 0,
+      w: 0,
+      h: 0,
+    };
+  }
   // Kit artboard bounds are authoritative world space (incl. mid-drag).
   const abId = frameToKitArtboard.get(String(frame.id));
   if (abId != null) {
@@ -4552,6 +4564,11 @@ function scheduleKitMutateFlush() {
 export function attachKitBridge(handle: CanvasEngineHandle) {
   detachKitBridge();
   attached = handle;
+  registerWorkbenchIsolationSync(() => {
+    syncKitWorkbenchIsolation(handle);
+  });
+  // Apply current timeline focus (may have been set before Kit mounted).
+  syncKitWorkbenchIsolation(handle);
   handle.scene.onMutate = () => {
     scheduleKitMutateFlush();
   };
@@ -4709,6 +4726,7 @@ export function detachKitBridge() {
   stopProcessGlowAnimation();
   mutateFlushQueued = false;
   pendingCreateTool = null;
+  registerWorkbenchIsolationSync(null);
   if (attached) {
     unwrapKitHitTestForArtboardClip(attached);
     unwrapKitArtboardContainedRoots(attached);
@@ -4930,55 +4948,60 @@ export function deleteKitSelection(
   if (!requestedNodes.length && !requestedFrames.length) return false;
 
   if (requestedFrames.length) {
-    try {
-      handle.scene.engine?.clear_selection();
-    } catch {
-      /* ignore */
-    }
-    const deletedAbs = new Set<number>();
-    for (const { ab } of frameKitPairs) {
-      if (deletedAbs.has(ab)) continue;
-      const stillThere = handle.scene.getArtboards().some((a) => a.id === ab);
-      if (!stillThere) continue;
-      (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId = ab;
-      handle.input.deleteSelectedArtboard();
-      deletedAbs.add(ab);
-    }
-    // Full chrome may still point at a Kit plate even if the RCB↔Kit map was lost.
-    const danglingAb = Number(
-      (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId ?? NaN
-    );
-    if (Number.isFinite(danglingAb) && !deletedAbs.has(danglingAb)) {
-      handle.input.deleteSelectedArtboard();
-      deletedAbs.add(danglingAb);
-    }
+    withSuppress(() => {
+      try {
+        handle.scene.engine?.clear_selection();
+      } catch {
+        /* ignore */
+      }
+      const deletedAbs = new Set<number>();
+      for (const { ab } of frameKitPairs) {
+        if (deletedAbs.has(ab)) continue;
+        const stillThere = handle.scene.getArtboards().some((a) => a.id === ab);
+        if (!stillThere) continue;
+        (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId = ab;
+        handle.input.deleteSelectedArtboard();
+        deletedAbs.add(ab);
+      }
+      // Full chrome may still point at a Kit plate even if the RCB↔Kit map was lost.
+      const danglingAb = Number(
+        (handle.renderer as { selectedArtboardId?: number | null }).selectedArtboardId ?? NaN
+      );
+      if (Number.isFinite(danglingAb) && !deletedAbs.has(danglingAb)) {
+        handle.input.deleteSelectedArtboard();
+        deletedAbs.add(danglingAb);
+      }
+    });
     // Apply SceneDocument drops now (do not wait for onMutate microtask).
     try {
       flushDeletesFromKit(handle.scene);
     } catch (err) {
       console.error('[rcb/canvas] kit artboard delete flush failed', err);
     }
-    // Multi-select: plate + off-plate shapes — remove leftovers after frames.
+    // Always scrub every requested RCB frame in one shot — Kit may only map a
+    // subset (or flushDeletes may miss an unmapped animation plate).
+    const docAfterKit = store.getState().editor.document;
+    const stillFrames = requestedFrames.filter((fid) =>
+      (docAfterKit?.frames || []).some((f: { id?: string }) => String(f?.id) === fid)
+    );
     const frameSet = new Set(requestedFrames);
-    const doc = store.getState().editor.document;
-    const leftover = nodes.filter((id) => {
-      if (!rcbToKit.has(id)) return false;
+    const leftoverNodes = nodes.filter((id) => {
+      if (!docAfterKit?.deltaSetLike?.[id]) return false;
       const fid = String(
-        (doc?.deltaSetLike?.[id]?.attrs as Record<string, unknown> | undefined)?.frameId || ''
+        (docAfterKit.deltaSetLike[id]?.attrs as Record<string, unknown> | undefined)?.frameId ||
+          ''
       ).trim();
+      // Bound children of deleted plates are included via removeDocumentNodes(frameIds).
       return !fid || !frameSet.has(fid);
     });
-    if (leftover.length) {
-      removeMappedKitNodesByRcbIds(leftover);
-      try {
-        flushDeletesFromKit(handle.scene);
-      } catch {
-        /* ignore */
-      }
+    if (stillFrames.length || leftoverNodes.length) {
+      removeDocumentNodes({
+        nodeIds: leftoverNodes,
+        frameIds: stillFrames,
+      });
     }
     handle.renderer.requestRender();
-    // True when Kit removed something OR caller still has RCB frames to scrub.
-    return deletedAbs.size > 0 || requestedFrames.length > 0;
+    return true;
   }
 
   // Node delete: do not trust engine selection alone. Empty generators are often

@@ -152,13 +152,29 @@ function AnimationTimelineFocusHost({
     setAnimationWorkbenchTimelineFocus(focusFrameId);
     // Focus is module state — must push Kit visibility immediately (no doc patch).
     syncKitWorkbenchIsolation(getCanvasEngine());
+    // Engine may not be ready on first layout — retry a few frames.
+    let tries = 0;
+    let raf = 0;
+    const retry = () => {
+      if (getCanvasEngine()) {
+        syncKitWorkbenchIsolation(getCanvasEngine());
+        return;
+      }
+      if (tries++ < 24) raf = window.requestAnimationFrame(retry);
+    };
+    raf = window.requestAnimationFrame(retry);
     return () => {
-      // Always clear module focus when leaving an open focus (not only when
-      // the next focusFrameId is already null — that skipped cleanup before).
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [focusFrameId]);
+
+  // Unmount only — avoid A→B cleanup bouncing through null (briefly re-shows all Kit ink).
+  useLayoutEffect(() => {
+    return () => {
       setAnimationWorkbenchTimelineFocus(null);
       syncKitWorkbenchIsolation(getCanvasEngine());
     };
-  }, [focusFrameId]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

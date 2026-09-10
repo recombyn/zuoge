@@ -32,7 +32,6 @@ import {
   localPointToScene,
   previewShapeParamsToKit,
   scenePointToLocal,
-  setOverlayHandleSeats,
 } from './shapeHandleChrome';
 
 const DRAG_DISTANCE_SQUARED = 16;
@@ -91,14 +90,6 @@ function StarShapeHandlesOverlay({
   const [liveSides, setLiveSides] = useState<number | null>(null);
   const [liveInner, setLiveInner] = useState<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const seatOwnerId = `star:${nodeId}`;
-
-  useEffect(
-    () => () => {
-      setOverlayHandleSeats(seatOwnerId, null);
-    },
-    [seatOwnerId]
-  );
 
   const w = Math.max(1, box.width);
   const h = Math.max(1, box.height);
@@ -109,12 +100,9 @@ function StarShapeHandlesOverlay({
   const innerRatio = liveInner ?? baseInner;
   const baseRadii = clampCornerRadii(radiiFromAttrs(node?.attrs), w, h);
   const linked = isRadiusLinked(node?.attrs);
-  const baseR = Math.round(
-    linked
-      ? (baseRadii.tl + baseRadii.tr + baseRadii.br + baseRadii.bl) / 4
-      : baseRadii.tl
-  );
-  const radius = dragValue != null && activeKey === 'radius' ? dragValue : baseR;
+  const linkedAvg = (baseRadii.tl + baseRadii.tr + baseRadii.br + baseRadii.bl) / 4;
+  const baseR = Math.round(linked ? linkedAvg : baseRadii.tl);
+  const radius = activeKey === 'radius' && dragValue != null ? dragValue : baseR;
 
   const preview = (opts: { r?: number; sides?: number; inner?: number }) => {
     const r = opts.r ?? radius;
@@ -373,18 +361,6 @@ function StarShapeHandlesOverlay({
       },
     },
   ];
-
-  if (interactive && knobs.length > 0) {
-    setOverlayHandleSeats(
-      seatOwnerId,
-      knobs.map((knob) => ({
-        pickKey: `star-${knob.key}`,
-        start: (e) => knob.onDown(e as unknown as ReactPointerEvent),
-      }))
-    );
-  } else {
-    setOverlayHandleSeats(seatOwnerId, null);
-  }
 
   return (
     <>
