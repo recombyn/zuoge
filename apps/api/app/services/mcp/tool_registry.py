@@ -13,6 +13,7 @@ from app.services.llm.design_tools import (
     _parameters_from_pydantic,
     pydantic_model_from_args_schema,
 )
+from app.services.mcp.apply_headless import HEADLESS_OP_NAMES
 
 _META_READ = frozenset({"get_scene_summary", "list_nodes", "list_frames"})
 _META_BATCH = frozenset({"apply_tool_ops"})
@@ -26,22 +27,36 @@ def _load_canvas_tools_yaml() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-@lru_cache(maxsize=1)
-def live_only_tool_names() -> frozenset[str]:
+def _yaml_force_live_only() -> frozenset[str]:
     cfg = _load_canvas_tools_yaml()
     raw = cfg.get("live_only")
     if isinstance(raw, list):
         return frozenset(str(x).strip() for x in raw if str(x or "").strip())
-    return frozenset(
-        {
-            "set_viewport",
-            "set_active_tool",
-            "set_grid",
-            "export_canvas",
-            "image_process",
-            "outline_text",
-        }
-    )
+    return frozenset()
+
+
+@lru_cache(maxsize=1)
+def headless_tool_names() -> frozenset[str]:
+    """Ops the API can patch into the project document without an open editor."""
+    return frozenset(HEADLESS_OP_NAMES)
+
+
+@lru_cache(maxsize=1)
+def live_only_tool_names() -> frozenset[str]:
+    """
+    Write ops that must run in a live editor (FE designTools).
+
+    Auto: every exposed canvas op_key minus headless-capable names.
+    Plus any names listed under YAML `live_only` (force list).
+    """
+    names: set[str] = set(_yaml_force_live_only())
+    for row in default_canvas_actions():
+        key = str(row.get("op_key") or "").strip()
+        if key and key not in HEADLESS_OP_NAMES:
+            names.add(key)
+    # Never treat meta tools as live-only writes.
+    names -= _META_READ | _META_BATCH
+    return frozenset(names)
 
 
 def live_session_ttl_sec() -> int:
@@ -62,6 +77,10 @@ def max_ops_per_call() -> int:
 
 def is_live_only_tool(name: str) -> bool:
     return str(name or "").strip() in live_only_tool_names()
+
+
+def is_headless_tool(name: str) -> bool:
+    return str(name or "").strip() in headless_tool_names()
 
 
 def is_canvas_write_tool(name: str) -> bool:
@@ -103,6 +122,13 @@ def exposed_tool_names() -> frozenset[str]:
     return frozenset(names)
 
 
+def clear_mcp_tool_caches() -> None:
+    """Test helper — drop lru caches after YAML / seed changes."""
+    exposed_tool_names.cache_clear()
+    live_only_tool_names.cache_clear()
+    headless_tool_names.cache_clear()
+
+
 def _meta_tool_defs() -> list[dict[str, Any]]:
     return [
         _openai_fn_def(
@@ -137,7 +163,8 @@ def _meta_tool_defs() -> list[dict[str, Any]]:
         ),
         _openai_fn_def(
             "apply_tool_ops",
-            "Apply a batch of canvas tool_ops after server-side validation.",
+            "Apply a batch of canvas tool_ops after server-side validation. "
+            "Basic create/update/delete/frame ops apply headless; others need a live editor.",
             {
                 "type": "object",
                 "properties": {
@@ -185,6 +212,8 @@ def list_mcp_tool_definitions() -> list[dict[str, Any]]:
         hint = str(row.get("model_hint") or row.get("label") or key).strip()
         if is_live_only_tool(key):
             hint = f"[live editor] {hint}"
+        else:
+            hint = f"[headless ok] {hint}"
         model = pydantic_model_from_args_schema(key, row.get("args_schema"))
         params = _parameters_from_pydantic(model)
         props = dict(params.get("properties") or {})

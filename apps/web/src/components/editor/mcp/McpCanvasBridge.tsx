@@ -1,7 +1,7 @@
 /**
  * Live editor bridge for MCP canvas control:
- * - heartbeat � server routes ops to live queue (full designTools parity)
- * - pending batches ? applyAgentToolOps (same stagger + canvas lock as Design Agent)
+ * - heartbeat → server routes ops to live queue (full designTools parity)
+ * - pending batches → applyAgentToolOps (same stagger + canvas lock as Design Agent)
  * - revision reload when headless writes land
  */
 import { useCallback, useEffect, useRef } from 'react';

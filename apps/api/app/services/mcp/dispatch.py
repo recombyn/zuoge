@@ -69,10 +69,13 @@ def _persist_ops(user_id: str, project_id: str, ops: list[dict[str, Any]]) -> di
     doc = _project_document(row)
     validated = _validate_ops_for_document(doc, ops)
     live = has_live_session(project_id)
-    live_only = [o for o in validated if is_live_only_tool(str(o.get("name") or ""))]
-    headless_candidates = [o for o in validated if not is_live_only_tool(str(o.get("name") or ""))]
+    live_required = [o for o in validated if is_live_only_tool(str(o.get("name") or ""))]
+    headless_ok = [o for o in validated if not is_live_only_tool(str(o.get("name") or ""))]
+    op_summaries = [{"name": o.get("name"), "args": o.get("args")} for o in validated]
+    live_names = [str(o.get("name") or "") for o in live_required]
 
-    if live or live_only:
+    # Open editor: full designTools parity via FE bridge.
+    if live:
         batch_id = publish_pending_ops(project_id, validated)
         return {
             "status": "queued_live",
@@ -80,24 +83,34 @@ def _persist_ops(user_id: str, project_id: str, ops: list[dict[str, Any]]) -> di
             "queued": len(validated),
             "batchId": batch_id,
             "revision": project_revision(row),
-            "liveOnly": [o.get("name") for o in live_only],
-            "ops": [{"name": o.get("name"), "args": o.get("args")} for o in validated],
+            "liveOnly": live_names,
+            "ops": op_summaries,
         }
 
-    patch = ops_to_document_patch(doc, headless_candidates)
+    # No editor: never silently drop live-only ops — queue until the project opens.
+    if live_required:
+        batch_id = publish_pending_ops(project_id, validated)
+        return {
+            "status": "queued_offline",
+            "applied": 0,
+            "queued": len(validated),
+            "batchId": batch_id,
+            "revision": project_revision(row),
+            "message": (
+                "Some ops require a live editor session. "
+                "Open this project in the web editor to apply "
+                f"({', '.join(sorted({n for n in live_names if n})[:8])})."
+            ),
+            "liveOnly": live_names,
+            "ops": op_summaries,
+        }
+
+    patch = ops_to_document_patch(doc, headless_ok)
     if not patch:
-        if live_only:
-            batch_id = publish_pending_ops(project_id, validated)
-            return {
-                "status": "queued_offline",
-                "applied": 0,
-                "queued": len(validated),
-                "batchId": batch_id,
-                "revision": project_revision(row),
-                "message": "Some ops require a live editor session",
-                "ops": [{"name": o.get("name"), "args": o.get("args")} for o in validated],
-            }
-        raise McpCanvasError("ops produced no document changes", code="empty_patch")
+        raise McpCanvasError(
+            "ops produced no document changes (check node ids / args)",
+            code="empty_patch",
+        )
 
     schema_errors = validate_headless_patch(patch)
     if schema_errors:
@@ -128,10 +141,10 @@ def _persist_ops(user_id: str, project_id: str, ops: list[dict[str, Any]]) -> di
     publish_project_revision(project_id, rev)
     return {
         "status": "applied_headless",
-        "applied": len(headless_candidates),
+        "applied": len(headless_ok),
         "queued": 0,
         "revision": rev,
-        "ops": [{"name": o.get("name"), "args": o.get("args")} for o in headless_candidates],
+        "ops": [{"name": o.get("name"), "args": o.get("args")} for o in headless_ok],
     }
 
 

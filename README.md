@@ -173,8 +173,9 @@ RECOMBYN_TOKEN = "<token>"
 RECOMBYN_PROJECT_ID = "<project-id>"
 ```
 
-**Live** — editor open; ops apply in the browser.  
-**Headless** — editor closed; API patches the project document.
+**Live** — editor open; ops apply in the browser (`queued_live`).  
+**Headless** — editor closed; basic create/update/delete/frame ops patch the document (`applied_headless`).  
+**Offline queue** — editor closed + live-only ops (boolean/align/…); batch waits until the project is opened (`queued_offline`, never silently dropped).
 
 Details: [docs/mcp-canvas.md](docs/mcp-canvas.md).
 

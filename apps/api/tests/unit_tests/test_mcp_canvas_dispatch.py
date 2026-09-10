@@ -9,6 +9,7 @@ from app.services.mcp.apply_headless import ops_to_document_patch
 from app.services.mcp.dispatch import McpCanvasError, call_mcp_canvas_tool
 from app.services.mcp.scene import scene_frames_from_document, scene_nodes_from_document, summarize_scene
 from app.services.mcp.tool_registry import (
+    clear_mcp_tool_caches,
     exposed_tool_names,
     is_canvas_write_tool,
     is_live_only_tool,
@@ -26,9 +27,9 @@ def _empty_doc() -> dict:
 
 @pytest.fixture(autouse=True)
 def _clear_tool_registry_cache():
-    exposed_tool_names.cache_clear()
+    clear_mcp_tool_caches()
     yield
-    exposed_tool_names.cache_clear()
+    clear_mcp_tool_caches()
 
 
 def test_expose_all_canvas_ops_in_registry():
@@ -45,7 +46,11 @@ def test_expose_all_canvas_ops_in_registry():
 def test_live_only_tools_flagged():
     assert is_live_only_tool("set_viewport")
     assert is_live_only_tool("image_process")
+    assert is_live_only_tool("boolean_op")
+    assert is_live_only_tool("align_nodes")
     assert not is_live_only_tool("create_shape")
+    assert not is_live_only_tool("create_text")
+    assert not is_live_only_tool("update_node")
     assert is_canvas_write_tool("update_node")
     assert not is_canvas_write_tool("get_scene_summary")
 
@@ -189,6 +194,24 @@ def test_ops_to_document_patch_skips_live_only():
     doc = _empty_doc()
     patch = ops_to_document_patch(doc, [{"name": "set_viewport", "args": {"action": "fit"}}])
     assert patch == {}
+    patch2 = ops_to_document_patch(
+        doc,
+        [
+            {"name": "boolean_op", "args": {"op": "unite", "nodeIds": ["a", "b"]}},
+            {
+                "name": "create_shape",
+                "args": {
+                    "shapeType": "rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 10,
+                    "height": 10,
+                    "fill": "#000",
+                },
+            },
+        ],
+    )
+    assert patch2.get("upsertNodes")
 
 
 def test_summarize_scene_empty():
@@ -290,6 +313,60 @@ def test_call_requires_project_id():
     assert exc.value.code == "bad_request"
 
 
+@patch("app.services.mcp.dispatch.has_live_session", return_value=False)
+@patch("app.services.mcp.dispatch.publish_pending_ops", return_value="batch-off")
+@patch("app.services.mcp.dispatch.load_writable_project")
+def test_call_live_only_op_queues_offline(mock_load, mock_pending, _live):
+    mock_load.return_value = {"id": "p1", "revision": 2, "document": _empty_doc()}
+    out = call_mcp_canvas_tool(
+        user_id="u1",
+        tool="boolean_op",
+        arguments={
+            "project_id": "p1",
+            "op": "unite",
+            "nodeIds": ["n1", "n2"],
+        },
+    )
+    assert out["status"] == "queued_offline"
+    assert out["batchId"] == "batch-off"
+    assert "boolean_op" in (out.get("liveOnly") or [])
+    mock_pending.assert_called_once()
+
+
+@patch("app.services.mcp.dispatch.has_live_session", return_value=False)
+@patch("app.services.mcp.dispatch.publish_pending_ops", return_value="batch-mix")
+@patch("app.services.mcp.dispatch.project_store.patch_project")
+@patch("app.services.mcp.dispatch.load_writable_project")
+def test_mixed_batch_with_live_only_queues_all_offline(
+    mock_load, mock_patch, mock_pending, _live
+):
+    mock_load.return_value = {"id": "p1", "revision": 2, "document": _empty_doc()}
+    out = call_mcp_canvas_tool(
+        user_id="u1",
+        tool="apply_tool_ops",
+        arguments={
+            "project_id": "p1",
+            "ops": [
+                {
+                    "name": "create_shape",
+                    "args": {
+                        "shapeType": "rect",
+                        "x": 0,
+                        "y": 0,
+                        "width": 40,
+                        "height": 40,
+                        "fill": "#000",
+                    },
+                },
+                {"name": "align_nodes", "args": {"nodeIds": ["a", "b"], "align": "left"}},
+            ],
+        },
+    )
+    assert out["status"] == "queued_offline"
+    mock_pending.assert_called_once()
+    mock_patch.assert_not_called()
+
+
 @patch("app.core.config.settings")
 def test_mcp_agent_tools_when_disabled(mock_settings):
     mock_settings.mcp_canvas_enabled = False
@@ -306,4 +383,10 @@ def test_mcp_agent_tools_when_enabled(mock_settings):
     tools = mcp_canvas_langchain_tools(user_id="u1", project_id="p1")
     names = {getattr(t, "name", "") for t in tools}
     assert "canvas_get_scene_summary" in names
+    assert "canvas_list_nodes" in names
+    assert "canvas_list_frames" in names
     assert "canvas_apply_tool_ops" in names
+    assert "canvas_create_shape" in names
+    assert "canvas_create_text" in names
+    assert "canvas_update_node" in names
+    assert "canvas_delete_nodes" in names
