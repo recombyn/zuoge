@@ -88,7 +88,7 @@ function restoreDocumentGeometry(
   const top = abs.top;
   const width = Math.max(1, Number(node.width) || 1);
   const height = Math.max(1, Number(node.height) || 1);
-  // Drop TransformPreview first so SoA snaps to document without a publish flash.
+  // Drop TransformPreview first so ink snaps to document without a publish flash.
   clearNodeTransformPreviews([sceneNodeId]);
   const el = nodeEls.get(sceneNodeId) as any;
   if (el) {

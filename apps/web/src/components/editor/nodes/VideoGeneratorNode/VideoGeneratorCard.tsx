@@ -53,9 +53,9 @@ import ModelPickerPanel, {
   ModelBrandIcon,
 } from '@/components/editor/panels/agent/models/ModelPickerPanel';
 import {
-  flyPickIntoComposer,
   attachSelectionToComposer,
   pickOrAttachFromCanvas,
+  usePendingCanvasAttachFly,
 } from '@/components/editor/nodes/shared/composerCanvasAttach';
 import { readGenAttrString, readGenAttrDuration } from '@/components/editor/nodes/shared/generatorAttrs';
 import {
@@ -75,7 +75,6 @@ import {
 import {
   clearCanvasAttachPick,
   closeImageToolPanel,
-  consumePendingCanvasAttach,
   consumePendingVideoGenMarkContexts,
   finishVideoGenerator,
   openImageToolPanel,
@@ -225,27 +224,18 @@ function VideoGeneratorCard({
     mentionIx,
   } = useComposerMentionPanel(inputRef);
 
-  useEffect(() => {
-    if (!pendingCanvasAttach || pendingCanvasAttach.target !== pickTarget) return;
-    const payload = pendingCanvasAttach.payload;
-    consumePendingCanvasAttach();
-    const doc = editorDocument || (store.getState() as any).editor?.document;
-    async function flyPendingAttach() {
-      await flyPickIntoComposer({
-        landId: pickTarget,
-        document: doc,
-        payload,
-        existing: contextsRef.current,
-        setContexts,
-        imagesOnly: false,
-        insertChip: (ctx) => {
-          inputRef.current?.insertContextAtCaret(ctx);
-          inputRef.current?.focus();
-        },
-      });
-    }
-    flyPendingAttach();
-  }, [pendingCanvasAttach, pickTarget, editorDocument]);
+  usePendingCanvasAttachFly({
+    pickTarget,
+    pending: pendingCanvasAttach,
+    document: editorDocument || (store.getState() as any).editor?.document,
+    contextsRef,
+    setContexts,
+    imagesOnly: false,
+    insertChip: (ctx) => {
+      inputRef.current?.insertContextAtCaret(ctx);
+      inputRef.current?.focus();
+    },
+  });
 
   // Re-hydrate after overlay remount (e.g. geometry transform hides the portal).
   useEffect(() => {

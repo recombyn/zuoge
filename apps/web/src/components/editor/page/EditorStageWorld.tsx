@@ -43,7 +43,7 @@ import FrameContextToolbar from '@/components/editor/nodes/FrameNode/FrameContex
 import FrameMultiSelectionToolbar from '@/components/editor/nodes/FrameNode/FrameMultiSelectionToolbar';
 import type { ArtboardFrame } from '@/components/rcb/frames/types';
 import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
-import { useKitSelectionDockAabb } from '@/components/rcb/selection/useKitSelectionDockAabb';
+import { useKitSelectionDockAabb, useKitSelectionMoveActive } from '@/components/rcb/selection/useKitSelectionDockAabb';
 import type { FillPanelValue } from '@/components/editor/panels/FillPanel';
 import {
   selectionPaintZIndex,
@@ -703,6 +703,8 @@ function EditorStageWorld({
   const kitDockAabb = useKitSelectionDockAabb(selectedNodeIds, selectedFrameIds);
   // Same Kit AABB as node toolbars — keeps frame chrome aligned after select/reconcile.
   const selectedFrameBox = kitDockAabb ?? selectedFrameBoxDoc;
+  // Kit artboard drag does not set HTML movingFrameIds — mirror node-move hide.
+  const kitArtboardOrNodeMoving = useKitSelectionMoveActive();
 
   /** Plates whose bound children own selection chrome — idle hairline kept; soft edge via activeFrameId. */
   const framesWithBoundChildSelection = useMemo(() => {
@@ -740,7 +742,8 @@ function EditorStageWorld({
     (selectedNodeIds.length === 0 || selectedFrames.length > 1) &&
     Boolean(selectedFrameBox) &&
     !selectedFrames.some((frame) => movingFrameIdSet.has(frame.id)) &&
-    !selectionTransforming;
+    !selectionTransforming &&
+    !kitArtboardOrNodeMoving;
   const showMultiFrameToolbar = showFrameToolbar && selectedFrames.length > 1;
   const aiNodeBox = aiOperationState?.active ? aiNodeWorldBox(document, aiOperationState.nodeId)  : null;
   const aiNodeCaption = aiOperationState?.label || undefined;
@@ -827,8 +830,12 @@ function EditorStageWorld({
           getPreviewDocumentRef={getPreviewDocumentRef}
           frameGestureActiveRef={frameGestureActiveRef}
           resetFrameGestureRef={resetFrameGestureRef}
-          frameGestureActive={movingFrameIds.length > 0 || selectionTransforming}
-          suppressChromeWhileFrameMoving={movingFrameIds.length > 0}
+          frameGestureActive={
+            movingFrameIds.length > 0 || selectionTransforming || kitArtboardOrNodeMoving
+          }
+          suppressChromeWhileFrameMoving={
+            movingFrameIds.length > 0 || kitArtboardOrNodeMoving
+          }
           embedded
           stageEl={stageEl}
           onOpenAgent={onOpenAgent}

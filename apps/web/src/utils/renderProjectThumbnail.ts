@@ -147,9 +147,9 @@ export function extractElementCoverDocument(document: unknown, nodeId: string): 
 
   const w = Math.max(1, num(node.width, 1));
   const h = Math.max(1, num(node.height, 1));
-  const pad = Math.max(12, Math.round(Math.max(w, h) * 0.08));
-  const boardW = Math.max(32, Math.round(w + pad * 2));
-  const boardH = Math.max(32, Math.round(h + pad * 2));
+  // Edge-to-edge — list cards object-cover; no letterbox margin around the element.
+  const boardW = Math.max(32, Math.round(w));
+  const boardH = Math.max(32, Math.round(h));
   const id = String(nodeId);
 
   return {
@@ -172,8 +172,8 @@ export function extractElementCoverDocument(document: unknown, nodeId: string): 
       [id]: {
         ...node,
         id,
-        x: pad,
-        y: pad,
+        x: 0,
+        y: 0,
         width: w,
         height: h,
       },

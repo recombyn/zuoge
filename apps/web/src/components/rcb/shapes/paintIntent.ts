@@ -37,8 +37,11 @@ export function resolvePaintIntent(
   if (isEmptyGeneratorPlate(node)) {
     return { kind: 'kit' };
   }
-  // Upload / remove-bg / 图片分层 — Kit paints SoftGlow in node local space;
-  // status pill stays React (NodeProcessGlow / ProcessGlowShell).
+  // Upload / remove-bg / 图片分层 — Kit SoftGlow (same for video/audio as images).
+  // Do not mount HTML decoder FO while processStatus is running.
+  if (String(node.attrs?.processStatus || '') === 'running') {
+    return { kind: 'kit' };
+  }
   if (key === 'lottie' || key === 'group') {
     return { kind: 'dom-host', reason: key };
   }

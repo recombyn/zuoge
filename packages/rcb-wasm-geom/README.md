@@ -7,7 +7,7 @@ RCB vector geometry kernel (Rust → WASM). Loaded by `apps/web/.../vector/wasmG
 | Export | Role |
 |--------|------|
 | `densify_path_d` | Path → polyline |
-| `tessellate_fill` / `_with_holes` / `_stroke` / `_batch_fill` | Mesh for SoA ink |
+| `tessellate_fill` / `_with_holes` / `_stroke` / `_batch_fill` | Mesh helpers (export / offline; not product Kit ink) |
 | `boolean_polygons` | Union / difference / intersection / xor (`i_overlay`) |
 | `offset_polyline` | Stroke centerline → filled outline |
 | `simplify_rdp` / `simplify_rdp_closed` | Ramer–Douglas–Peucker |

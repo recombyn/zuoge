@@ -53,7 +53,7 @@ import {
 } from '../canvasBulkOpLoading';
 import i18n from '@/i18n';
 
-/** Multi-select chrome + SoA in one sync commit froze 64× paste at 2k+. */
+/** Multi-select chrome + Kit mirror in one sync commit froze 64× paste at 2k+. */
 const DEFER_PASTE_SELECTION_AT = 24;
 
 /** Coalesce dock wakes across rapid Ctrl+V — LayerPanel rebuild must not stack. */

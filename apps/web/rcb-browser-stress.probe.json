@@ -2,7 +2,7 @@
   "generatedAt": "2026-09-06T03:33:46.053Z",
   "ua": "Cursor/Electron Chromium",
   "dpr": 1,
-  "note": "Browser Canvas2D homogeneous paint + viewport cull (proxy for SoA idle ink).",
+  "note": "Browser Canvas2D homogeneous paint + viewport cull (proxy for Kit idle ink).",
   "rows": [
     {"kind":"rect","n":1000,"frameMs":1.36,"fps":732.6,"drawnAvg":0},
     {"kind":"rect","n":5000,"frameMs":0.37,"fps":2739.7,"drawnAvg":840},

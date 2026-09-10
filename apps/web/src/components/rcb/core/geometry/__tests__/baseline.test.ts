@@ -81,6 +81,32 @@ describe('ellipseArcPercentFromPointerAngle', () => {
   });
 });
 
+describe('stabilizeEllipseArcPercentDrag', () => {
+  it('pins near-zero shrinks that wrap across the start seam to the min wedge', async () => {
+    const { stabilizeEllipseArcPercentDrag, MIN_ELLIPSE_ARC_PERCENT } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    // Dragging 9.6% → 0%: a pointer past the start ray would report ~99%.
+    expect(stabilizeEllipseArcPercentDrag(9.6, 99.2, 9.6)).toBe(MIN_ELLIPSE_ARC_PERCENT);
+    expect(stabilizeEllipseArcPercentDrag(1.2, 98.5, 9.6)).toBe(MIN_ELLIPSE_ARC_PERCENT);
+  });
+
+  it('keeps a closed ring full until the pointer clearly leaves the seam', async () => {
+    const { stabilizeEllipseArcPercentDrag } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    expect(stabilizeEllipseArcPercentDrag(100, 1.5, 100)).toBe(100);
+    expect(stabilizeEllipseArcPercentDrag(100, 8, 100)).toBeCloseTo(8, 5);
+  });
+
+  it('pins near-full expands that wrap to min back to 100%', async () => {
+    const { stabilizeEllipseArcPercentDrag } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    expect(stabilizeEllipseArcPercentDrag(96, 1.2, 80)).toBe(100);
+  });
+});
+
 describe('advanceEllipseArcAlong', () => {
   it('uses one continuous direction and never wraps a full circle to the other opening side', async () => {
     const { advanceEllipseArcAlong, ellipseArcPercentFromAlongRad } = await import(

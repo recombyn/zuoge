@@ -1,13 +1,13 @@
 # ADR 0027: Scene + camera + layered render + independent hit
 
-- **Status:** Accepted (paint path **partially superseded**)
+- **Status:** Accepted
 - **Date:** 2026-08-15
-- **Updated:** 2026-09-07 — **Retired product SoA buffer + world/artboard WebGL mesh ink.** Stage mounts CanvasKit via `rcb/canvas/KitCanvasHost` + `mountCore` (`@rcb-vector`). Authoring still commits `SceneDocument` through RCB draw features; Kit is underlayer (`pointer-events: none`) until scene sync lands. See [canvas-architecture.md](../canvas-architecture.md). Prior: 2026-09-06 plate-bound selection/reveal; 2026-09-05 ArtboardLayer WebGL blit; 2026-09-04 artboard small canvas + world WebGL unbound-only.
+- **Updated:** 2026-09-10 — Product idle ink is **CanvasKit** (`KitCanvasHost` / `mountCore` / `kitBridge`). Authoring commits `SceneDocument` through RCB draw features; Kit mirrors geometry, style, and selection. See [canvas-architecture.md](../canvas-architecture.md).
 - **Supersedes (partial):** [ADR 0002](./0002-canvas-rcb-runtime.md) runtime paint/hit coupling — RCB ownership stays; SVG is no longer the editor runtime fact layer.
 
 ## Context
 
-RCB already owns `SceneDocument`, camera math (`rcb/core/math.ts`), and `SceneSpatialRuntime`. Live editing previously coupled **paint, hit-testing, and selection chrome** through SVG/DOM:
+RCB already owns `SceneDocument` and camera math (`rcb/core/math.ts`). Live editing previously coupled **paint, hit-testing, and selection chrome** through SVG/DOM:
 
 - One world layer drove SVG + HTML via CSS `translate + scale`.
 - Selection chrome / path handles mirrored host `viewBox` and used `1/zoom` counter-scale.
@@ -24,45 +24,36 @@ Treat the editor runtime as four facts (**this is the product architecture — d
 3. **Layered render** — paint order is:
 
    ```text
-   grid (Canvas2D) → Kit (CanvasKit underlayer) → stack by stackOrder (plates + FO hosts) → chrome
+   grid (optional) → Kit (CanvasKit underlayer) → stack by stackOrder (plates + FO hosts) → chrome
    ```
 
-   - **Kit / CanvasKit** (`KitCanvasHost` / `mountCore`) is the product idle vector surface. Do **not** restore SoA typed-array buffers, world WebGL instancing, or `artboardInkSurface` WebGL blit.
-   - **DOM hosts** for FO media, SoftGlow, editors, lottie/group, heavy paths, and stack promotion above plates.
-   - **Grid** stays on a separate Canvas2D surface. Selection, guides, and drawing previews share the camera surface; screen UI stays in the HTML overlay.
-   - SoftGlow/editors use `RenderDemotionScheduler` (`ACTIVE_SVG` → `CANDIDATE` → `DEPLOYED_IDLE`).
-   - **Forbidden:** reintroducing `sceneRenderBuffer` / `webglSceneRenderer` / artboard WebGL ink as the product path.
+   - **Kit / CanvasKit** (`KitCanvasHost` / `mountCore` / `kitBridge`) is the product idle vector surface.
+   - **DOM hosts** for FO media, SoftGlow, editors, lottie/group, and stack promotion above plates.
+   - Selection, guides, and drawing previews share the camera surface; screen UI stays in the HTML overlay.
+   - **Forbidden:** reintroducing typed-array bake buffers, world WebGL instancing, or artboard WebGL ink as the product path.
 
-4. **Independent hit** — root pointer capture → chrome hit → **one** `SceneSpatialRuntime` QT (`searchPoint`, nodes + `frame:id` plates) → permanent `stackOrder` top-first → first precise geometry or plate AABB (`hitTestUnifiedStackAtPoint`). Frame picks return `__frame__:id`. `sceneToSvg` stays an **export** path, not the live paint core.
+4. **Independent hit** — root pointer capture → chrome seats → Kit / plate AABB pick. `sceneToSvg` stays an **export** path, not the live paint core.
 
-SVG is not the editor runtime fact layer. Fact layer = `SceneDocument` + `CameraTransform` + `SceneSpatialRuntime`. Demotion host-release uses one shared wake over `lastActive` timestamps; TransformPreview uses dirty AABB + live filter + threshold rebuild (not per-frame QT upsert).
-
+SVG is not the editor runtime fact layer. Fact layer = `SceneDocument` + `CameraTransform` + Kit scene.
 ### Product layers (current)
 
 | # | Layer | Role |
 |---|--------|------|
-| 1 | Kit underlayer | CanvasKit idle vector surface |
-| 2 | Demotion + host viewport cull | DOM budget; who stays SVG host |
-| 3 | Stack plates + FO hosts | Artboards + media/editors by `stackOrder` |
-| 4 | Grid Canvas2D | Pixel grid only |
-| 5 | Hit QT (`SceneQuadtree`) | Broad-phase for pick / cull |
-| 6 | RCB draw tools | Authoring → SceneDocument |
-| 7 | Export SVG | `sceneToSvg` / raster export |
-
-### Historical (retired 2026-09-07)
-
-Former default-on path used `sceneRenderBuffer`, `webglSceneRenderer`, `soaBakeLayer`, and `artboardInkSurface`. Those files are deleted. Do not implement new work against that stack.
+| 1 | Kit underlayer | CanvasKit idle vector surface + `kitBridge` mirror |
+| 2 | Stack plates + FO hosts | Artboards + media/editors by `stackOrder` |
+| 3 | Grid (optional) | Pixel lattice when zoomed in |
+| 4 | RCB draw tools | Authoring → SceneDocument |
+| 5 | Export SVG | `sceneToSvg` / Kit raster export |
 
 ## Consequences
 
-- Authoring remains SceneDocument-first until Kit scene sync is productized.
-- Density / sharpness targets move with CanvasKit, not SoA mesh restamp.
-- Prefer [canvas-architecture.md](../canvas-architecture.md) for the live map; older paragraphs in sibling docs that still say “SoA canvas ink” are stale.
+- Kit ↔ document mirror (`kitBridge`) is the live sync path for vectors; FO hosts stay document-first.
+- Density / sharpness targets move with CanvasKit.
+- Prefer [canvas-architecture.md](../canvas-architecture.md) for the live map.
 
 ## References
 
 - `apps/web/src/components/rcb/canvas/KitCanvasHost.tsx`
 - `apps/web/src/components/rcb/canvas/mountCore.ts`
-- `apps/web/src/components/rcb/render/sceneRenderer.ts`
-- `apps/web/src/components/rcb/core/spatialIndex.ts` / `sceneQuadtree.ts`
+- `apps/web/src/components/rcb/canvas/kitBridge.ts`
 - [canvas-architecture.md](../canvas-architecture.md)

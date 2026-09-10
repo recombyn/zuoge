@@ -122,6 +122,12 @@ export default function KitCanvasHost({
       ? String(s.editor.document.activeFrameId)
       : ''
   );
+  const canvasAttachPick = useSelector(
+    (s: RootState) => s.editor.canvasAttachPick as null | { target: string }
+  );
+  const canvasAttachPickBlocked = useSelector((s: RootState) =>
+    Boolean(s.editor.canvasAttachPickBlocked)
+  );
   const bucketFill = useSelector((s: RootState) => s.editor.bucketFill);
 
   useEffect(() => {
@@ -183,7 +189,12 @@ export default function KitCanvasHost({
     // Always resolve from the store (shape flyout → shapeKind). Do not trust the
     // `activeTool` prop alone — it can lag Kit one-shot revert and leave
     // renderSelectionOverlay gated off for ellipses.
-    sharedHandle?.setTool(resolveEngineTool(storeActiveTool, storeShapeKind));
+    const handle = sharedHandle;
+    if (!handle) return;
+    // Path-edit subtools (pen / curve / add-anchor) arm Kit directly while the
+    // product store stays on `direct` for chrome — don't echo store over them.
+    if (handle.input?.editingNodeId != null) return;
+    handle.setTool(resolveEngineTool(storeActiveTool, storeShapeKind));
   }, [storeActiveTool, storeShapeKind]);
 
   useEffect(() => {
@@ -337,6 +348,22 @@ export default function KitCanvasHost({
     syncKitArtboardChromeHighlight(handle);
     handle.renderer.requestRender();
   }, [engineReady, frameChromeMode, activeFrameId, selectedFrameIds]);
+
+  // Seed / clear Kit canvas cursor for「从画布选择」(InputManager otherwise owns it).
+  useEffect(() => {
+    const handle = engineRef.current ?? sharedHandle;
+    const canvas = handle?.input?.canvas as HTMLElement | null | undefined;
+    if (!handle || !canvas || !engineReady) return;
+    if (canvasAttachPick?.target) {
+      canvas.style.cursor = canvasAttachPickBlocked ? 'not-allowed' : 'copy';
+      return;
+    }
+    try {
+      handle.ui.applyToolCursor();
+    } catch {
+      /* optional */
+    }
+  }, [engineReady, canvasAttachPick, canvasAttachPickBlocked]);
 
   // Kit artboard drag: Kit bounds move every frame while inGesture skips flush —
   // mirror into RCB live plate geom so DomHost / clips track.

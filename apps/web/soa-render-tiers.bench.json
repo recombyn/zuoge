@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-09-06T03:27:40.511Z",
-  "note": "1M light shapes: use SoA bake tiles + pick (not 1M SVG hosts / editable layers).",
+  "note": "1M light shapes: Kit / CanvasKit idle density (not 1M SVG hosts).",
   "bakeThresholdDefault": 800,
   "tiers": [
     {

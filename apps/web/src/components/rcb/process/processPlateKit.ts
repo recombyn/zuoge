@@ -1,6 +1,6 @@
 /**
  * Kit-native process plate (SoftGlow) — painted in the node's world AABB
- * via CanvasKit soft circles (no DomHost translate; no radial-shader color traps).
+ * via CanvasKit radial-gradient blooms (diffuse wash, matching SoftGlowSurface).
  */
 import {
   resolveProcessPlatePalette,
@@ -111,6 +111,19 @@ type CkApi = {
   LTRBRect?: (l: number, t: number, r: number, b: number) => unknown;
   XYWHRect?: (x: number, y: number, w: number, h: number) => unknown;
   ClipOp?: { Intersect: unknown };
+  TileMode?: { Clamp: unknown; Repeat: unknown; Mirror: unknown };
+  Shader?: {
+    MakeRadialGradient?: (
+      center: [number, number],
+      radius: number,
+      colors: unknown[],
+      pos: number[] | null,
+      mode: unknown,
+      localMatrix?: unknown,
+      flags?: number,
+      startAngle?: number
+    ) => { delete?: () => void } | null;
+  };
 };
 
 function ckColor(
@@ -132,8 +145,8 @@ function plateRect(ck: CkApi, w: number, h: number): unknown {
 }
 
 /**
- * Soft bloom via concentric circles (no MakeRadialGradient — avoids black /
- * opaque shader failures on some CanvasKit color paths).
+ * Soft bloom via CanvasKit radial gradient (diffuse wash — not concentric rings).
+ * Matches SVG / canvas2d SoftGlow: center pastel → transparent edge.
  */
 function paintSoftBloom(
   c: CkCanvas,
@@ -149,27 +162,42 @@ function paintSoftBloom(
 ): void {
   const cx = cxPct * w;
   const cy = cyPct * h;
-  const radius = rPct * Math.max(w, h);
+  const radius = Math.max(1, rPct * Math.max(w, h));
   const core = parseRgbTriplet(rgb);
   paint.setStyle(ck.PaintStyle.Fill);
   paint.setAntiAlias(true);
   paint.setShader?.(null);
 
-  if (typeof c.drawCircle === 'function') {
-    const rings = 10;
-    for (let i = rings - 1; i >= 0; i -= 1) {
-      const t = i / (rings - 1);
-      const rr = Math.max(1, radius * (0.12 + 0.88 * t));
-      // Quadratic falloff — soft center, transparent edge.
-      const a = alpha * (1 - t) * (1 - t);
-      if (a < 0.01) continue;
-      paint.setColor(ckColor(ck, core.r, core.g, core.b, a));
-      c.drawCircle(cx, cy, rr, paint);
+  const makeRadial = ck.Shader?.MakeRadialGradient;
+  const tileClamp = ck.TileMode?.Clamp;
+  if (typeof makeRadial === 'function' && tileClamp != null && typeof ck.Color4f === 'function') {
+    let shader: { delete?: () => void } | null = null;
+    try {
+      // Color4f 0–1 (same as Kit fills) — wrong Color()/0–255 was the old black trap.
+      const colors = [
+        ck.Color4f(core.r, core.g, core.b, alpha),
+        ck.Color4f(core.r, core.g, core.b, alpha * 0.42),
+        ck.Color4f(core.r, core.g, core.b, 0),
+      ];
+      shader = makeRadial([cx, cy], radius, colors, [0, 0.48, 1], tileClamp);
+      if (shader) {
+        paint.setShader?.(shader);
+        c.drawRect(plateRect(ck, w, h), paint);
+        paint.setShader?.(null);
+        return;
+      }
+    } catch {
+      /* fall through */
+    } finally {
+      try {
+        shader?.delete?.();
+      } catch {
+        /* ignore */
+      }
     }
-    return;
   }
 
-  // No drawCircle — flat tint fallback (still clipped to the plate).
+  // No radial shader — flat soft tint (still clipped to the plate).
   paint.setColor(ckColor(ck, core.r, core.g, core.b, alpha * 0.35));
   c.drawRect(plateRect(ck, w, h), paint);
 }

@@ -114,6 +114,28 @@ describe('resolveActiveVideoDecoderId', () => {
       })
     ).toBeNull();
   });
+
+  it('skips uploading SoftGlow video (no HTML decoder until finish)', () => {
+    const doc = {
+      deltaSetLike: {
+        ROOT: { children: ['v0'] },
+        v0: {
+          key: 'video',
+          attrs: {
+            src: 'blob:pending',
+            processStatus: 'running',
+            processKind: 'upload',
+          },
+        },
+      },
+    };
+    expect(
+      resolveActiveVideoDecoderId({
+        document: doc as any,
+        selectedNodeIds: ['v0'],
+      })
+    ).toBeNull();
+  });
 });
 
 describe('shared video decoder singleton', () => {

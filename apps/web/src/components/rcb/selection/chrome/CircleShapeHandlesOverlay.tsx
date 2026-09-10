@@ -14,6 +14,7 @@ import {
   ellipseInnerRatioFromAttrs,
   ellipseParametricAngle,
   snapEllipseInnerRatio,
+  stabilizeEllipseArcPercentDrag,
 } from '@/components/rcb/scene/document/sceneShapes';
 import { strokeInnerClearanceScene } from '@/components/rcb/scene/document/sceneEffects';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
@@ -182,11 +183,9 @@ function CircleShapeHandlesOverlay({
 
       // Parametric angle so the cut end tracks the pointer on wide/tall ellipses too.
       const pointerAngle = ellipseParametricAngle(local.x, local.y, cx, cy, rx, ry);
-      let next = ellipseArcPercentFromPointerAngle(pointerAngle, startDeg);
-      // Opening a closed ring: stay full until the pointer clearly leaves the start seam.
-      if (Math.abs(d.startPercent) >= 99.95 && next < 3) {
-        next = 100;
-      }
+      const rawNext = ellipseArcPercentFromPointerAngle(pointerAngle, startDeg);
+      // Don't wrap past the start seam (near-0% → leap to ~100%).
+      const next = stabilizeEllipseArcPercentDrag(d.current, rawNext, d.startPercent);
       d.current = next;
       setDragValue(Math.round(Math.abs(next) * 10) / 10);
       setLiveArc(next);

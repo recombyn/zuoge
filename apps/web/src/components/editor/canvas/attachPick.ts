@@ -5,7 +5,10 @@ import {
   expandSelectionWithGroups,
   readNodeGroupId
 } from '@/components/rcb/scene/document/sceneGroups';
-import { frameForFullBleedPlate as frameForFullBleedPlateId } from '@/components/rcb/frames/frameSceneQuery';
+import {
+  frameForFullBleedPlate as frameForFullBleedPlateId,
+  parseFrameSelId,
+} from '@/components/rcb/frames/frameSceneQuery';
 import { nodeIdsBoundToFrames } from '@/components/rcb/scene/document/sceneClipboard';
 import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
@@ -117,4 +120,27 @@ export function attachPickFilterOpts(
   pick: null | { target: string; accept?: 'image' | 'media' }
 ): AttachPickOpts | undefined {
   return pick?.accept === 'image' ? { imagesOnly: true } : undefined;
+}
+
+/**
+ * Hover under pointer during「从画布选择」— true → not-allowed cursor, stay in pick.
+ * Mirrors SvgCanvas / Kit attach-pick hit rules (frame, full-bleed plate, blocked gens).
+ */
+export function attachPickBlockedUnderHit(
+  doc: SceneDocument | null | undefined,
+  rawHit: string | null | undefined,
+  opts?: AttachPickOpts
+): boolean {
+  if (!doc || !rawHit) return false;
+  const frameFromHit = parseFrameSelId(rawHit);
+  if (frameFromHit) {
+    return !canAttachFrameToPick(doc, frameFromHit, opts);
+  }
+  const seed = expandSelectionWithGroups(doc, [rawHit]);
+  const attachable = filterChatAttachNodeIds(doc, seed, opts);
+  const plate = frameForFullBleedPlate(doc, rawHit);
+  if (plate && attachable.length === 0) {
+    return !canAttachFrameToPick(doc, plate.id, opts);
+  }
+  return seed.length > 0 && attachable.length === 0;
 }

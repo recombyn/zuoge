@@ -139,10 +139,11 @@ import {
   isDomHostOnlyRcbNode,
   reconcileKitWithDocument,
 } from '@/components/rcb/canvas/kitBridge';
-import { kitOwnsStagePointer } from '@/components/rcb/canvas/toolMap';
+import { kitOwnsStagePointer, isPersistentDrawSessionTool } from '@/components/rcb/canvas/toolMap';
 import SvgPaper from './SvgPaper';
 import { pointerToWorld, type ArtboardRect } from './pointerToWorld';
 import {
+  attachPickBlockedUnderHit,
   attachPickFilterOpts,
   canAttachFrameToPick,
   ctxMenuSeedNodeIds,
@@ -766,25 +767,9 @@ function SvgCanvas({
         clientY: e.clientY,
       });
       const opts = attachPickFilterOpts(canvasAttachPickRef.current);
-      const doc = documentRef.current;
-      const frameFromHit = rawHit ? parseFrameSelId(rawHit) : null;
-      if (frameFromHit) {
-        setCanvasAttachPickBlocked(!canAttachFrameToPick(doc, frameFromHit, opts));
-        return;
-      }
-      if (!rawHit) {
-        setCanvasAttachPickBlocked(false);
-        return;
-      }
-      const seed = expandSelectionWithGroups(doc, [rawHit]);
-      const attachable = filterChatAttachNodeIds(doc, seed, opts);
-      // Full-bleed plate ? click promotes to frame; mirror that for the cursor.
-      const plate = frameForFullBleedPlate(doc, rawHit);
-      if (plate && attachable.length === 0) {
-        setCanvasAttachPickBlocked(!canAttachFrameToPick(doc, plate.id, opts));
-        return;
-      }
-      setCanvasAttachPickBlocked(seed.length > 0 && attachable.length === 0);
+      setCanvasAttachPickBlocked(
+        attachPickBlockedUnderHit(documentRef.current, rawHit, opts)
+      );
     };
     stageEl.addEventListener('pointermove', onMove);
     return () => {
@@ -1247,7 +1232,7 @@ function SvgCanvas({
       if (opts?.skipLoading) return apply();
       runCanvasBulkOp({
         count,
-        label: t('editor.bulkOp.deleting', { defaultValue: '?????' }),
+        label: t('editor.bulkOp.deleting', { defaultValue: '正在删除…' }),
         run: () => {
           apply();
         },
@@ -1379,7 +1364,7 @@ function SvgCanvas({
           height,
           x: origin?.x,
           y: origin?.y,
-          label: '???',
+          label: t('editor.tools.uploading', { defaultValue: '上传中' }),
           name: file.name?.replace(/\.[^.]+$/, '') || 'Image',
         });
       finishToSelect();
@@ -1389,7 +1374,9 @@ function SvgCanvas({
       if (isUploadAbortError(err)) return;
       revokeNodePreviewSrc(store.getState().editor?.document, spawnedId || undefined);
       failImageProcess({ nodeId: spawnedId || undefined });
-      message.error(formatUploadErrorMessage(err, t, '??????'));
+      message.error(
+        formatUploadErrorMessage(err, t, t('editor.tools.uploadFail', { defaultValue: '上传失败' }))
+      );
     }
   };
 
@@ -1412,7 +1399,7 @@ function SvgCanvas({
           height,
           x: origin?.x,
           y: origin?.y,
-          label: '???',
+          label: t('editor.tools.uploading', { defaultValue: '上传中' }),
           name: prepared.name,
           duration: prepared.duration,
         });
@@ -1434,7 +1421,9 @@ function SvgCanvas({
       const failedId = String(store.getState().editor?.pendingImageProcessId || '');
       revokeNodePreviewSrc(store.getState().editor?.document, failedId || undefined);
       failImageProcess({ nodeId: failedId || undefined });
-      message.error(formatUploadErrorMessage(err, t, '??????'));
+      message.error(
+        formatUploadErrorMessage(err, t, t('editor.tools.uploadFail', { defaultValue: '上传失败' }))
+      );
     }
   };
 
@@ -1458,7 +1447,7 @@ function SvgCanvas({
           height,
           x: origin?.x,
           y: origin?.y,
-          label: '???',
+          label: t('editor.tools.uploading', { defaultValue: '上传中' }),
           name:
             file.name?.replace(/\.[^.]+$/, '') ||
             t('editor.tools.audio', { defaultValue: 'Audio' }),
@@ -1479,7 +1468,9 @@ function SvgCanvas({
       const failedId = String(store.getState().editor?.pendingImageProcessId || '');
       revokeNodePreviewSrc(store.getState().editor?.document, failedId || undefined);
       failImageProcess({ nodeId: failedId || undefined });
-      message.error(formatUploadErrorMessage(err, t, '??????'));
+      message.error(
+        formatUploadErrorMessage(err, t, t('editor.tools.uploadFail', { defaultValue: '上传失败' }))
+      );
     }
   };
 
@@ -1572,7 +1563,7 @@ function SvgCanvas({
     if (/\.lottie$/i.test(name)) {
       message.error(
         t('editor.tools.lottieGenNeedJson', {
-          defaultValue: '??? Bodymovin JSON?.json / .lot?????? .lottie ???',
+          defaultValue: '请上传 Bodymovin JSON（.json / .lot），暂不支持 .lottie 压缩包',
         })
       );
       return;
@@ -1779,6 +1770,13 @@ function SvgCanvas({
       );
     };
     const onExit = () => {
+      const input = getCanvasEngine()?.input as
+        | { addPointMode?: boolean; convertPointMode?: boolean }
+        | undefined;
+      if (input) {
+        input.addPointMode = false;
+        input.convertPointMode = false;
+      }
       exitKitPathEdit();
       setKitPathEditNodeId(null);
       setActiveTool('select');
@@ -1795,19 +1793,34 @@ function SvgCanvas({
     const onSub = (e: Event) => {
       const s = (e as CustomEvent).detail?.subtool;
       // Kit NODE_EDIT_TOOLS: direct | pen while editing.
-      // add-anchor → direct + addPointMode (not scissors — that cuts paths).
-      const input = getCanvasEngine()?.input as { addPointMode?: boolean } | undefined;
+      // add-anchor → direct + addPointMode; curve → direct + convertPointMode.
+      const input = getCanvasEngine()?.input as
+        | { addPointMode?: boolean; convertPointMode?: boolean }
+        | undefined;
       if (s === 'pen') {
-        if (input) input.addPointMode = false;
+        if (input) {
+          input.addPointMode = false;
+          input.convertPointMode = false;
+        }
+        // Keep path-edit session; KitCanvasHost must not stomp this with store `direct`.
         setEngineToolFromRcb('pen');
       } else if (s === 'add-anchor') {
+        if (input) {
+          input.addPointMode = true;
+          input.convertPointMode = false;
+        }
         setEngineToolFromRcb('direct');
-        if (input) input.addPointMode = true;
       } else if (s === 'curve') {
-        if (input) input.addPointMode = false;
+        if (input) {
+          input.addPointMode = false;
+          input.convertPointMode = true;
+        }
         setEngineToolFromRcb('direct');
       } else {
-        if (input) input.addPointMode = false;
+        if (input) {
+          input.addPointMode = false;
+          input.convertPointMode = false;
+        }
         setEngineToolFromRcb('direct');
       }
     };
@@ -1923,7 +1936,9 @@ function SvgCanvas({
               audioToolOpen ||
               suppressChromeWhileFrameMoving ||
               // Keep chrome while editing radius so the outline can follow rounded corners.
-              (shapeStylePanelOpen && shapeStylePanel?.kind !== 'radius')
+              (shapeStylePanelOpen && shapeStylePanel?.kind !== 'radius') ||
+              // Pen/pencil session: no transform box until 退出编辑 + user selects.
+              isPersistentDrawSessionTool(activeTool)
             }
           />
         </div>

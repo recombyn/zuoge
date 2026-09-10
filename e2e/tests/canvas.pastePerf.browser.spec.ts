@@ -65,7 +65,7 @@ function resolveKinds(): StressKind[] {
 
 const KINDS = resolveKinds();
 
-/** Frame-hosted grid — same inject path as canvas.soa10k.browser.spec.ts. */
+/** Frame-hosted grid — same inject path as canvas density browser specs. */
 async function injectStressNodes(page: Page, n: number, kind: StressKind) {
   return page.evaluate(
     async ({ n: count, kind: stressKind }) => {
@@ -334,7 +334,9 @@ async function pasteClipViaStore(page: Page, clipIds: string[], offset: number) 
 }
 
 function summarizePaste(r: PastePerfReport, idx: number) {
-  const soa = r.stages?.find((s) => s.name === 'soa-sync');
+  const kitSync = r.stages?.find(
+    (s) => s.name === 'reveal-kit' || s.name === 'kit-sync' || s.name === 'idle-paint'
+  );
   const layout = r.stages?.find((s) => s.name === 'react-layout-enter');
   const live = Number(String(r.label || '').match(/live≈(\d+)/)?.[1] || 0);
   const clip = Number(String(r.label || '').match(/clip=(\d+)/)?.[1] || 0);
@@ -345,12 +347,12 @@ function summarizePaste(r: PastePerfReport, idx: number) {
     clip,
     totalMs: r.totalMs,
     layoutMs: layout?.ms ?? null,
-    soaBodyMs: (soa?.detail?.bodyMs as number | undefined) ?? soa?.ms ?? null,
-    soaBranch: (soa?.detail?.branch as string | undefined) ?? null,
-    insertMs: (soa?.detail?.insertMs as number | undefined) ?? null,
-    spatialMs: (soa?.detail?.spatialMs as number | undefined) ?? null,
-    bufCount: (soa?.detail?.bufCount as number | undefined) ?? null,
-    missing: (soa?.detail?.missing as number | undefined) ?? null,
+    kitBodyMs: (kitSync?.detail?.bodyMs as number | undefined) ?? kitSync?.ms ?? null,
+    kitBranch: (kitSync?.detail?.branch as string | undefined) ?? null,
+    insertMs: (kitSync?.detail?.insertMs as number | undefined) ?? null,
+    spatialMs: (kitSync?.detail?.spatialMs as number | undefined) ?? null,
+    bufCount: (kitSync?.detail?.bufCount as number | undefined) ?? null,
+    missing: (kitSync?.detail?.missing as number | undefined) ?? null,
     slowest: r.slowest?.name,
     stageNames: (r.stages || []).map((s) => `${s.name}:${s.ms}`).slice(0, 16),
   };
@@ -560,7 +562,7 @@ test.describe('canvas paste perf (browser)', () => {
             selectOneAfter,
             summary,
             worstTotal: summary.reduce((m, r) => Math.max(m, r.totalMs), 0),
-            worstSoa: summary.reduce((m, r) => Math.max(m, Number(r.soaBodyMs) || 0), 0),
+            worstKit: summary.reduce((m, r) => Math.max(m, Number(r.kitBodyMs) || 0), 0),
             worstLayout: summary.reduce((m, r) => Math.max(m, Number(r.layoutMs) || 0), 0),
           },
           null,
@@ -576,10 +578,10 @@ test.describe('canvas paste perf (browser)', () => {
           row.totalMs,
           `paste #${row.i} totalMs=${row.totalMs} ${row.label}`
         ).toBeLessThan(2500);
-        if (row.soaBodyMs != null) {
+        if (row.kitBodyMs != null) {
           expect(
-            row.soaBodyMs,
-            `paste #${row.i} soa bodyMs=${row.soaBodyMs} ${row.label}`
+            row.kitBodyMs,
+            `paste #${row.i} kit bodyMs=${row.kitBodyMs} ${row.label}`
           ).toBeLessThan(400);
         }
       }

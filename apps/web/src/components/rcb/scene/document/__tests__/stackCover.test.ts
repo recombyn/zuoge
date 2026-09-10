@@ -151,12 +151,12 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(listSingleSelectionPaintRaiseNodeIds(doc, ['w1', 'c1'], [])).toEqual([]);
     expect(listSingleSelectionPaintRaiseNodeIds(doc, [], ['f1'])).toEqual(['c1']);
     expect(listSingleSelectionPaintRaiseNodeIds(doc, [], ['f1', 'f2'])).toEqual([]);
-    // World node after the artboard in stackOrder must leave SoA (under plates).
+    // World node after the artboard in stackOrder stacks above plates.
     expect(worldNodeStacksAboveAnyFrame(doc, 'w1')).toBe(true);
     expect(worldNodeStacksAboveAnyFrame(doc, 'c1')).toBe(false);
   });
 
-  it('workbench surround above a plate is not stack-above (stays SoA mesh)', () => {
+  it('workbench surround above a plate is not stack-above (Kit underlayer)', () => {
     let doc = createBareDocument();
     doc.frames = [
       { id: 'anim', name: 'Animation', backgroundColor: '#fff', x: 0, y: 0, width: 100, height: 100 },
@@ -203,7 +203,7 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(worldNodeStacksAboveAnyFrame(doc, 'w1')).toBe(false);
   });
 
-  it('world node below all frames can stay on SoA', () => {
+  it('world node below all frames stays under plate stack', () => {
     let doc = createBareDocument();
     doc = addNodeToDocument(doc, 'under', {
       id: 'under',

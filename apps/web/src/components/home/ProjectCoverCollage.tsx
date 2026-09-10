@@ -22,8 +22,8 @@ import { cn } from '@/utils/classnames';
 
 const MAX_TILES = 4;
 const IMG_TILE_LOAD_TIMEOUT_MS = 15_000;
-const GRID_2_CLASS = 'absolute inset-0 grid grid-cols-2 gap-1 overflow-hidden';
-const GRID_4_CLASS = 'absolute inset-0 grid grid-cols-2 grid-rows-2 gap-1 overflow-hidden';
+const GRID_2_CLASS = 'absolute inset-0 grid grid-cols-2 gap-0 overflow-hidden';
+const GRID_4_CLASS = 'absolute inset-0 grid grid-cols-2 grid-rows-2 gap-0 overflow-hidden';
 
 export function normalizeThumbnailUrls(
   input: string | string[] | null | undefined
@@ -126,7 +126,7 @@ function CollageCells({
 
 /**
  * Project card cover for 最近打开 / 我的项目 — multi `<img>` collage (max 4).
- * Layout: 1 full · 2 side-by-side · 3 tall-left · 4 = 2×2 CSS grid (equal gutters).
+ * Layout: 1 full · 2 side-by-side · 3 tall-left · 4 = 2×2 flush grid (edge-to-edge fill).
  */
 function ProjectCoverCollage({
   urls,
@@ -257,7 +257,9 @@ function ImgTile({
         src={src}
         alt=""
         className={cn(
-          'absolute inset-0 h-full w-full object-cover transition-opacity duration-200',
+          // Slight overscale crops legacy shape-tile letterbox (~6% pad) without
+          // waiting for cover re-upload; new edge-to-edge tiles stay near-full.
+          'absolute inset-0 h-full w-full scale-[1.12] object-cover transition-opacity duration-200',
           loaded ? 'opacity-100' : 'opacity-0'
         )}
         loading={eager ? 'eager' : 'lazy'}

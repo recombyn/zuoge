@@ -159,6 +159,8 @@ export function resolveActiveVideoDecoderId(opts: {
   const videoWithSrc = (id: string): boolean => {
     const node = document?.deltaSetLike?.[id];
     if (!isVideoNode(node)) return false;
+    // Upload SoftGlow — no HTML decoder until process finishes (parity with images).
+    if (String(node?.attrs?.processStatus || '') === 'running') return false;
     return Boolean(String(node?.attrs?.src || '').trim());
   };
 

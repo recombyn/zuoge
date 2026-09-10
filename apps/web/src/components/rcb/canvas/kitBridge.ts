@@ -34,6 +34,7 @@ import {
   setPendingCanvasAttach,
 } from '@/store/modules/editor';
 import {
+  attachPickBlockedUnderHit,
   attachPickFilterOpts,
   canAttachFrameToPick,
   frameForFullBleedPlate,
@@ -93,6 +94,7 @@ import {
   isArtboardVisibleInDocument,
   isAudioGeneratorNode,
   isEmptyGeneratorPlate,
+  isGeneratorNode,
   isImageGeneratorNode,
   isLottieGeneratorNode,
   isNodeMarqueeSkippable,
@@ -194,6 +196,7 @@ let origHandlePaintBucketClick:
   | ((pos: { x: number; y: number }, wantEdge?: boolean, erase?: boolean) => void)
   | null = null;
 let origOnMouseUp: ((e: MouseEvent) => void) | null = null;
+let origOnMouseMove: ((e: MouseEvent) => void) | null = null;
 /**
  * Occupied plate body press: Kit must marquee (not artboard-drag). Stash the
  * RCB frame so a click (no drag) can soft-select the plate like a generator.
@@ -519,11 +522,29 @@ const lastKitEffectsJson = new Map<number, string>();
 const lastKitTextSig = new Map<number, string>();
 /** Parametric outline fingerprint (sides / IR / Ar / radii) → rebuild Kit path when changed. */
 const lastParametricSig = new Map<string, string>();
+/**
+ * Still URL last registered into Kit for an RCB raster node.
+ * Video/audio must rebind when poster changes; never leave a failed mp4 decode stuck.
+ */
+const lastKitRasterSrc = new Map<string, string>();
 
 function forgetKitStyle(kitId: number) {
   lastKitStyleJson.delete(kitId);
   lastKitEffectsJson.delete(kitId);
   lastKitTextSig.delete(kitId);
+}
+
+/** Kit `register_image` only accepts stills — video/audio use poster (or empty plate). */
+function kitStillRasterUrl(node: SceneNodeInput): string {
+  const key = String(node.key || '');
+  const attrs = (node.attrs || {}) as Record<string, unknown>;
+  const assetKind = String(attrs.assetKind || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'video' || assetKind === 'video' || key === 'audio' || assetKind === 'audio') {
+    return String(attrs.poster || '').trim();
+  }
+  return String(attrs.src || attrs.poster || '').trim();
 }
 
 /** Sync RCB autoSize / box width → Kit Paragraph wrap width. */
@@ -996,6 +1017,28 @@ function notifyPathEditChrome(active: boolean, rcbId: string | null) {
   );
 }
 
+function editorNodeByRcbId(rcbId: string | null | undefined): SceneNodeInput | null {
+  if (!rcbId) return null;
+  const raw = store.getState().editor.document;
+  if (!raw) return null;
+  return normalizeDocument(raw).deltaSetLike?.[rcbId] ?? null;
+}
+
+/** Generators must not convertToPath / enter direct path-edit. */
+function bounceGeneratorOffPathEdit(
+  handle: CanvasEngineHandle,
+  node: SceneNodeInput | null | undefined
+): boolean {
+  if (!isGeneratorNode(node)) return false;
+  try {
+    handle.setTool('selection');
+  } catch {
+    /* ignore */
+  }
+  setActiveTool('select');
+  return true;
+}
+
 function flushCreates(
   scene: WasmScene,
   opts?: { preserveKitStyle?: boolean; skipHistory?: boolean }
@@ -1113,18 +1156,25 @@ function flushCreates(
   // clipContent applies on the first post-create paint (not only after a later mutation).
   refreshKitArtboardClipPaint();
   // Figma-style finish: select the new object and return to the select tool.
-  // Pen/pencil stay armed until 退出编辑 — skip the one-shot revert for them.
+  // Pen/pencil stay armed until 退出编辑 — skip select + one-shot revert so
+  // continuous strokes do not flash a transform box after every mouse-up.
   // Skip during Kit history reconcile — undo/redo must not steal selection/tool.
   if (!skipHistory) {
-    if (lastCreated) {
+    const stayOnDrawTool = isPersistentDrawSessionTool(createTool);
+    if (lastCreated && !stayOnDrawTool) {
       // Engine already holds the new selection — store is a mirror, not a push-back.
       selectionMirrorGeneration += 1;
       lastSelKey = `${lastCreated}|`;
       // Prefer setSelectedNodeIds only — setSelectedNodeId collapses multi to [id].
       setSelectedNodeIds([lastCreated]);
       setSelectedFrameIds([]);
+    } else if (stayOnDrawTool) {
+      // Mirror Kit's empty selection while the draw session stays locked.
+      selectionMirrorGeneration += 1;
+      lastSelKey = '|';
+      setSelectedNodeIds([]);
+      setSelectedFrameIds([]);
     }
-    const stayOnDrawTool = isPersistentDrawSessionTool(createTool);
     if ((lastCreated || createdArtboardId) && !stayOnDrawTool) {
       setActiveTool('select');
       attached?.setTool('selection');
@@ -1148,6 +1198,7 @@ function flushDeletesFromKit(scene: WasmScene, opts?: { skipHistory?: boolean })
     clearKitTextLayoutWidth(scene, kitId);
     kitToRcb.delete(kitId);
     rcbToKit.delete(rcbId);
+    lastKitRasterSrc.delete(rcbId);
   }
   const dropFrames: string[] = [];
   for (const [kitId, frameId] of [...kitArtboardToFrame.entries()]) {
@@ -1209,7 +1260,10 @@ function flushKitSceneToDocument(opts?: { preserveKitStyle?: boolean; skipHistor
  * - Centered Ellipse / Polygon / Star keep transform-at-center; RCB stores
  *   top-left box = center − half size.
  * - Path local AABB (after Kit resize_node) updates RCB width/height so
- *   parametric knobs track the resized outline.
+ *   freehand / boolean paths track the resized outline.
+ * - Parametric polygon/star/triangle keep the document box as SoT — fillet
+ *   rebuilds must not rewrite W/H from the rounded path AABB (that stretched
+ *   the shape when dragging corner radius).
  */
 function isCenteredKitMirror(rn: SceneNodeInput, kn: KitSceneNode): boolean {
   const shapeType = String(
@@ -1264,6 +1318,39 @@ function kitPathLocalAabb(
     w: Math.max(1, maxX - minX),
     h: Math.max(1, maxY - minY),
   };
+}
+
+/**
+ * Path → RCB box. Parametric outlines keep document W/H (fillets must not stretch).
+ * Freehand / boolean paths mirror Kit local AABB + centered transform.
+ */
+function mirrorPathBoxFromKit(
+  scene: WasmScene,
+  kitId: number,
+  kn: KitSceneNode,
+  rn: SceneNodeInput,
+  centered: boolean,
+  tx: number,
+  ty: number,
+  w: number,
+  h: number
+): { x: number; y: number; w: number; h: number } {
+  const parametric =
+    centered && isParametricOutlineShape(resolveParametricShapeType(rn));
+  if (parametric) {
+    return { x: tx - w / 2, y: ty - h / 2, w, h };
+  }
+  const local = kitPathLocalAabb(scene, kitId, kn);
+  if (local) {
+    return {
+      x: tx + local.minX,
+      y: ty + local.minY,
+      w: local.w,
+      h: local.h,
+    };
+  }
+  if (centered) return { x: tx - w / 2, y: ty - h / 2, w, h };
+  return { x: tx, y: ty, w, h };
 }
 
 function flushMappedGeometry(scene: WasmScene) {
@@ -1339,22 +1426,11 @@ function flushMappedGeometry(scene: WasmScene) {
       x = tx;
       y = ty;
     } else if (kn.geometry?.Path) {
-      // Kit `add_path` (boolean / pen) stores local points around the AABB center
-      // with transform at that center. Always derive top-left as tx+minX — never
-      // treat transform as the box origin (that shifted boolean results by w/2,h/2).
-      const local = kitPathLocalAabb(scene, kitId, kn);
-      if (local) {
-        w = local.w;
-        h = local.h;
-        x = tx + local.minX;
-        y = ty + local.minY;
-      } else if (centered) {
-        x = tx - w / 2;
-        y = ty - h / 2;
-      } else {
-        x = tx;
-        y = ty;
-      }
+      const box = mirrorPathBoxFromKit(scene, kitId, kn, rn, centered, tx, ty, w, h);
+      x = box.x;
+      y = box.y;
+      w = box.w;
+      h = box.h;
     } else if (kn.geometry?.Text) {
       x = tx;
       y = ty;
@@ -1704,38 +1780,77 @@ function flushSelectionToStore(
     const editorDoc = store.getState().editor.document;
     const doc = editorDoc ? normalizeDocument(editorDoc) : null;
     const filter = attachPickFilterOpts(pick);
-    if (!nodeIds.length && !frameIds.length) {
-      clearCanvasAttachPick();
-    } else if (doc) {
-      const plateFrame =
-        nodeIds.length === 1 && !frameIds.length
-          ? frameForFullBleedPlate(doc, nodeIds[0]!)
-          : null;
-      if (plateFrame) {
-        if (!canAttachFrameToPick(doc, plateFrame.id, filter)) {
-          setCanvasAttachPickBlocked(true);
-        } else {
-          setPendingCanvasAttach({
-            target: pick.target,
-            payload: `frame:${plateFrame.id}`,
-          });
-          clearCanvasAttachPick();
-        }
-      } else {
-        const resolved = resolveAttachPickPayload(doc, nodeIds, frameIds[0], filter);
-        if (!resolved) {
-          clearCanvasAttachPick();
-        } else if (resolved.blockedOnly) {
-          // Generators / processing nodes — stay in pick mode (not-allowed cursor).
-          setCanvasAttachPickBlocked(true);
-        } else {
-          setPendingCanvasAttach({
-            target: pick.target,
-            payload: resolved.payload,
-          });
-          clearCanvasAttachPick();
-        }
+    const hostNodeId = pick.target.startsWith('node:')
+      ? pick.target.slice('node:'.length).trim()
+      : '';
+
+    const keepHostComposerSelected = () => {
+      if (!hostNodeId) return false;
+      // Keep the generator/quick-edit composer open — do not steal selection onto the pick.
+      selectionMirrorGeneration += 1;
+      lastSelKey = `${hostNodeId}|`;
+      setSelectedNodeIds([hostNodeId]);
+      setSelectedFrameIds([]);
+      setSoftFrameContext(null);
+      const kitId = rcbToKit.get(hostNodeId);
+      if (kitId != null && attached) {
+        withSuppress(() => {
+          try {
+            attached.scene.engine?.clear_selection();
+          } catch {
+            /* ignore */
+          }
+          try {
+            attached.scene.selectNode(kitId, false);
+          } catch {
+            /* ignore */
+          }
+        });
+        syncKitArtboardChromeHighlight(attached);
+        attached.renderer.requestRender();
       }
+      return true;
+    };
+
+    if (!nodeIds.length && !frameIds.length) {
+      // Empty click cancels pick mode only — leave the host composer selected.
+      clearCanvasAttachPick();
+      return;
+    }
+    if (!doc) return;
+
+    const plateFrame =
+      nodeIds.length === 1 && !frameIds.length
+        ? frameForFullBleedPlate(doc, nodeIds[0]!)
+        : null;
+    if (plateFrame) {
+      if (!canAttachFrameToPick(doc, plateFrame.id, filter)) {
+        setCanvasAttachPickBlocked(true);
+        return;
+      }
+      setPendingCanvasAttach({
+        target: pick.target,
+        payload: `frame:${plateFrame.id}`,
+      });
+      clearCanvasAttachPick();
+      if (keepHostComposerSelected()) return;
+    } else {
+      const resolved = resolveAttachPickPayload(doc, nodeIds, frameIds[0], filter);
+      if (!resolved) {
+        clearCanvasAttachPick();
+        return;
+      }
+      if (resolved.blockedOnly) {
+        // Generators / processing nodes — stay in pick mode (not-allowed cursor).
+        setCanvasAttachPickBlocked(true);
+        return;
+      }
+      setPendingCanvasAttach({
+        target: pick.target,
+        payload: resolved.payload,
+      });
+      clearCanvasAttachPick();
+      if (keepHostComposerSelected()) return;
     }
   }
 
@@ -1833,12 +1948,11 @@ function selectKitNodesInWorldRect(
     /* ignore */
   }
   // Measured AABB union — covers spatial-index misses / transform edge cases.
+  // Walk every mapped Kit id (not only root_nodes) so grouped / nested hits
+  // stay in the multi-select that move_nodes will drag together.
   try {
-    const data = scene.getSceneData();
-    const roots = Array.isArray(data.root_nodes) ? data.root_nodes : [];
-    for (const id of roots) {
-      const kitId = Number(id);
-      if (!Number.isFinite(kitId) || hit.has(kitId)) continue;
+    for (const kitId of kitToRcb.keys()) {
+      if (hit.has(kitId)) continue;
       try {
         if (typeof scene.isLockedInTree === 'function' && scene.isLockedInTree(kitId)) continue;
         if (typeof scene.isVisibleInTree === 'function' && !scene.isVisibleInTree(kitId)) continue;
@@ -2002,25 +2116,14 @@ function framesIntersectingMarquee(
   return out;
 }
 
-function aabbIntersectionArea(
-  a: { left: number; top: number; width: number; height: number },
-  mx0: number,
-  my0: number,
-  mx1: number,
-  my1: number
-): number {
-  const x0 = Math.max(a.left, mx0);
-  const y0 = Math.max(a.top, my0);
-  const x1 = Math.min(a.left + a.width, mx1);
-  const y1 = Math.min(a.top + a.height, my1);
-  const w = x1 - x0;
-  const h = y1 - y0;
-  return w > 0 && h > 0 ? w * h : 0;
-}
-
 /**
  * Marquee that targets artboard plates → select frames (full chrome), not only
  * their children. Multi-plate → FrameMultiSelectionToolbar + union control box.
+ *
+ * Important: if the marquee also hit scene nodes, keep that node selection so
+ * multi-drag moves every ink item together. Promoting to the artboard here used
+ * to clear Kit selection whenever the rect covered ≥55% of an occupied plate —
+ * then a follow-up drag only moved whichever shape was clicked.
  */
 function promoteMarqueeToArtboardUnits(
   handle: CanvasEngineHandle,
@@ -2042,22 +2145,9 @@ function promoteMarqueeToArtboardUnits(
   });
   // Pasteboard / other-frame content in the same marquee → keep node selection.
   if (freeOrForeign.length) return;
-
-  // Multi empty plates / bare empty: promote. Single occupied plate: only when
-  // the marquee mostly covers it (whole-board gesture).
-  if (hitFrames.length < 2 && nodeIds.length > 0) {
-    const fid = hitFrames[0]!;
-    const frame = (Array.isArray(doc.frames) ? doc.frames : []).find(
-      (f) => String(f?.id) === fid
-    );
-    if (!frame) return;
-    const box = frameSceneBounds(doc, frame, getLiveArtboardFrameGeometry(fid));
-    const area = Math.max(1, box.width * box.height);
-    const cover =
-      aabbIntersectionArea(box, marquee.x, marquee.y, marquee.x + marquee.w, marquee.y + marquee.h) /
-      area;
-    if (cover < 0.55) return;
-  }
+  // Ink was hit — keep multi/single node selection for Kit move_nodes.
+  // Empty-plate marquees (no nodes) still promote to artboard units below.
+  if (nodeIds.length > 0) return;
 
   let nextFrames = hitFrames;
   if (shiftKey) {
@@ -2305,34 +2395,47 @@ export function styleJsonFromRcbNode(node: SceneNodeInput): string {
     .filter((n) => Number.isFinite(n) && n > 0);
 
   const shapeType = String(attrs.shapeType || node.key || '').toLowerCase();
-  const fill_rule =
-    (shapeType === 'circle' || shapeType === 'ellipse' || shapeType === 'oval') &&
-    ellipseInnerRatioFromAttrs(attrs) > 1e-4
-      ? 1
-      : 0;
+  const fill_rule = kitStyleFillRule(shapeType, attrs);
+  const corner_radius = kitStyleCornerRadius(shapeType, attrs);
+  const strokes = stroke
+    ? [
+        {
+          paint: stroke,
+          width,
+          cap: 0,
+          join: 0,
+          dash_array,
+          dash_offset: 0,
+          miter_limit: 4,
+          alignment,
+        },
+      ]
+    : [];
 
   return JSON.stringify({
     fills,
-    strokes: stroke
-      ? [
-          {
-            paint: stroke,
-            width,
-            cap: 0,
-            join: 0,
-            dash_array,
-            dash_offset: 0,
-            miter_limit: 4,
-            alignment,
-          },
-        ]
-      : [],
+    strokes,
     opacity: Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1,
     blend_mode: 0,
     fill_rule,
-    corner_radius: Number(attrs.cornerRadius || attrs.rx || 0) || 0,
+    corner_radius,
     effects: [],
   });
+}
+
+function kitStyleFillRule(shapeType: string, attrs: Record<string, unknown>): number {
+  const ellipseLike =
+    shapeType === 'circle' || shapeType === 'ellipse' || shapeType === 'oval';
+  if (ellipseLike && ellipseInnerRatioFromAttrs(attrs) > 1e-4) return 1;
+  return 0;
+}
+
+/** Path-baked fillets (polygon/star/triangle) must not also set Kit style radius. */
+function kitStyleCornerRadius(shapeType: string, attrs: Record<string, unknown>): number {
+  if (shapeType === 'polygon' || shapeType === 'star' || shapeType === 'triangle') {
+    return 0;
+  }
+  return Number(attrs.cornerRadius || attrs.rx || 0) || 0;
 }
 
 /**
@@ -2556,25 +2659,42 @@ function commitImageBytesToKit(
   scene: WasmScene,
   rcbId: string,
   node: SceneNodeInput,
-  data: { bytes: Uint8Array; mime: string }
-) {
+  data: { bytes: Uint8Array; mime: string },
+  rasterSrc?: string
+): boolean {
+  const expected = String(rasterSrc || '').trim();
   const existing = rcbToKit.get(rcbId);
   if (existing != null) {
     const have = kitGeomKind(scene.getNode(existing));
     if (have === 'image') {
-      applyKitNodeGeom(scene, existing, node);
-      applyKitNodeStyle(scene, existing, node);
-      attached?.renderer.requestRender();
-      return;
+      const bound = lastKitRasterSrc.get(rcbId) || '';
+      // Same still already registered — geom/style only.
+      if (expected && bound === expected) {
+        applyKitNodeGeom(scene, existing, node);
+        applyKitNodeStyle(scene, existing, node);
+        attached?.renderer.requestRender();
+        return true;
+      }
+      // Stale/wrong still (e.g. blob finished after durable rebind started).
+      try {
+        scene.removeNode(existing);
+      } catch {
+        /* ignore */
+      }
+      kitToRcb.delete(existing);
+      rcbToKit.delete(rcbId);
+      forgetKitStyle(existing);
+      lastKitRasterSrc.delete(rcbId);
+    } else {
+      // Drop placeholder rect so real Kit image can take the mapping.
+      try {
+        scene.removeNode(existing);
+      } catch {
+        /* ignore */
+      }
+      kitToRcb.delete(existing);
+      rcbToKit.delete(rcbId);
     }
-    // Drop placeholder rect so real Kit image can take the mapping.
-    try {
-      scene.removeNode(existing);
-    } catch {
-      /* ignore */
-    }
-    kitToRcb.delete(existing);
-    rcbToKit.delete(rcbId);
   }
   const x = Number(node.x) || 0;
   const y = Number(node.y) || 0;
@@ -2586,9 +2706,11 @@ function commitImageBytesToKit(
     scene.invalidateCache?.();
     applyKitNodeStyle(scene, kitId, node);
     remember(kitId, rcbId);
+    if (expected) lastKitRasterSrc.set(rcbId, expected);
     attached?.renderer.requestRender();
+    return true;
   } catch {
-    /* ignore */
+    return false;
   }
 }
 
@@ -2633,18 +2755,36 @@ function pushRasterNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInp
     remember(kitId, rcbId);
     return;
   }
-  const attrs = (node.attrs || {}) as Record<string, unknown>;
-  const src = String(attrs.src || attrs.poster || '').trim();
+  const src = kitStillRasterUrl(node);
   const existing = rcbToKit.get(rcbId);
   if (existing != null) {
     const have = kitGeomKind(scene.getNode(existing));
-    if (have === 'image' || !src) {
+    const bound = lastKitRasterSrc.get(rcbId) || '';
+    if (have === 'image') {
+      // Same still — geom/style only. Different/missing URL — drop and rebind
+      // (e.g. video src was wrongly decoded as image → black plate).
+      if (src && src === bound) {
+        applyKitNodeGeom(scene, existing, node);
+        applyKitNodeStyle(scene, existing, node);
+        return;
+      }
+      try {
+        scene.removeNode(existing);
+      } catch {
+        /* ignore */
+      }
+      kitToRcb.delete(existing);
+      rcbToKit.delete(rcbId);
+      forgetKitStyle(existing);
+      lastKitRasterSrc.delete(rcbId);
+    } else if (!src) {
       applyKitNodeGeom(scene, existing, node);
       applyKitNodeStyle(scene, existing, node);
       return;
     }
     // Placeholder rect still mapped — fall through to register real image bytes.
-  } else if (!src) {
+  }
+  if (rcbToKit.get(rcbId) == null && !src) {
     // Placeholder plate until bytes exist — still Kit, not SVG.
     const x = Number(node.x) || 0;
     const y = Number(node.y) || 0;
@@ -2668,7 +2808,7 @@ function pushRasterNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInp
   }
   const cached = imageBytesCache.get(src);
   if (cached) {
-    commitImageBytesToKit(scene, rcbId, node, cached);
+    commitImageBytesToKit(scene, rcbId, node, cached, src);
     return;
   }
   if (imageFetchInflight.has(src)) return;
@@ -2677,7 +2817,11 @@ function pushRasterNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInp
     imageFetchInflight.delete(src);
     if (!data || !attached) return;
     withSuppress(() => {
-      commitImageBytesToKit(attached!.scene, rcbId, node, data);
+      const doc = store.getState().editor.document as SceneDocument | null;
+      const live = doc?.deltaSetLike?.[rcbId];
+      // Drop stale completions (blob fetch finishing after durable poster rebind).
+      if (!live || kitStillRasterUrl(live) !== src) return;
+      commitImageBytesToKit(attached!.scene, rcbId, live, data, src);
     });
   });
 }
@@ -2880,6 +3024,7 @@ export function reconcileKitWithDocument(
       rcbToKit.delete(rcbId);
       forgetKitStyle(kitId);
       lastParametricSig.delete(rcbId);
+      lastKitRasterSrc.delete(rcbId);
       dirty = true;
     }
     // Boolean / replace: path result reuses id but Kit still holds Rect → recreate.
@@ -2900,6 +3045,7 @@ export function reconcileKitWithDocument(
       clearKitTextLayoutWidth(scene, kitId);
       forgetKitStyle(kitId);
       lastParametricSig.delete(rcbId);
+      lastKitRasterSrc.delete(rcbId);
       dirty = true;
     }
     const frames = new Set(
@@ -3230,6 +3376,7 @@ export function hydrateKitFromDocument(
     lastKitStyleJson.clear();
     lastKitEffectsJson.clear();
     lastParametricSig.clear();
+    lastKitRasterSrc.clear();
     scene.newDocument();
     // Engine::new seeds "Artwork 1" — strip without history so Undo cannot
     // resurrect it while the user is resizing shapes.
@@ -4099,9 +4246,10 @@ export function attachKitBridge(handle: CanvasEngineHandle) {
   // product store sync is enough for RCB chrome.
   origEnterPathEdit = handle.input.enterPathEditMode.bind(handle.input);
   handle.input.enterPathEditMode = (nodeId: number) => {
+    const rcbId = kitToRcb.get(nodeId) ?? null;
+    if (bounceGeneratorOffPathEdit(handle, editorNodeByRcbId(rcbId))) return;
     origEnterPathEdit?.(nodeId);
     if (handle.input.editingNodeId == null) return;
-    const rcbId = kitToRcb.get(nodeId) ?? null;
     notifyPathEditChrome(true, rcbId);
     if (rcbId) {
       // Kit already selected this node — mark store write as Kit mirror echo.
@@ -4171,6 +4319,34 @@ export function attachKitBridge(handle: CanvasEngineHandle) {
       }
     });
   };
+  // 「从画布选择」: Kit InputManager owns canvas.style.cursor — overwrite after
+  // its hover pass so the stage shows copy / not-allowed (matches SvgCanvas).
+  origOnMouseMove = handle.input.onMouseMove.bind(handle.input);
+  handle.input.onMouseMove = (e: MouseEvent) => {
+    origOnMouseMove?.(e);
+    const pick = store.getState().editor.canvasAttachPick as null | {
+      target: string;
+      accept?: 'image' | 'media';
+    };
+    if (!pick?.target || !attached || attached !== handle) return;
+    const canvas = handle.input.canvas as HTMLElement | null | undefined;
+    if (!canvas) return;
+    try {
+      const pos = handle.input.getPos(e);
+      const rawHit = hitTestRcbIdFromKit(pos.x, pos.y);
+      const editorDoc = store.getState().editor.document;
+      const doc = editorDoc ? normalizeDocument(editorDoc) : null;
+      const blocked = attachPickBlockedUnderHit(
+        doc,
+        rawHit,
+        attachPickFilterOpts(pick)
+      );
+      setCanvasAttachPickBlocked(blocked);
+      canvas.style.cursor = blocked ? 'not-allowed' : 'copy';
+    } catch {
+      canvas.style.cursor = 'copy';
+    }
+  };
 }
 
 export function detachKitBridge() {
@@ -4212,6 +4388,9 @@ export function detachKitBridge() {
     if (origOnMouseUp) {
       attached.input.onMouseUp = origOnMouseUp;
     }
+    if (origOnMouseMove) {
+      attached.input.onMouseMove = origOnMouseMove;
+    }
   }
   attached = null;
   origSyncWithSelection = null;
@@ -4219,12 +4398,14 @@ export function detachKitBridge() {
   origExitEditMode = null;
   origHandlePaintBucketClick = null;
   origOnMouseUp = null;
+  origOnMouseMove = null;
   pendingSoftArtboardFrameId = null;
   pendingBucketImageFill = null;
   lastSelKey = '';
   lastHydrateKey = '';
   lastArtboardClipPaintSig = '';
   pendingImageSrcByKitId.clear();
+  lastKitRasterSrc.clear();
 }
 
 /** True while Kit canvas bridge owns wash / Lucide / pick for mapped nodes. */
@@ -4821,12 +5002,10 @@ export function hitTestRcbIdFromKit(x: number, y: number): string | null {
 /** Enter Kit path-edit for an RCB node (convertToPath + direct tool). */
 export function enterKitPathEditForRcbId(rcbId: string): boolean {
   if (!attached || !rcbId) return false;
+  const node = editorNodeByRcbId(rcbId);
+  if (isGeneratorNode(node)) return false;
   let kitId = rcbToKit.get(rcbId);
   if (kitId == null) {
-    const doc = store.getState().editor.document
-      ? normalizeDocument(store.getState().editor.document)
-      : null;
-    const node = doc?.deltaSetLike?.[rcbId];
     if (!node) return false;
     withSuppress(() => {
       pushNodeToKit(attached!.scene, rcbId, node);
@@ -4962,7 +5141,7 @@ export function getKitSelectionDockAabb(): {
   }
 }
 
-/** True while Kit select tool is mid gesture (move/resize/rotate/marquee). */
+/** True while Kit select tool is mid gesture (move/resize/rotate/marquee/artboard). */
 export function kitSelectionGestureActive(): boolean {
   const im = attached?.input as
     | {
@@ -4973,6 +5152,8 @@ export function kitSelectionGestureActive(): boolean {
         resizeSnapshot?: unknown;
         rotateHandleType?: string | null;
         rotateSnapshot?: unknown;
+        isArtboardMoving?: () => boolean;
+        isArtboardResizing?: () => boolean;
       }
     | null
     | undefined;
@@ -4980,17 +5161,23 @@ export function kitSelectionGestureActive(): boolean {
   if (im.resizeHandleType || im.resizeSnapshot || im.rotateHandleType || im.rotateSnapshot) {
     return true;
   }
+  if (im.isArtboardMoving?.() || im.isArtboardResizing?.()) return true;
   const mode = im.dragMode;
   return mode === 'move' || mode === 'marquee' || Boolean(im.didMove);
 }
 
-/** True while Kit is mid move-drag (past press threshold). */
+/** True while Kit is mid move-drag (nodes or artboard) past press threshold. */
 export function kitSelectionMoveActive(): boolean {
   const im = attached?.input as
-    | { dragMode?: string; didMove?: boolean }
+    | {
+        dragMode?: string;
+        didMove?: boolean;
+        isArtboardMoving?: () => boolean;
+      }
     | null
     | undefined;
   if (!im) return false;
+  if (im.isArtboardMoving?.()) return true;
   return im.dragMode === 'move' && Boolean(im.didMove);
 }
 

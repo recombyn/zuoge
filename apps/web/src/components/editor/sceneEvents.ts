@@ -149,7 +149,12 @@ export function isInteractionPerfSessionActive(): boolean {
 function sessionHasPostCommitMark(session: InteractionPerfSession): boolean {
   for (let i = 0; i < session.marks.length; i += 1) {
     const name = session.marks[i]?.name;
-    if (name === 'react-layout-enter' || name === 'soa-sync' || name === 'idle-paint') {
+    if (
+      name === 'reveal-kit' ||
+      name === 'kit-sync' ||
+      name === 'react-layout-enter' ||
+      name === 'idle-paint'
+    ) {
       return true;
     }
   }

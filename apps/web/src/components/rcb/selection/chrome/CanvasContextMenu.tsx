@@ -19,8 +19,6 @@ type CtxAction =
   | 'addToChat'
   | 'spawnImageGenerator'
   | 'spawnVideoGenerator'
-  | 'spawnAnimationBoard'
-  | 'spawnLottieGenerator'
   | 'spawnAudioGenerator'
   | 'undo'
   | 'redo'
@@ -46,8 +44,6 @@ type CtxAction =
 type GeneratorPickAction =
   | 'spawnImageGenerator'
   | 'spawnVideoGenerator'
-  | 'spawnAnimationBoard'
-  | 'spawnLottieGenerator'
   | 'spawnAudioGenerator';
 
 export type ContextMenuState = {
@@ -199,8 +195,6 @@ function MenuItem({
 const GENERATOR_MENU_SHORTCUT: Record<GeneratorPickAction, string> = {
   spawnImageGenerator: 'A',
   spawnVideoGenerator: 'Shift A',
-  spawnAnimationBoard: 'M',
-  spawnLottieGenerator: '',
   spawnAudioGenerator: 'U',
 };
 
@@ -210,6 +204,7 @@ function GeneratorFlyoutButtons({
   onPick: (action: GeneratorPickAction) => void;
 }) {
   const { t } = useTranslation();
+  // Match toolbar Generators: image / video / audio only (animation + Lottie elsewhere).
   const rows: Array<{ action: GeneratorPickAction; label: string }> = [
     {
       action: 'spawnImageGenerator',
@@ -218,14 +213,6 @@ function GeneratorFlyoutButtons({
     {
       action: 'spawnVideoGenerator',
       label: t('editor.tools.videoGenerator'),
-    },
-    {
-      action: 'spawnAnimationBoard',
-      label: t('editor.tools.animationBoard', { defaultValue: '动画' }),
-    },
-    {
-      action: 'spawnLottieGenerator',
-      label: t('editor.tools.lottieGenerator'),
     },
     {
       action: 'spawnAudioGenerator',

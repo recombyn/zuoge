@@ -206,6 +206,37 @@ export function ellipseArcPercentFromPointerAngle(
 }
 
 /**
+ * Keep arc-handle drags continuous across the start-ray seam.
+ *
+ * Absolute angle→% maps a hair past the start ray to ~100%, so shrinking toward
+ * 0% would otherwise leap to a full ring. Large→small jumps pin to the side the
+ * drag was already on; opening a closed ring still waits until the pointer
+ * clearly leaves the seam (``startPercent`` ≈ 100 and ``next`` still tiny).
+ */
+export function stabilizeEllipseArcPercentDrag(
+  previousPercent: number,
+  nextPercent: number,
+  startPercent: number
+): number {
+  let next = clampEllipseArcPercent(Math.abs(nextPercent));
+  const prev = clampEllipseArcPercent(Math.abs(previousPercent));
+  const start = clampEllipseArcPercent(Math.abs(startPercent));
+
+  // Opening a closed ring: stay full until the pointer clearly leaves the seam.
+  if (start >= 99.95 && next < 3) {
+    return 100;
+  }
+
+  // Seam wrap in one pointer sample — stay on the side we were already dragging.
+  // Exception: leaving a closed ring (prev ≈ 100) to a clear open wedge is intentional.
+  if (Math.abs(next - prev) > 50) {
+    if (prev >= 99.95 && next >= 3) return next;
+    return prev <= 50 ? MIN_ELLIPSE_ARC_PERCENT : 100;
+  }
+  return next;
+}
+
+/**
  * Parametric angle on an axis-aligned ellipse — matches PathBuilder `cos(t)/sin(t)`.
  */
 export function ellipseParametricAngle(

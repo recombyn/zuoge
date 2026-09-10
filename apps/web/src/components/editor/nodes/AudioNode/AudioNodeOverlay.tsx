@@ -71,6 +71,8 @@ export function resolveActiveAudioPlayerId(opts: {
   const audioWithSrc = (id: string): boolean => {
     const node = document?.deltaSetLike?.[id];
     if (!isAudioNode(node)) return false;
+    // Upload SoftGlow — no HTML player until process finishes (parity with images).
+    if (String(node?.attrs?.processStatus || '') === 'running') return false;
     return Boolean(String(node?.attrs?.src || '').trim());
   };
 

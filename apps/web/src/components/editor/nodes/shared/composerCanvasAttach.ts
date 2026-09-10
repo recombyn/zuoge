@@ -1,3 +1,4 @@
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 import {
   buildComposerContext,
@@ -9,6 +10,7 @@ import {
   noteCanvasFlyLand,
   playFlyChipToChat,
 } from '@/components/editor/panels/agent/composer/flyToChat';
+import { canvasAttachToken } from '@/components/editor/panels/agent/canvasAttach';
 import { canAttachNodeToChat, canvasAttachPickPayload } from '@/components/rcb/scene/document/mediaLifecycle';
 import { captureVideoPosterFrame } from '@/components/rcb/scene/document/nodeFactories';
 import {
@@ -16,6 +18,7 @@ import {
   listGroupMemberIds,
   readNodeGroupId,
 } from '@/components/rcb/scene/document/sceneGroups';
+import { consumePendingCanvasAttach } from '@/store/modules/editor';
 
 function resolveSharedGroupAttachIds(doc: SceneDocument, ids: string[]): string[] | null {
   if (!doc || !ids || ids.length < 2) return null;
@@ -317,4 +320,66 @@ export async function pickOrAttachFromCanvas(opts: {
   }
   const attached = await opts.attachSelection();
   if (!attached) opts.startPick();
+}
+
+type PendingAttach = { target: string; payload: string | string[] } | null;
+
+/**
+ * One-shot consume of `pendingCanvasAttach` for a node composer (`node:${id}`).
+ * Token lock prevents StrictMode / double-flush from inserting the same chip twice.
+ */
+export function usePendingCanvasAttachFly(opts: {
+  pickTarget: string;
+  pending: PendingAttach;
+  document: SceneDocument | null | undefined;
+  contextsRef: MutableRefObject<ComposerContext[]>;
+  setContexts: (
+    next: ComposerContext[] | ((prev: ComposerContext[]) => ComposerContext[])
+  ) => void;
+  insertChip: (ctx: ComposerContext) => void;
+  imagesOnly?: boolean;
+}) {
+  const {
+    pickTarget,
+    pending,
+    document: doc,
+    contextsRef,
+    setContexts,
+    insertChip,
+    imagesOnly = true,
+  } = opts;
+  const lockRef = useRef<string | null>(null);
+  const insertChipRef = useRef(insertChip);
+  insertChipRef.current = insertChip;
+  const setContextsRef = useRef(setContexts);
+  setContextsRef.current = setContexts;
+  const imagesOnlyRef = useRef(imagesOnly);
+  imagesOnlyRef.current = imagesOnly;
+
+  useEffect(() => {
+    if (!pending) {
+      lockRef.current = null;
+      return;
+    }
+    if (pending.target !== pickTarget || !doc) return;
+    const token = `pending:${pending.target}:${canvasAttachToken(pending.payload)}`;
+    if (lockRef.current === token) {
+      consumePendingCanvasAttach();
+      return;
+    }
+    lockRef.current = token;
+    const payload = pending.payload;
+    consumePendingCanvasAttach();
+    void flyPickIntoComposer({
+      landId: pickTarget,
+      document: doc,
+      payload,
+      existing: contextsRef.current,
+      setContexts: (next) => setContextsRef.current(next),
+      imagesOnly: imagesOnlyRef.current,
+      insertChip: (ctx) => insertChipRef.current(ctx),
+    });
+    // One-shot attach — fly reads latest via refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, pickTarget, doc]);
 }

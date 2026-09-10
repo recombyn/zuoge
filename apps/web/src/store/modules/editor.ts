@@ -371,7 +371,7 @@ function listChangedChildIds(
   return patched;
 }
 
-/** Frame ids whose plate x/y/w/h changed (frameLocal children need SoA rewrite). */
+/** Frame ids whose plate x/y/w/h changed (frameLocal children need geom rewrite). */
 function listMovedArtboardFrameIds(
   prevDoc: SceneDocument | null | undefined,
   nextDoc: SceneDocument | null | undefined
@@ -2109,7 +2109,7 @@ export const editorReducers = {
       state.aiMutationLock = Math.max(0, (state.aiMutationLock || 0) - 1);
       if (state.aiMutationLock === 0) {
         state.sceneRevision = (state.sceneRevision || 0) + 1;
-        // One remount + SoA flush after the whole transaction (not per tool_op).
+        // One remount + scene flush after the whole transaction (not per tool_op).
         state.sceneReloadToken = (Number(state.sceneReloadToken) || 0) + 1;
         bumpDocumentRevision(state);
         requestAiFlush();
@@ -3490,6 +3490,14 @@ export const editorReducers = {
             ...(extra.name ? { name: String(extra.name) } : {}),
             ...(extra.assetKind ? { assetKind: String(extra.assetKind) } : {}),
             ...(extra.uploadKey ? { uploadKey: String(extra.uploadKey) } : {}),
+            ...(extra.poster != null
+              ? { poster: String(extra.poster || '').trim() || undefined }
+              : {}),
+            ...(extra.duration != null &&
+            Number.isFinite(Number(extra.duration)) &&
+            Number(extra.duration) > 0
+              ? { duration: Number(extra.duration) }
+              : {}),
             ...(extra.genPrompt != null
               ? { genPrompt: String(extra.genPrompt || '').trim() || undefined }
               : {}),

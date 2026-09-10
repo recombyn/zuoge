@@ -66,9 +66,9 @@ import {
   pickVisionChatModel,
 } from '@/components/editor/nodes/shared/generatorModelLists';
 import {
-  flyPickIntoComposer,
   attachSelectionToComposer,
   pickOrAttachFromCanvas,
+  usePendingCanvasAttachFly,
 } from '@/components/editor/nodes/shared/composerCanvasAttach';
 import { finishGeneratorGenerateSession } from '@/components/editor/nodes/shared/finishGeneratorGenerate';
 import { modelSupportsVisionInput } from '@/components/editor/panels/agent/llmModelMeta';
@@ -82,7 +82,6 @@ import {
 import { processJobAttrPatch } from '@/components/rcb/scene/document/processJobAttrs';
 import {
   clearCanvasAttachPick,
-  consumePendingCanvasAttach,
   EMPTY_ID_LIST,
   finishLottieGenerator,
   patchDocumentNode,
@@ -146,7 +145,8 @@ function AnimationGeneratorCard({
   sceneBox,
   disabled = false,
 }: Props): ReactNode {
-  const { t } = useTranslation();  const fileRef = useRef<HTMLInputElement | null>(null);
+  const { t } = useTranslation();
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<AgentComposerHandle | null>(null);
   const contextsRef = useRef<ComposerContext[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -234,27 +234,18 @@ function AnimationGeneratorCard({
     if (nextModel && nextModel !== 'auto') setModelId(nextModel);
   }, [nodeId, genAttrs?.lottieGenAspect, genAttrs?.lottieGenDuration, genAttrs?.lottieGenModel]);
 
-  useEffect(() => {
-    if (!pendingCanvasAttach || pendingCanvasAttach.target !== pickTarget) return;
-    const payload = pendingCanvasAttach.payload;
-    consumePendingCanvasAttach();
-    const doc = editorDocument || (store.getState() as any).editor?.document;
-    async function flyPendingAttach() {
-      await flyPickIntoComposer({
-        landId: pickTarget,
-        document: doc,
-        payload,
-        existing: contextsRef.current,
-        setContexts,
-        imagesOnly: true,
-        insertChip: (ctx) => {
-          inputRef.current?.insertContextAtCaret(ctx);
-          inputRef.current?.focus();
-        },
-      });
-    }
-    flyPendingAttach();
-  }, [pendingCanvasAttach, pickTarget, editorDocument]);
+  usePendingCanvasAttachFly({
+    pickTarget,
+    pending: pendingCanvasAttach,
+    document: editorDocument || (store.getState() as any).editor?.document,
+    contextsRef,
+    setContexts,
+    imagesOnly: true,
+    insertChip: (ctx) => {
+      inputRef.current?.insertContextAtCaret(ctx);
+      inputRef.current?.focus();
+    },
+  });
 
   useEffect(() => {
     const id = nodeId;

@@ -3,25 +3,26 @@
  * Video = play triangle; image = sun + mountains; audio = 7 rounded bars.
  * Drawn in a uniform 24×24 box so plate aspect never squashes the glyph.
  */
+import { FRAME_PLATE_STROKE } from '@/components/rcb/frames/types';
 
-/** Soft gray glyph fill on `#e9eaee` wash — keep lighter than mid gray. */
-export const GENERATOR_EMPTY_ICON_COLOR = '#d4d4d4';
+/** Soft gray glyph fill — same as artboard idle edge. */
+export const GENERATOR_EMPTY_ICON_COLOR = FRAME_PLATE_STROKE;
 
-/** Idle generator plate hairline — matches theme `--line`. */
-export const GENERATOR_EMPTY_PLATE_STROKE = '#e5e5e5';
+/** Idle generator plate hairline — match artboard border. */
+export const GENERATOR_EMPTY_PLATE_STROKE = FRAME_PLATE_STROKE;
 
 /** Target hairline in CSS px (artboard idle edge is also 1 CSS px). */
 export const GENERATOR_EMPTY_PLATE_STROKE_WIDTH = 1;
 
-/** Parse `#rrggbb` → 0–1 RGB for CanvasKit / SVG callers. */
+/** Parse `#rrggbb` → 0–255 RGB for CanvasKit `Color(r,g,b,a)`. */
 export function generatorEmptyCssRgb(css: string): { r: number; g: number; b: number } {
   const hex = /^#([0-9a-f]{6})$/i.exec(String(css || '').trim());
-  if (!hex) return { r: 0xd4 / 255, g: 0xd4 / 255, b: 0xd4 / 255 };
+  if (!hex) return { r: 0xc5, g: 0xc9, b: 0xd2 };
   const n = parseInt(hex[1], 16);
   return {
-    r: ((n >> 16) & 0xff) / 255,
-    g: ((n >> 8) & 0xff) / 255,
-    b: (n & 0xff) / 255,
+    r: (n >> 16) & 0xff,
+    g: (n >> 8) & 0xff,
+    b: n & 0xff,
   };
 }
 

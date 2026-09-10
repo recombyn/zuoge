@@ -4,6 +4,7 @@ import {
   GEN_VIDEO_PLAY_PATH,
   GEN_IMAGE_MOUNTAIN_PATH,
   buildGeneratorEmptyIconSvg,
+  generatorEmptyCssRgb,
 } from '../../core/generatorEmptyIcons';
 
 describe('generatorEmptyIcons', () => {
@@ -24,5 +25,10 @@ describe('generatorEmptyIcons', () => {
     expect(buildGeneratorEmptyIconSvg('image', 24)).toContain('<path');
     expect(buildGeneratorEmptyIconSvg('audio', 24)).toContain('<line ');
     expect(buildGeneratorEmptyIconSvg('audio', 24).match(/<line /g)?.length).toBe(7);
+  });
+
+  it('generatorEmptyCssRgb returns 0–255 channels for CanvasKit Color', () => {
+    expect(generatorEmptyCssRgb('#c5c9d2')).toEqual({ r: 0xc5, g: 0xc9, b: 0xd2 });
+    expect(generatorEmptyCssRgb('#ffffff')).toEqual({ r: 255, g: 255, b: 255 });
   });
 });

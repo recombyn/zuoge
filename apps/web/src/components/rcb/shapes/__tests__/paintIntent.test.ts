@@ -81,6 +81,39 @@ describe('paintIntent', () => {
     ).toEqual({ kind: 'kit' });
   });
 
+  it('routes uploading video/audio SoftGlow to Kit (no HTML FO)', () => {
+    let doc = createEmptyDocument();
+    doc = addNodeToDocument(doc, 'v', {
+      id: 'v',
+      key: 'video',
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 180,
+      attrs: {
+        src: 'blob:video',
+        poster: 'blob:poster',
+        processStatus: 'running',
+        processKind: 'upload',
+      },
+    } as any);
+    expect(
+      resolvePaintIntent(doc, 'v', doc.deltaSetLike!.v, { forceFull: true })
+    ).toEqual({ kind: 'kit' });
+    doc = addNodeToDocument(doc, 'a', {
+      id: 'a',
+      key: 'audio',
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 80,
+      attrs: { src: 'blob:audio', processStatus: 'running', processKind: 'upload' },
+    } as any);
+    expect(
+      resolvePaintIntent(doc, 'a', doc.deltaSetLike!.a, { forceFull: true })
+    ).toEqual({ kind: 'kit' });
+  });
+
   it('routes lottie and group to DomHost', () => {
     let doc = createEmptyDocument();
     doc = addNodeToDocument(doc, 'l', {

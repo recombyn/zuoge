@@ -9,7 +9,6 @@ import { syncStackPaintOrder } from '@/components/rcb/scene/document/sceneStackP
 import {
   createDomHostBoard,
   mountDomHostAnchor,
-  nodeNeedsHtmlMediaMount,
   syncHtmlMediaMountGeometry,
 } from '@/components/rcb/scene/dom/domHostShell';
 import { isEmptyGeneratorPlate } from '@/components/rcb/scene/document/nodeCapabilities';
@@ -272,7 +271,8 @@ function RcbShapeHost({
     }
 
     // Kit paints SoftGlow in node local space — host is pill-only (no SVG plate).
-    if (n && String(n.attrs?.processStatus || '') === 'running' && !nodeNeedsHtmlMediaMount(n)) {
+    // Video/audio upload must not mount HTML decoder FO (same SoftGlow as images).
+    if (n && String(n.attrs?.processStatus || '') === 'running') {
       return undefined;
     }
 

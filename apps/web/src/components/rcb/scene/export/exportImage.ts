@@ -1,8 +1,7 @@
 /**
  * Kit / Kit-backed scene export (PNG preferred; SVG via Kit buildSVGString when available).
  *
- * Replaces the deleted paint/exportImage SoA + sceneToSvg dual path. Public API
- * signatures match the previous module so existing imports keep compiling.
+ * Public API signatures match the previous module so existing imports keep compiling.
  *
  * Limitations:
  * - SVG export prefers Kit `UIEngine.buildSVGString` / `buildSVGStringForSelection`.
@@ -11,7 +10,7 @@
  * - DomHost-only media (video/lottie shells) is not inked by Kit and will be
  *   missing from Kit raster/SVG exports.
  * - `renderComposerChipThumb` / `renderExport` return null when the canvas engine
- *   is not mounted (no SoA fallback).
+ *   is not mounted.
  */
 import { imageSrcToFile } from '@/utils/uploadImage';
 import { resolveApiUrl } from '@/utils/apiBase';

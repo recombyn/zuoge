@@ -336,6 +336,10 @@ export async function createCanvasEngine(
     const multiSet = new Set(multiIds);
     const multiSelect = multiSet.size > 1;
     const artboards = anyAbRenderer.scene.getArtboards();
+    // Same as node move: hide transform box + title/size while the plate is dragged.
+    const artboardMoving = Boolean(
+      (input as { isArtboardMoving?: () => boolean }).isArtboardMoving?.()
+    );
 
     for (const ab of artboards) {
       const bg = ab.background;
@@ -358,7 +362,9 @@ export async function createCanvasEngine(
       const selected = soleSelected || multiMember;
       const soft =
         !selected && ab.id === anyAbRenderer.softArtboardId;
-      const border = selected || soft ? op.selOutline : op.artboardStroke;
+      // Mid-move: idle hairline only (no blue control box), like a dragging rect.
+      const showSelectChrome = (selected || soft) && !artboardMoving;
+      const border = showSelectChrome ? op.selOutline : op.artboardStroke;
       border.setStrokeWidth(1 / zoom);
       border.setAntiAlias(true);
       canvas.drawRect(
@@ -366,12 +372,16 @@ export async function createCanvasEngine(
         border
       );
 
-      anyAbRenderer.drawArtboardLabel(canvas, ab, selected || soft);
+      if (!artboardMoving) {
+        anyAbRenderer.drawArtboardLabel(canvas, ab, selected || soft);
+      }
       // Per-plate handles only for sole full chrome — multi uses the union box.
-      if (soleSelected) anyAbRenderer.drawArtboardHandles(canvas, ab);
+      if (soleSelected && !artboardMoving) {
+        anyAbRenderer.drawArtboardHandles(canvas, ab);
+      }
     }
 
-    if (multiSelect) {
+    if (multiSelect && !artboardMoving) {
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;

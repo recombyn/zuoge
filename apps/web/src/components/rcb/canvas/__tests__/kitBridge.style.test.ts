@@ -102,6 +102,17 @@ describe('styleJsonFromRcbNode', () => {
     expect(s.corner_radius).toBe(8);
   });
 
+  it('does not push Kit corner_radius for path-baked polygon fillets', () => {
+    const s = styleOf({
+      attrs: {
+        shapeType: 'polygon',
+        cornerRadius: 24,
+        sides: 10,
+      },
+    });
+    expect(s.corner_radius).toBe(0);
+  });
+
   it('defaults white fill when solid fill color omitted', () => {
     const s = styleOf({ attrs: { 'border-color': '#000000' } });
     expect(s.fills[0]).toMatchObject({ r: 1, g: 1, b: 1, a: 1 });

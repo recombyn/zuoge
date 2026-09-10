@@ -38,7 +38,7 @@ import {
   buildImageGeneratorModelList,
 } from '@/components/editor/nodes/shared/generatorModelLists';
 import { ratioSummaryLabel } from '@/components/editor/nodes/shared/generatorAttrs';
-import { flyPickIntoComposer } from '@/components/editor/nodes/shared/composerCanvasAttach';
+import { usePendingCanvasAttachFly } from '@/components/editor/nodes/shared/composerCanvasAttach';
 import { MEDIA_QUICK_EDIT_ATTR } from '@/components/editor/panels/agent/composer/composerMentionHelpers';
 import { useGeneratorModelsCatalog } from '@/components/editor/panels/agent/composer/useGeneratorModelsCatalog';
 import {
@@ -65,7 +65,6 @@ import {
 import {
   clearCanvasAttachPick,
   closeImageToolPanel,
-  consumePendingCanvasAttach,
   consumePendingQuickEditMarkContexts,
   finishImageProcess,
   openImageToolPanel,
@@ -208,25 +207,17 @@ function ImageQuickEditComposer({
     pendingMarksLockRef.current = null;
   }, [nodeId, src, savedPrompt, node?.attrs?.imageVariantPrompts, node?.attrs]);
 
-  useEffect(() => {
-    if (!pendingCanvasAttach || pendingCanvasAttach.target !== pickTarget) return;
-    const payload = pendingCanvasAttach.payload;
-    consumePendingCanvasAttach();
-    async function flyPendingAttach() {
-      await flyPickIntoComposer({
-        landId: pickTarget,
-        document,
-        payload,
-        existing: contextsRef.current,
-        setContexts,
-        insertChip: (ctx) => {
-          inputRef.current?.insertContextAtCaret(ctx);
-          inputRef.current?.focus();
-        },
-      });
-    }
-    flyPendingAttach();
-  }, [pendingCanvasAttach, pickTarget, document]);
+  usePendingCanvasAttachFly({
+    pickTarget,
+    pending: pendingCanvasAttach,
+    document,
+    contextsRef,
+    setContexts,
+    insertChip: (ctx) => {
+      inputRef.current?.insertContextAtCaret(ctx);
+      inputRef.current?.focus();
+    },
+  });
 
   // Auto-focus prompt when the floating chat panel opens.
   useEffect(() => {
