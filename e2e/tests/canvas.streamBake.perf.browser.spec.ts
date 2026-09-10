@@ -331,8 +331,7 @@ test.describe('stream bake browser perf', () => {
       select: {
         totalMs: selectOne!.totalMs,
         slowest: selectOne!.slowest,
-        idlePaintMs: stageIdleMs(selectOne!.stages, 'idle-paint'),
-        revealIdleMs: stageIdleMs(selectOne!.stages, 'reveal-idle'),
+        revealKitMs: stageIdleMs(selectOne!.stages, 'reveal-kit'),
         spatialMs: stageIdleMs(selectOne!.stages, 'spatial-sync-memo'),
         label: selectOne!.label,
         stages: selectOne!.stages,

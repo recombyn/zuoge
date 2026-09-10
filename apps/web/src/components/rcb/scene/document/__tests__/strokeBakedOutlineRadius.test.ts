@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isOutlinedPath, supportsCornerRadius } from '../nodeCapabilities';
-import { buildOutlinePath, outlineNodePatch } from '../../paint/outlineToPath';
+import { outlineNodePatch } from '../../outline/outlineToPath';
 
 describe('轮廓化后不显示圆角控制点', () => {
   it('outlineNodePatch sets outlined flag', () => {
@@ -16,10 +16,12 @@ describe('轮廓化后不显示圆角控制点', () => {
         'border-color': '#111',
       },
     };
-    const outline = buildOutlinePath(node, { zoom: 1 });
-    expect(outline?.pathD).toBeTruthy();
-    const patch = outlineNodePatch(node, outline!);
-    expect(patch.attrs.outlined).toBe('true');
+    const patch = outlineNodePatch(node, {
+      path: 'M 0 0 L 10 0 L 10 8 L 0 8 Z',
+      width: 100,
+      height: 40,
+    });
+    expect(patch.attrs?.outlined).toBe(true);
     expect(isOutlinedPath({ key: 'shape', attrs: patch.attrs })).toBe(true);
     expect(supportsCornerRadius({ key: 'shape', attrs: patch.attrs })).toBe(false);
   });

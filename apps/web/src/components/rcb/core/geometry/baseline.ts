@@ -96,7 +96,7 @@ export function getShapeBaseline(
     key === 'lottie' ||
     key === 'audio'
   ) {
-    // Match sceneToSvg plate / clip path (generators are always sharp).
+    // Match DomHost plate / clip path (generators are always sharp).
     const gen =
       (key === 'image' &&
         (node.attrs?.imageGenerator === true ||
@@ -155,6 +155,7 @@ export function getShapeBaseline(
 
   if (shapeType === 'circle' || shapeType === 'ellipse' || shapeType === 'oval') {
     const innerRatio = ellipseInnerRatioFromAttrs(node.attrs);
+    // Always clockwise from the right (positive arc + fixed east start).
     const arcPercent = ellipseArcPercentFromAttrs(node.attrs);
     const startDeg = ellipseStartDegFromAttrs(node.attrs);
     return {

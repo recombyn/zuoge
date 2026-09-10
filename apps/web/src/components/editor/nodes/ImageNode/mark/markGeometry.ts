@@ -1,5 +1,5 @@
 import { rcbSceneToScreen, type RcbCamera } from '@/components/rcb';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   isImageGeneratorNode,
   isNodeHidden,

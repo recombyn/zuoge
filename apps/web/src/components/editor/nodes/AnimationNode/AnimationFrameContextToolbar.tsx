@@ -118,6 +118,10 @@ function LottieFrameContextToolbar({ frame, box }: Props) {
 
   // Bottom timeline dock owns transport — hide floating bar so the two don't stack.
   if (timelineOpen) return null;
+  // Plate already deleted (stale selection / Kit AABB lag) — do not leave the strip.
+  if (!document?.frames?.some((f) => String(f?.id) === String(frame.id))) {
+    return null;
+  }
 
   return (
     <SelectionToolbarShell

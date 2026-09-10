@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ensureDefs, svgEl } from '@/components/rcb/scene/paint/svgDom';
+import { ensureDefs, svgEl } from '@/components/rcb/scene/dom/svgDom';
 import {
   appendProcessPlatePaths,
   processPlateGradientIds,

@@ -2,7 +2,7 @@
  * Rasterize Lottie → canvas stream → MediaRecorder, optional FFmpeg to MP4 / GIF.
  */
 import lottie, { type AnimationItem } from 'lottie-web';
-import { downloadFileBlob } from '@/components/rcb/scene/paint/exportImage';
+import { downloadFileBlob } from '@/components/rcb/scene/export/exportImage';
 import { parseLottieAnimationData } from '@/components/rcb/scene/document/nodeFactories';
 import { getFFmpeg } from '@/utils/audioExporter';
 import { fetchFile } from '@ffmpeg/util';

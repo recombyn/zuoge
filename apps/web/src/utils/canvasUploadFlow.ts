@@ -71,6 +71,39 @@ function finishPlaceholderUpload(
   });
 }
 
+/** Local video poster → durable http URL so Kit idle paint survives blob revoke. */
+async function resolveDurablePosterUrl(
+  poster: string | undefined,
+  signal: AbortSignal
+): Promise<string | undefined> {
+  const p = String(poster || '').trim();
+  if (!p) return undefined;
+  if (!p.startsWith('blob:') && !p.startsWith('data:')) return p;
+  try {
+    const uploaded = await uploadImageFromSrc(p, 'video-poster.jpg', { signal });
+    const url = String(uploaded?.url || '').trim();
+    return url || p;
+  } catch {
+    // Keep local still rather than finishing with no poster (black Kit plate).
+    return p;
+  }
+}
+
+async function withDurableVideoPosterAttrs(
+  extraAttrs: Record<string, unknown> | undefined,
+  signal: AbortSignal
+): Promise<Record<string, unknown> | undefined> {
+  if (!extraAttrs) return extraAttrs;
+  const kind = String(extraAttrs.assetKind || '').trim().toLowerCase();
+  if (kind !== 'video') return extraAttrs;
+  const durable = await resolveDurablePosterUrl(
+    extraAttrs.poster != null ? String(extraAttrs.poster) : undefined,
+    signal
+  );
+  if (!durable) return extraAttrs;
+  return { ...extraAttrs, poster: durable };
+}
+
 /** Upload a file for a spawned placeholder node. */
 export async function uploadCanvasPlaceholderFile(opts: {
   nodeId: string;
@@ -106,8 +139,11 @@ export async function uploadCanvasPlaceholderFile(opts: {
       : true;
     if (signal.aborted) return false;
 
+    const extraAttrs = await withDurableVideoPosterAttrs(opts.extraAttrs, signal);
+    if (signal.aborted) return false;
+
     finishPlaceholderUpload(id, uploaded, {
-      extraAttrs: opts.extraAttrs,
+      extraAttrs,
       remoteReady,
       waitDecode,
     });
@@ -136,8 +172,12 @@ export async function uploadCanvasPlaceholderSrc(opts: {
 
     const remoteReady = await waitForImageReady(uploaded.url, { signal });
     if (signal.aborted) return false;
+
+    const extraAttrs = await withDurableVideoPosterAttrs(opts.extraAttrs, signal);
+    if (signal.aborted) return false;
+
     finishPlaceholderUpload(id, uploaded, {
-      extraAttrs: opts.extraAttrs,
+      extraAttrs,
       remoteReady,
       waitDecode: true,
     });

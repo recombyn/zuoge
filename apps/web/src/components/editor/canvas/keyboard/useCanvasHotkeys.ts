@@ -33,10 +33,22 @@ import {
   tryConsumeLottieTimelineDelete,
   tryConsumeLottieTimelinePaste,
 } from '@/components/editor/nodes/AnimationNode/animationTimelineHotkeys';
+import { kitOwnsStagePointer } from '@/components/rcb/canvas/toolMap';
+import {
+  groupKitSelection,
+  redoKit,
+  selectionUsesKitClipboard,
+  undoKit,
+  ungroupKitSelection,
+  rcbIdsAllKitMapped,
+  deleteKitSelection,
+} from '@/components/rcb/canvas/kitBridge';
+import { unlockedGroupableIds } from '@/components/rcb/scene/document/sceneGroups';
 
 type UseCanvasHotkeysArgs = {
   readOnly: boolean;
   activeTool: string;
+  shapeKind?: string | null;
   documentRef: RefObject<any>;
   selectedIdsRef: RefObject<string[]>;
   selectedFrameIdsRef: RefObject<string[]>;
@@ -61,6 +73,7 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
   const {
     readOnly,
     activeTool,
+    shapeKind = null,
     documentRef,
     selectedIdsRef,
     selectedFrameIdsRef,
@@ -80,6 +93,7 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
     duplicateSelected,
     onAddToChat,
   } = args;
+  const kitOwns = () => kitOwnsStagePointer(activeTool, shapeKind);
   useEffect(() => {
     const isTypingTarget = (t: HTMLElement | null) =>
       Boolean(
@@ -143,11 +157,26 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
       if (mod && e.key === 'z' && !e.shiftKey) {
         if (typing) return;
         e.preventDefault();
+        // Kit owns stage history — one owner; stop Kit InputManager from also undoing.
+        if (kitOwns()) {
+          e.stopImmediatePropagation();
+          if (!collabUndo()) {
+            if (!undoKit()) undo();
+          }
+          return;
+        }
         if (!collabUndo()) undo();
       }
       if (mod && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
         if (typing) return;
         e.preventDefault();
+        if (kitOwns()) {
+          e.stopImmediatePropagation();
+          if (!collabRedo()) {
+            if (!redoKit()) redo();
+          }
+          return;
+        }
         if (!collabRedo()) redo();
       }
       if (mod && e.key.toLowerCase() === 'a' && activeTool === 'select' && !typing) {
@@ -229,6 +258,62 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
       }
       if (mod && !typing && !readOnly) {
         const k = e.key.toLowerCase();
+        // Kit owns clipboard for Kit-mapped selection; DomHost-only (lottie/group) stays on RCB.
+        if (kitOwns() && (k === 'c' || k === 'x' || k === 'v' || k === 'd')) {
+          if (k === 'c' && tryConsumeLottieTimelineCopy()) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+          }
+          if (k === 'v' && tryConsumeLottieTimelinePaste()) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+          }
+          const ids = selectedIdsRef.current;
+          const frameIds = selectedFrameIdsRef.current;
+          // Artboard-only: Kit Ctrl+X only cuts node selection (not selectedArtboardId).
+          // Route frame clipboard / duplicate through RCB.
+          const artboardOnly =
+            !ids.length && (frameIds.length > 0 || Boolean(activeFrameIdRef.current));
+          const useKitClip =
+            !artboardOnly && selectionUsesKitClipboard(documentRef.current, ids);
+          if (!useKitClip) {
+            // DomHost-only, mixed DomHost, or artboard-only: RCB clipboard.
+            if (k === 'c') {
+              if (!ids.length && !frameIds.length && !activeFrameIdRef.current) return;
+              if (selectionBusy()) return;
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              copySelected(ids, frameIds);
+              return;
+            }
+            if (k === 'x') {
+              if (!ids.length && !frameIds.length && !activeFrameIdRef.current) return;
+              if (selectionBusy()) return;
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              cutSelected(ids, frameIds);
+              return;
+            }
+            if (k === 'v') {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              runCtxActionRef.current('paste');
+              return;
+            }
+            if (k === 'd') {
+              if (!ids.length && !frameIds.length && !activeFrameIdRef.current) return;
+              if (selectionBusy()) return;
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              duplicateSelected(ids, frameIds);
+              return;
+            }
+          }
+          // Let Kit InputManager handle canvas clipboard / duplicate for Kit-mapped shapes.
+          return;
+        }
         if (k === 'c') {
           if (tryConsumeLottieTimelineCopy()) {
             e.preventDefault();
@@ -273,7 +358,22 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
           const ids = selectedIdsRef.current;
           const frameIds = selectedFrameIdsRef.current;
           const targetIds = resolveSelectionNodeIds(documentRef.current, ids, frameIds);
-          if (targetIds.length < 2 || selectionBusy()) return;
+          if (selectionBusy()) return;
+          if (kitOwns()) {
+            const unlocked = unlockedGroupableIds(documentRef.current, targetIds);
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (e.shiftKey) {
+              if (rcbIdsAllKitMapped(unlocked) && ungroupKitSelection(unlocked)) return;
+              runCtxActionRef.current('ungroup');
+              return;
+            }
+            if (unlocked.length < 2) return;
+            if (rcbIdsAllKitMapped(unlocked) && groupKitSelection(unlocked)) return;
+            runCtxActionRef.current('group');
+            return;
+          }
+          if (targetIds.length < 2 && !e.shiftKey) return;
           e.preventDefault();
           if (e.shiftKey) {
             runCtxActionRef.current('ungroup');
@@ -310,6 +410,20 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
         const ids = selectedIdsRef.current;
         const frameIds = selectedFrameIdsRef.current;
         if (ids.length || frameIds.length || activeFrameIdRef.current) {
+          // Kit: explicitly call InputManager.delete* — do not rely on Kit
+          // keydown alone (selection can be store-only / drawKeyboard gated).
+          if (
+            kitOwns() &&
+            selectionUsesKitClipboard(documentRef.current, ids) &&
+            !frameIds.length
+          ) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!deleteKitSelection(ids, [])) {
+              deleteCanvasSelection();
+            }
+            return;
+          }
           e.preventDefault();
           deleteCanvasSelection();
         }
@@ -333,6 +447,7 @@ export function useCanvasHotkeys(args: UseCanvasHotkeysArgs) {
   }, [
     activeFrameIdRef,
     activeTool,
+    shapeKind,
     canvasAttachPickRef,
     copySelected,
     cutSelected,

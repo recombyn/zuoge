@@ -62,7 +62,6 @@ import {
 } from '@/components/rcb/scene/document/sceneText';
 import { markdownToPlain } from '@/components/rcb/scene/document/sceneMarkdown';
 import { TEXT_FRAME_PADDING, TEXT_FRAME_RADIUS } from '@/components/rcb/scene/document/sceneEffects';
-import { nodeLeftTop, previewSvgNodeGeometry } from '@/components/rcb/scene/paint/sceneToSvg';
 import { clearNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
 import { getSharedNodeEls } from '@/components/rcb/shapes/shapeHostRegistry';
 import {
@@ -110,12 +109,7 @@ import AudioToolbarEditTools from '@/components/editor/nodes/AudioNode/AudioTool
 import { getAudioHost } from '@/components/editor/nodes/AudioNode/AudioNodeOverlay';
 import ShapeSelectionToolbar from '@/components/editor/nodes/ShapeNode/ShapeSelectionToolbar';
 import { SelectionToolbarShell } from './SelectionToolbarShell';
-import {
-  buildOutlinePathAsync,
-  canOutlineNode,
-  outlineNodePatch,
-  requestEnterPathEdit,
-} from '@/components/rcb/scene/paint/outlineToPath';
+import { enterKitPathEditForRcbId } from '@/components/rcb/canvas/kitBridge';
 import {
   loadFontCatalog,
   parseWeightSelectValue,
@@ -138,7 +132,7 @@ type Props = {
   valueBox?: SceneBox;
   /** Scene pad beyond chrome for outer stroke ink (center stroke half-width). */
   edgePadScene?: number;
-  /** Live control-box angle — toolbar tracks oriented top edge after rotate. */
+  /** Live control-box angle — dock to visual AABB; toolbar stays screen-upright (Kit context bar is never CSS-rotated). */
   angle?: number;
   onOpenAgent?: (opts?: { prompt?: string }) => void;
 };
@@ -364,41 +358,11 @@ function openImageMoreTool(
 }
 
 async function outlineSelectedNode(opts: {
-  node: SceneNodeInput;
   nodeId: string;
-  loadingLabel: string;
   failLabel: string;
-  okLabel: string;
-  enterPathEdit?: boolean;
 }) {
-  const hide = message.loading(opts.loadingLabel, 0);
-  try {
-    const outline = await buildOutlinePathAsync(opts.node);
-    if (!outline?.pathD) {
-      message.error(opts.failLabel);
-      return;
-    }
-    const patch = outlineNodePatch(opts.node, outline);
-    patchDocumentNode({
-        nodeId: opts.nodeId,
-        patch: {
-          key: 'shape',
-          x: patch.x,
-          y: patch.y,
-          width: patch.width,
-          height: patch.height,
-          attrs: patch.attrs,
-        },
-      });
-    if (opts.enterPathEdit) {
-      const st = String(opts.node?.attrs?.shapeType || opts.node?.key || '');
-      const fromStrokeOutline =
-        st === 'pen' || st === 'pencil' || st === 'line' || st === 'arrow';
-      requestEnterPathEdit(opts.nodeId, outline.pathD, { fromStrokeOutline });
-    }
-    message.success(opts.okLabel);
-  } finally {
-    hide();
+  if (!enterKitPathEditForRcbId(opts.nodeId)) {
+    message.error(opts.failLabel);
   }
 }
 
@@ -542,9 +506,7 @@ function SelectionContextToolbar(props: Props): ReactNode {
     }
     const nextAttrs = buildTextAttrsPreservingMarkdown(node.attrs || {}, mergedStyle);
     const { width, height } = measureTextNodeBoxAfterStyleChange(node, mergedStyle);
-    const { left, top } = nodeLeftTop(document, node);
     const nodeEls = getSharedNodeEls();
-    let previewed = false;
     if (nodeEls) {
       const el = nodeEls.get(nodeId) as
         | (SVGElement & {
@@ -562,16 +524,6 @@ function SelectionContextToolbar(props: Props): ReactNode {
         delete el.__sceneDragBaseLetterSpacing;
         el.__sceneFontSize = Number(mergedStyle.fontSize) || undefined;
       }
-      previewed = previewSvgNodeGeometry(
-        nodeEls,
-        nodeId,
-        { left, top, width, height },
-        {
-          textResizeMode: 'wrap',
-          plainText: parseNodeText(node.attrs || {}),
-          textStyle: mergedStyle,
-        }
-      );
     }
     patchDocumentNode({
         nodeId,
@@ -580,8 +532,8 @@ function SelectionContextToolbar(props: Props): ReactNode {
           width,
           height,
         },
-        // Live SVG already shows the new glyphs/box — skip remount flash (same as W/H).
-        skipHostReload: previewed,
+        // Noop preview always returned false — remount host from document.
+        skipHostReload: false,
       });
     clearNodeTransformPreviews([nodeId]);
   };
@@ -701,7 +653,7 @@ function SelectionContextToolbar(props: Props): ReactNode {
 
   const showLayerChrome = kind !== 'image';
   const supportsEffects = !['image', 'video', 'audio', 'lottie', 'frame', 'group'].includes(kind);
-  const showOutline = canOutlineNode(node);
+  const showOutline = isVectorKind;
   const imageAspectLocked = resolveImageAspectLocked(node, kind);
   const opacityControl = showLayerChrome ? (
     <OpacityControl nodeId={nodeId} />
@@ -748,15 +700,9 @@ function SelectionContextToolbar(props: Props): ReactNode {
       return;
     }
     if (key === 'outline') {
-      const isShapeKind =
-        kind === 'shape' || kind === 'rect' || kind === 'ellipse' || kind === 'path';
-      outlineSelectedNode({
-        node,
+      void outlineSelectedNode({
         nodeId,
-        loadingLabel: t('editor.imageToolbar.outlining'),
         failLabel: t('editor.imageToolbar.outlineFailed'),
-        okLabel: t('editor.imageToolbar.outlineDone'),
-        enterPathEdit: isShapeKind,
       });
       return;
     }

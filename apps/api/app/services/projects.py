@@ -685,7 +685,7 @@ def _cov_node_cover_digest(node: dict[str, Any], blob: bytes | None) -> str:
 
 
 def _cov_raster_shape(node: dict[str, Any]) -> bytes | None:
-    """Pillow tile for shape/rect — white board, real fill/stroke (not gray plates)."""
+    """Pillow tile for shape/rect — edge-to-edge fill/stroke (no letterbox margin)."""
     try:
         from io import BytesIO
 
@@ -699,9 +699,6 @@ def _cov_raster_shape(node: dict[str, Any]) -> bytes | None:
     scale = min(1.0, float(_COVER_EDGE) / max(w, h))
     out_w = max(32, int(round(w * scale)))
     out_h = max(32, int(round(h * scale)))
-    pad = max(4, int(round(max(out_w, out_h) * 0.06)))
-    canvas_w = out_w + pad * 2
-    canvas_h = out_h + pad * 2
 
     fill = _cov_parse_rgba(
         attrs.get("fill-color") or attrs.get("fill") or node.get("fill")
@@ -720,10 +717,11 @@ def _cov_raster_shape(node: dict[str, Any]) -> bytes | None:
     if not shape_type:
         shape_type = "rect"
 
-    img = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 255))
+    # Edge-to-edge tile — list cards use object-cover; no white letterbox margin.
+    img = Image.new("RGBA", (out_w, out_h), (255, 255, 255, 255))
     draw = ImageDraw.Draw(img)
-    x0, y0 = float(pad), float(pad)
-    x1, y1 = float(pad + out_w), float(pad + out_h)
+    x0, y0 = 0.0, 0.0
+    x1, y1 = float(out_w - 1), float(out_h - 1)
     fill_c = fill  # may be None → outline only
     stroke_c = stroke if stroke_w > 0 else None
     outline_w = max(1, int(round(stroke_w))) if stroke_c else 0

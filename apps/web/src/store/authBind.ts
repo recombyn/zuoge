@@ -1,23 +1,39 @@
 /**
  * Bind auth case mutators to Zustand.
+ *
+ * `runAuth` is pinned on globalThis so Vite HMR cannot desync mutators from
+ * the React-subscribed Zustand singleton (see store/index.ts).
  */
 import { produce } from 'immer';
 
 type AuthDraftFn = (fn: (draft: any) => void) => void;
 
-let runAuth: AuthDraftFn = () => {
-  throw new Error('Auth store not bound — import @/store before calling mutators');
+type AuthBindSlot = { runAuth: AuthDraftFn };
+
+const g = globalThis as typeof globalThis & {
+  __RCB_AUTH_BIND__?: AuthBindSlot;
 };
 
+function authBindSlot(): AuthBindSlot {
+  if (!g.__RCB_AUTH_BIND__) {
+    g.__RCB_AUTH_BIND__ = {
+      runAuth: () => {
+        throw new Error('Auth store not bound — import @/store before calling mutators');
+      },
+    };
+  }
+  return g.__RCB_AUTH_BIND__;
+}
+
 export function bindAuthStore(run: AuthDraftFn) {
-  runAuth = run;
+  authBindSlot().runAuth = run;
 }
 
 export function bindAuthMutator<S, P = void>(
   reducer: (state: S, action: { payload: P }) => void
 ): P extends void ? () => void : (payload: P) => void {
   return ((payload?: P) => {
-    runAuth((draft) => {
+    authBindSlot().runAuth((draft) => {
       reducer(draft, { payload: payload as P });
     });
   }) as P extends void ? () => void : (payload: P) => void;

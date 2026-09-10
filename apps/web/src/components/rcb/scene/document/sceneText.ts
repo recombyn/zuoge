@@ -299,7 +299,7 @@ export function measurePlainTextSize(text: string, style: Partial<TextStyle> = {
 
   // Tight width = ink metrics. Height = font em-box / line box so control chrome
   // covers CJK glyphs and matches the inline editor line-height.
-  const emBox = measureTextEmBoxHeight(merged, sample[0] || '永');
+  const emBox = measureTextEmBoxHeight(merged, sample[0] || '\u6c38');
   const height = Math.ceil(textHugContentHeight(fontSize, lineHeight, sample.length, emBox));
   return {
     width: Math.max(Math.ceil(fontSize), Math.ceil(maxW)),
@@ -321,7 +321,7 @@ export function measureWrappedTextSize(
     Math.round(maxWidth) || DEFAULT_TEXT_BOX_WIDTH
   );
   const lines = wrapPlainTextLines(text, merged, boxW);
-  const emBox = measureTextEmBoxHeight(merged, (lines[0] || '永').slice(0, 1) || '永');
+  const emBox = measureTextEmBoxHeight(merged, (lines[0] || '\u6c38').slice(0, 1) || '\u6c38');
   const height = Math.ceil(
     textHugContentHeight(fontSize, lineHeight, Math.max(1, lines.length), emBox)
   );
@@ -388,14 +388,14 @@ export function textHugContentHeight(
  */
 export function measureTextEmBoxHeight(
   style: Partial<TextStyle> = {},
-  sample = '永'
+  sample = '\u6c38'
 ): number {
   const merged = { ...DEFAULT_TEXT_STYLE, ...style };
   const fs = Math.max(1, Number(merged.fontSize) || 14);
   const ctx = getMeasureContext(merged);
   if (!ctx || typeof ctx.measureText !== 'function') return fs;
   try {
-    const m = ctx.measureText(String(sample || '永'));
+    const m = ctx.measureText(String(sample || '\u6c38'));
     const ascent = Number(
       (m as TextMetrics).fontBoundingBoxAscent ?? (m as TextMetrics).actualBoundingBoxAscent
     );

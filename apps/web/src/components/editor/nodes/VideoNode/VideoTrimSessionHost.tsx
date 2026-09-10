@@ -15,7 +15,7 @@ import { SELECTION_TOOLBAR_BELOW_BOX_GAP_PX } from '@/components/rcb/selection/c
 import { FloatingToolbar } from '@/components/editor/chrome/FloatingToolbar';
 import { ImageToolSep, imageToolBtn } from '@/components/editor/nodes/ImageNode/imageToolbarShared';
 import { radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { closeVideoToolPanel, setDocument, setSelectedNodeId, setSelectedNodeIds } from '@/store/modules/editor';
 import {
   addNodeToDocument,
@@ -265,7 +265,8 @@ function VideoTrimSessionHost({
   document: SceneDocument;
   hidden?: boolean;
 }): ReactNode {
-  const { t } = useTranslation();  const camera = useRcbCamera();
+  const { t } = useTranslation();
+  const camera = useRcbCamera();
   const { zoom } = camera;
   const panel = useSelector(
     (s: any) =>

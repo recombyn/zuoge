@@ -137,6 +137,64 @@ describe('framePlatePointer', () => {
     expect(frameIsEmpty(doc, 'lot')).toBe(true);
   });
 
+  it('animation workbench with timeline-closed preview children is occupied (marquee, not frame_move)', () => {
+    const doc = {
+      frames: [{ id: 'anim', x: 0, y: 0, width: 300, height: 300, kind: 'animation' }],
+      deltaSetLike: {
+        ROOT: { children: ['host', 'shape'] },
+        host: {
+          id: 'host',
+          key: 'lottie',
+          x: 0,
+          y: 0,
+          width: 300,
+          height: 300,
+          attrs: { frameId: 'anim', animationFrameHost: true },
+        },
+        shape: {
+          id: 'shape',
+          key: 'shape',
+          x: 40,
+          y: 40,
+          width: 80,
+          height: 80,
+          attrs: { shapeType: 'rect', frameId: 'anim' },
+        },
+      },
+    } as unknown as SceneDocument;
+    expect(frameIsEmpty(doc, 'anim')).toBe(false);
+    expect(
+      resolveFramePlateDragMode(doc, 'anim', { readOnly: false, canMove: true })
+    ).toBe('pointing_canvas');
+  });
+
+  it('animation workbench edit-open treats full-bleed ink as occupied content', async () => {
+    const { setAnimationWorkbenchTimelineFocus } = await import(
+      '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus'
+    );
+    setAnimationWorkbenchTimelineFocus('anim');
+    try {
+      const doc = {
+        frames: [{ id: 'anim', x: 0, y: 0, width: 300, height: 300, kind: 'animation' }],
+        deltaSetLike: {
+          ROOT: { children: ['bg'] },
+          bg: {
+            id: 'bg',
+            key: 'shape',
+            x: 0,
+            y: 0,
+            width: 300,
+            height: 300,
+            attrs: { shapeType: 'rect', frameId: 'anim' },
+          },
+        },
+      } as unknown as SceneDocument;
+      expect(frameIsEmpty(doc, 'anim')).toBe(false);
+    } finally {
+      setAnimationWorkbenchTimelineFocus(null);
+    }
+  });
+
   it('edge band scales with zoom and detects border hits', () => {
     const box = { left: 0, top: 0, width: 200, height: 100 };
     expect(framePlateEdgeBandScene(1)).toBeGreaterThan(0);

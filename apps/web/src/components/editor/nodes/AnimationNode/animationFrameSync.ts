@@ -13,8 +13,7 @@ import {
   serializeLottieAnimationData,
 } from '@/components/rcb/scene/document/nodeFactories';
 import type { SceneDocument, SceneNode } from '@/components/rcb/sceneNode';
-import { isFrameLocalCoordSpace } from '@/components/rcb/scene/paint/sceneToSvg';
-
+import { isFrameLocalCoordSpace } from '@/components/rcb/scene/layout/nodeLayout';
 const LINK_KEY = 'ln'; // custom: scene node id on a synced layer
 
 /** Plate box for scene↔Lottie mapping (0,0 under frameLocal — child x/y are already local). */

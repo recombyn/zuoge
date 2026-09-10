@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type ReactNode, memo } from 'react';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
 import { ProcessGlowShell } from '@/components/rcb/process/ProcessGlowShell';
-import { liveShapeGeomBox } from '@/components/rcb/selection/HostPathChrome';
+import { liveShapeGeomBox } from '@/components/rcb/selection/hostGeom';
 import {
   hasNodeTransformPreviews,
   subscribeTransformPreview,
@@ -37,7 +37,7 @@ export function NodeProcessGlow({
   nodeId: string;
   node: SceneNodeInput;
   /** Kept for call-site compat; label no longer portals into the SVG host. */
-  paintHost?: SVGElement | null;
+  paintHost?: Element | null;
 }): ReactNode {
   const hide = useSyncExternalStore(
     subscribeProcessPillHide,

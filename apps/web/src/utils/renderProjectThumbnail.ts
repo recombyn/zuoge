@@ -2,8 +2,8 @@
  * Client-side cover rasterization for list-card fallbacks (TemplateThumbnail / doc collage).
  */
 
-import { inlineSvgImages, rasterizeSvgString } from '@/components/rcb/scene/paint/exportImage';
-import { createSvgBoard, loadSceneOntoSvg } from '@/components/rcb/scene/paint/sceneToSvg';
+import { inlineSvgImages, rasterizeSvgString } from '@/components/rcb/scene/export/exportImage';
+import { createDomHostBoard, mountDomHostBoard } from '@/components/rcb/scene/dom/domHostBoard';
 import {
   isExportableSceneNode
 } from '@/components/rcb/scene/document/nodeCapabilities';
@@ -147,9 +147,9 @@ export function extractElementCoverDocument(document: unknown, nodeId: string): 
 
   const w = Math.max(1, num(node.width, 1));
   const h = Math.max(1, num(node.height, 1));
-  const pad = Math.max(12, Math.round(Math.max(w, h) * 0.08));
-  const boardW = Math.max(32, Math.round(w + pad * 2));
-  const boardH = Math.max(32, Math.round(h + pad * 2));
+  // Edge-to-edge — list cards object-cover; no letterbox margin around the element.
+  const boardW = Math.max(32, Math.round(w));
+  const boardH = Math.max(32, Math.round(h));
   const id = String(nodeId);
 
   return {
@@ -172,8 +172,8 @@ export function extractElementCoverDocument(document: unknown, nodeId: string): 
       [id]: {
         ...node,
         id,
-        x: pad,
-        y: pad,
+        x: 0,
+        y: 0,
         width: w,
         height: h,
       },
@@ -222,10 +222,8 @@ export async function renderDocumentThumbnail(
       backgroundColor: bg,
       backgroundFillType: 'solid',
     } as unknown as SceneDocument;
-    const { root, layer } = createSvgBoard(host, docW, docH);
-    await loadSceneOntoSvg(root, layer, previewDoc, 0, undefined, {
-      omitNonExportable: true,
-    });
+    const { root, layer } = createDomHostBoard(host, docW, docH);
+    await mountDomHostBoard(root, layer, previewDoc);
 
     const xml = new XMLSerializer().serializeToString(root);
     const inlined = await inlineSvgImages(xml, previewDoc, { failClosed: false });

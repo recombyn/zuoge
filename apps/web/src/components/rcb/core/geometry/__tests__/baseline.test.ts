@@ -38,27 +38,72 @@ describe('PathBuilder', () => {
     expect(d).toContain('Z');
   });
 
-  it('sweeps from fixed startDeg (default south)', () => {
-    // start=90°, +50% → south to north via west.
+  it('sweeps clockwise from fixed startDeg (default east / right)', () => {
+    // start=0°, +50% → right to left via south.
     const d = PathBuilder.ellipseVariant(100, 100, {
       innerRatio: 0,
       arcPercent: 50,
-      startDeg: 90,
+      startDeg: 0,
     }).toD();
     expect(d).toMatch(/M 50 50/);
-    // First rim point is start (south).
-    expect(d).toMatch(/L 50(?:\.\d+)? 100/);
+    // First rim point is start (east / right).
+    expect(d).toMatch(/L 100(?:\.\d+)? 50/);
   });
 
   it('builds an annular sector with hole + partial arc', () => {
     const d = PathBuilder.ellipseVariant(100, 100, {
       innerRatio: 0.4,
-      arcPercent: -76.7,
-      startDeg: 90,
+      arcPercent: 76.7,
+      startDeg: 0,
     }).toD();
     expect(d).toContain('A ');
     expect(d.match(/A /g)?.length).toBeGreaterThanOrEqual(2);
     expect(d).toContain('Z');
+  });
+});
+
+describe('ellipseArcPercentFromPointerAngle', () => {
+  it('tracks the pointer 1:1 clockwise from the right', async () => {
+    const { ellipseArcPercentFromPointerAngle, ellipseParametricAngle } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    // Pointer at south (π/2) from start east (0) → 25% of full turn.
+    expect(ellipseArcPercentFromPointerAngle(Math.PI / 2, 0)).toBeCloseTo(25, 5);
+    // Pointer at west (π) → 50%.
+    expect(ellipseArcPercentFromPointerAngle(Math.PI, 0)).toBeCloseTo(50, 5);
+    // Pointer just past start clockwise stays near min, not jumping to the other side.
+    expect(ellipseArcPercentFromPointerAngle(0.02, 0)).toBeGreaterThanOrEqual(0.5);
+    expect(ellipseArcPercentFromPointerAngle(0.02, 0)).toBeLessThan(2);
+
+    // Parametric angle on a wide ellipse: point on the south parametric ray.
+    const t = ellipseParametricAngle(50, 50, 50, 25, 50, 25);
+    expect(t).toBeCloseTo(Math.PI / 2, 5);
+  });
+});
+
+describe('stabilizeEllipseArcPercentDrag', () => {
+  it('pins near-zero shrinks that wrap across the start seam to the min wedge', async () => {
+    const { stabilizeEllipseArcPercentDrag, MIN_ELLIPSE_ARC_PERCENT } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    // Dragging 9.6% → 0%: a pointer past the start ray would report ~99%.
+    expect(stabilizeEllipseArcPercentDrag(9.6, 99.2, 9.6)).toBe(MIN_ELLIPSE_ARC_PERCENT);
+    expect(stabilizeEllipseArcPercentDrag(1.2, 98.5, 9.6)).toBe(MIN_ELLIPSE_ARC_PERCENT);
+  });
+
+  it('keeps a closed ring full until the pointer clearly leaves the seam', async () => {
+    const { stabilizeEllipseArcPercentDrag } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    expect(stabilizeEllipseArcPercentDrag(100, 1.5, 100)).toBe(100);
+    expect(stabilizeEllipseArcPercentDrag(100, 8, 100)).toBeCloseTo(8, 5);
+  });
+
+  it('pins near-full expands that wrap to min back to 100%', async () => {
+    const { stabilizeEllipseArcPercentDrag } = await import(
+      '@/components/rcb/scene/document/sceneShapes'
+    );
+    expect(stabilizeEllipseArcPercentDrag(96, 1.2, 80)).toBe(100);
   });
 });
 
@@ -79,10 +124,12 @@ describe('advanceEllipseArcAlong', () => {
     expect(ellipseArcPercentFromAlongRad(reopened, 1)).toBeCloseTo(95.2, 1);
   });
 
-  it('allows a zero-degree arc without retaining a minimum wedge', () => {
+  it('clamps a near-zero arc to the minimum wedge (avoids degenerate spike)', () => {
     const d = PathBuilder.ellipseVariant(100, 100, { innerRatio: 0.4, arcPercent: 0 }).toD();
-    expect(d).toContain('A 50 50 0 0 1');
-    expect(d).toContain('A 20 20 0 0 0');
+    expect(d).toContain('A ');
+    expect(d).toContain('Z');
+    // Must not collapse outer/inner ends onto the same point.
+    expect(d).not.toMatch(/A 50 50 0 0 1 50(?:\.\d+)? 100 A 20/);
   });
 
   it('preserves reverse arc direction without selecting a new direction mid-drag', async () => {
@@ -94,17 +141,33 @@ describe('advanceEllipseArcAlong', () => {
   });
 });
 
+describe('ellipse arc attr normalization', () => {
+  it('forces positive clockwise arc and fixed right-side start', async () => {
+    const {
+      ellipseArcPercentFromAttrs,
+      ellipseStartDegFromAttrs,
+      DEFAULT_ELLIPSE_START_DEG,
+    } = await import('@/components/rcb/scene/document/sceneShapes');
+    expect(DEFAULT_ELLIPSE_START_DEG).toBe(0);
+    expect(ellipseStartDegFromAttrs({ ellipseStartDeg: 90 })).toBe(0);
+    expect(ellipseArcPercentFromAttrs({ ellipseArcPercent: -76.7 })).toBeCloseTo(76.7, 5);
+  });
+});
+
 describe('ellipseArcPercentFromAlongRad', () => {
   it('covers a full turn without flipping sign', async () => {
-    const { ellipseArcPercentFromAlongRad, ellipseArcAlongRadFromPercent } =
+    const { ellipseArcPercentFromAlongRad, ellipseArcAlongRadFromPercent, MIN_ELLIPSE_ARC_PERCENT } =
       await import('@/components/rcb/scene/document/sceneShapes');
     const half = Math.PI;
     expect(ellipseArcPercentFromAlongRad(half, 1)).toBeCloseTo(50, 5);
     expect(ellipseArcPercentFromAlongRad(half, -1)).toBeCloseTo(-50, 5);
     expect(ellipseArcAlongRadFromPercent(100)).toBeCloseTo(Math.PI * 2, 5);
     expect(ellipseArcPercentFromAlongRad(Math.PI * 2, -1)).toBe(-100);
-    expect(ellipseArcPercentFromAlongRad(0, 1)).toBe(0);
-    expect(ellipseArcAlongRadFromPercent(0)).toBe(0);
+    expect(ellipseArcPercentFromAlongRad(0, 1)).toBe(MIN_ELLIPSE_ARC_PERCENT);
+    expect(ellipseArcAlongRadFromPercent(0)).toBeCloseTo(
+      (MIN_ELLIPSE_ARC_PERCENT / 100) * Math.PI * 2,
+      5
+    );
   });
 });
 

@@ -16,7 +16,7 @@ import {
   type RcbCamera,
 } from '@/components/rcb';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
-import { sceneToDocumentCoords } from '@/components/rcb/scene/paint/svgToScene';
+import { sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 
 export type CanvasPluginManifest = {
   id: string;

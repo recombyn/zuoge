@@ -44,7 +44,7 @@ import {
   type ExportAffixMode,
   type ExportImageFormat,
   type ExportSlotConfig,
-} from '@/components/rcb/scene/paint/exportImage';
+} from '@/components/rcb/scene/export/exportImage';
 import {
   normalizeDocument
 } from '@/components/rcb/scene/document/sceneDocument';
@@ -56,7 +56,7 @@ import {
 import {
   parseLottieAnimationData
 } from '@/components/rcb/scene/document/nodeFactories';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { downloadVideoNodeAsset } from '@/components/editor/nodes/VideoNode/VideoDownloadButton';
 import {
   downloadLottieAsGif,

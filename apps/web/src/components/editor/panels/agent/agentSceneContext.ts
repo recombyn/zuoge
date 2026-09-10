@@ -1,6 +1,6 @@
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 import { maxRadius, radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { parseNodeText, parseNodeTextStyle } from '@/components/rcb/scene/document/sceneText';
 import { nodeIdsBoundToFrames } from '@/components/rcb/scene/document/sceneClipboard';
 import { parseFillGradient, parseFillType } from '@/components/rcb/scene/document/sceneFill';

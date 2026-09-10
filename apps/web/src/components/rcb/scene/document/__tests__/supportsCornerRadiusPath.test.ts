@@ -55,7 +55,7 @@ describe('supportsCornerRadius — closed boolean / path', () => {
         attrs: {
           shapeType: 'path',
           closed: 'true',
-          // 4+ closed rings — same threshold as requestEnterPathEdit
+          // 4+ closed rings — same threshold as Kit path-edit / convertToPath
           path: 'M 0 0 L 10 0 L 10 10 Z M 20 0 L 30 0 L 30 10 Z M 40 0 L 50 0 L 50 10 Z M 60 0 L 70 0 L 70 10 Z',
         },
       })

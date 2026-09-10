@@ -9,8 +9,8 @@ import {
   isFrameLocalCoordSpace,
   nodeDocumentLeftTop,
   nodeLeftTop,
-} from '@/components/rcb/scene/paint/sceneToSvg';
-import { storedOriginForSceneResult } from '@/components/rcb/scene/paint/svgToScene';
+} from '@/components/rcb/scene/layout/nodeLayout';
+import { storedOriginForSceneResult } from '@/components/rcb/scene/layout/coords';
 import { applyNodeFrameBindings } from '@/components/editor/canvas/canvasSession';
 import { setAnimationWorkbenchTimelineFocus } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import type { SceneDocument } from '@/components/rcb/sceneNode';

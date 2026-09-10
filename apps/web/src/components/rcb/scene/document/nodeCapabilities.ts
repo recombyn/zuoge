@@ -73,9 +73,8 @@ export function isAudioGeneratorNode(node: SceneNodeRef): boolean {
 }
 
 /**
- * Empty generator plates (no bitmap/poster yet) — must be SVG hosts so Lucide
- * icons stay crisp and stackOrder/`data-z` interleaves with other hosts.
- * WebGL densified line redraws looked soft and sat under all SVG hosts.
+ * Empty generator plates (no bitmap/poster yet).
+ * Kit owns gray wash + Lucide glyph + pick/select/move.
  */
 export function isEmptyGeneratorPlate(node: SceneNodeRef): boolean {
   if (!node) return false;
@@ -327,7 +326,7 @@ export function isIconImageNode(node: SceneNodeRef): boolean {
 
 /**
  * Per-side stroke (T/R/B/L) is only rendered for rect-like closed paths
- * (`createRectLike` in sceneToSvg).
+ * (rect-like create).
  */
 export function supportsSideStroke(node: SceneNodeRef) {
   if (!node) return false;
@@ -340,7 +339,7 @@ export function supportsSideStroke(node: SceneNodeRef) {
 }
 
 /**
- * Closed path / boolean result — fillets sharp verts via `radiusVertices` (sceneToSvg).
+ * Closed path / boolean result — fillets sharp verts via `radiusVertices` (path fillet).
  */
 function isClosedPathNode(node: SceneNodeRef): boolean {
   if (!node?.attrs) return false;

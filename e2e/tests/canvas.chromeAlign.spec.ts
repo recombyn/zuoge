@@ -1,6 +1,6 @@
 /**
  * Live editor: selection chrome vs shape ink + visual-outer vs grid at high zoom.
- * Stays on ADR 0027 (overlay CameraTransform) ‚Ä?measures product alignment bugs.
+ * Stays on ADR 0027 (overlay CameraTransform) ù?measures product alignment bugs.
  */
 import path from 'node:path';
 import { test, expect, type Page, type Locator } from '@playwright/test';
@@ -55,7 +55,7 @@ async function seedAuthSession(page: Page) {
 
 async function dismissBlockingDialogs(page: Page) {
   for (let i = 0; i < 8; i += 1) {
-    const skip = page.getByRole('button', { name: /^Skip$|^Ë∑≥Ëøá$/i });
+    const skip = page.getByRole('button', { name: /^Skip$|^??$/i });
     if ((await skip.count()) > 0) {
       await skip.last().click({ force: true }).catch(() => undefined);
       await sleep(150);
@@ -98,7 +98,7 @@ async function focusStage(page: Page, stage: Locator) {
   return box;
 }
 
-test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
+test.describe('canvas chrome ù?ink align (high zoom)', () => {
   test.skip(!TOKEN, E2E_TOKEN_SKIP_REASON);
 
   test.beforeEach(async ({ page }) => {
@@ -117,7 +117,7 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
     await sleep(500);
     await expectShapeInk(page, 1);
 
-    // Draw commit auto-selects ‚Ä?chrome should mount before we leave select.
+    // Draw commit auto-selects ù?chrome should mount before we leave select.
     await expect
       .poll(async () => selectionChromeCount(page), {
         timeout: 12_000,
@@ -148,12 +148,12 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
     // Keep selection: click predicted ink if chrome vanished after zoom.
     const still = await selectionChromeCount(page);
     if (still === 0) {
-      const layersBtn = page.getByRole('button', { name: /^Layers$|^ÂõæÂ±Ç$/i }).first();
+      const layersBtn = page.getByRole('button', { name: /^Layers$|^??$/i }).first();
       if (await layersBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
         await layersBtn.click({ force: true });
         await sleep(200);
       }
-      const layerHit = page.getByText(/^Áü©ÂΩ¢$|^Rectangle$/i).first();
+      const layerHit = page.getByText(/^??$|^Rectangle$/i).first();
       await expect(layerHit).toBeAttached({ timeout: 10_000 });
       await layerHit.click({ force: true });
       await sleep(500);
@@ -240,7 +240,7 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
       const panX = panM ? Number(panM[1]) : 0;
       const panY = panM ? Number(panM[2]) : 0;
       const z = cssZoom > 0 ? cssZoom : 1;
-      const outset = 0.5; // center stroke 1 ‚Ä?matches strokeChromeOutset
+      const outset = 0.5; // center stroke 1 ù?matches strokeChromeOutset
       const chromeGeom = {
         left: geom.left - outset,
         top: geom.top - outset,
@@ -336,7 +336,7 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
           document.querySelector('[data-rcb-shapes-layer="1"]')?.getAttribute('data-rcb-visible-count') ||
           '0'
       );
-      const soaInk = canvasIdle > 0;
+      const kitInk = canvasIdle > 0;
       const hasSvgShape = Boolean(baseline || nodeEl);
       return {
         cssZoom,
@@ -344,7 +344,7 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
         geom,
         visual,
         chromeGeom,
-        soaInk,
+        kitInk,
         hasSvgShape,
         visualOnGrid: {
           left: onLattice(visual.left),
@@ -376,7 +376,7 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
         sameSceneRoot,
         sameCameraRoot,
         hasChrome: Boolean(chromeBox || chromeSvg || document.querySelector('[data-rcb-sel-knob]')),
-        hasShape: hasSvgShape || soaInk,
+        hasShape: hasSvgShape || kitInk,
         worldTf: zoomAttr.slice(0, 120),
         overlayKids: overlay?.childElementCount ?? 0,
         chromeLayer: Boolean(document.querySelector('[data-rcb-sel-chrome-layer]')),
@@ -425,7 +425,7 @@ test.describe('canvas chrome ‚Ü?ink align (high zoom)', () => {
       expect(Math.abs((report.inkVsPred?.dx || 0) - outsetScreen)).toBeLessThan(0.5);
       expect(Math.abs((report.inkVsPred?.dy || 0) - outsetScreen)).toBeLessThan(0.5);
     } else {
-      // SoA ink: chrome knobs + high zoom smoke only (no SVG baseline to compare).
+      // Kit ink: chrome knobs + high zoom smoke only (no SVG baseline to compare).
       expect(report.se).toBeTruthy();
     }
 

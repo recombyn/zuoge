@@ -83,7 +83,7 @@ Editor **document**, selection, tools, camera-ish UI — local canvas SoT. Do no
 
 ## Related
 
-- [canvas-architecture.md](./canvas-architecture.md) — paint / SoA ink / demotion / QT cull / Path2D
+- [canvas-architecture.md](./canvas-architecture.md) — paint / Kit underlayer / demotion / QT cull / Path2D
 - [scene-json-spec.md](./scene-json-spec.md) — persisted document JSON
 - [billing.md](./billing.md) — `WALLET_BILLING_ENABLED` + `useBillingEnabled`
 - [deployment-modes.md](./deployment-modes.md) — self-host / dev / desktop

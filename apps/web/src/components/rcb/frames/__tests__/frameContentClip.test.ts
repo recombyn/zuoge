@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { applyFrameContentClip, syncFrameContentClip } from '../frameContentClip';
+import {
+  applyFrameContentClip,
+  findClippingFrameForNode,
+  syncFrameContentClip,
+} from '../frameContentClip';
 import {
   clearLiveArtboardFrameGeometry,
   previewArtboardFrameGeometry,
@@ -10,6 +14,30 @@ import {
 } from '@/components/rcb/core/transformPreview';
 
 describe('frame content clipping', () => {
+  it('treats undefined clipContent as on (default)', () => {
+    const frame = {
+      id: 'frame-1',
+      name: 'Frame',
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      hidden: false,
+      backgroundColor: '#fff',
+    };
+    const found = findClippingFrameForNode(
+      { frames: [frame] },
+      { attrs: { frameId: 'frame-1' } }
+    );
+    expect(found?.id).toBe('frame-1');
+    expect(
+      findClippingFrameForNode(
+        { frames: [{ ...frame, clipContent: false }] },
+        { attrs: { frameId: 'frame-1' } }
+      )
+    ).toBeNull();
+  });
+
   it('keeps plate clip while frameId is set, even when AABB is outside the plate', () => {
     const root = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');

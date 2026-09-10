@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { buildMarkdownTextAttrs, measurePlainTextSize } from './sceneText';
+import { buildMarkdownTextAttrs, measurePlainTextSize, type TextStyle } from './sceneText';
 import {
   clampShapeSides,
   DEFAULT_SHAPE_SIDES,
@@ -18,6 +18,7 @@ export function createTextNode({
   height,
   autoSize = true,
   fontSize,
+  fontFamily,
 }: {
   x?: number;
   y?: number;
@@ -28,13 +29,15 @@ export function createTextNode({
   autoSize?: boolean;
   /** Scene-px font size (T-tool passes zoom-fitted size so high zoom is not huge). */
   fontSize?: number;
+  fontFamily?: string;
 } = {}): CreatedSceneNode {
   const id = nanoid(10);
   const content = String(text ?? '');
-  const style =
-    fontSize != null && Number.isFinite(fontSize) && fontSize > 0
-      ? { fontSize: Math.max(1, Number(fontSize)) }
-      : {};
+  const style: Partial<TextStyle> = {};
+  if (fontSize != null && Number.isFinite(fontSize) && fontSize > 0) {
+    style.fontSize = Math.max(1, Number(fontSize));
+  }
+  if (fontFamily) style.fontFamily = String(fontFamily);
   const measured = measurePlainTextSize(content || 'M', style);
   // Empty autoSize = caret only (tiny width). Fixed-width keeps the dragged box.
   const w = width ?? (content ? measured.width : autoSize ? 2 : 160);
@@ -114,13 +117,18 @@ export function createShapeNode({
   // half-pixel snapping the node would shift freehand ink off the stored centerline.
   const rawX = Number(x) || 0;
   const rawY = Number(y) || 0;
-  const rawW = Math.max(1, Number(width) || 1);
-  const rawH = Math.max(1, Number(height) || 1);
+  // Keep true size — do not floor to 1wu (high zoom draws sub-1 shapes).
+  const nW = Number(width);
+  const nH = Number(height);
+  const rawW = Number.isFinite(nW) && nW > 0 ? nW : 1;
+  const rawH = Number.isFinite(nH) && nH > 0 ? nH : 1;
   const keepExactOrigin = shapeType === 'pencil' || shapeType === 'pen';
   const ix = keepExactOrigin ? rawX : Math.round(rawX * 2) / 2;
   const iy = keepExactOrigin ? rawY : Math.round(rawY * 2) / 2;
-  const iw = keepExactOrigin ? rawW : Math.max(1, Math.round(rawW * 2) / 2);
-  const ih = keepExactOrigin ? rawH : Math.max(1, Math.round(rawH * 2) / 2);
+  const snappedW = keepExactOrigin ? rawW : Math.round(rawW * 2) / 2;
+  const snappedH = keepExactOrigin ? rawH : Math.round(rawH * 2) / 2;
+  const iw = snappedW > 0 ? snappedW : rawW;
+  const ih = snappedH > 0 ? snappedH : rawH;
   if (shapeType === 'line' || shapeType === 'arrow') {
     return {
       id,
@@ -130,7 +138,7 @@ export function createShapeNode({
         x: ix,
         y: iy,
         z: 0,
-        width: Math.max(iw, 1),
+        width: iw > 0 ? iw : rawW,
         // Open strokes are length + angle; visual thickness belongs to border-width.
         height: STROKE_GEOMETRY_HEIGHT,
         attrs: {

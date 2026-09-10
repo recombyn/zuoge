@@ -110,7 +110,7 @@ function listRootNodeIds(doc: SceneDocument): string[] {
   return Array.isArray(fromRoot) ? uniqueStringIds(fromRoot) : [];
 }
 
-/** Stable unique ids — duplicate ROOT/page children break React keys + SoA sync. */
+/** Stable unique ids — duplicate ROOT/page children break React keys + Kit sync. */
 export function uniqueStringIds(ids: readonly unknown[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -378,7 +378,7 @@ export function maxArtboardPlateStackZ(doc: SceneDocument | null | undefined): n
 
 /**
  * Host + hit z for nodes. Empty world generators never sit under opaque artboard
- * plates: idle SoA used to paint under every plate, and SVG hosts that follow
+ * plates: Kit ink used to paint under every plate, and SVG hosts that follow
  * raw stackOrder vanish under a later 画板 until selection max+1.
  * Does not mutate `stackOrder`.
  */
@@ -401,11 +401,11 @@ export function nodePaintZIndex(
 
 /**
  * World (unbound) node whose stack z is above at least one artboard plate.
- * Those must paint as SVG hosts on the shared stack mount — SoA ink sits under
+ * Those must paint as SVG hosts on the shared stack mount — Kit ink sits under
  * that SVG, so only hosts can cover 画板 / 动画工作台 plates via data-z.
  *
  * Workbench surround (`animationWorkbenchSurround`) is visibility-only: always
- * false here so pasteboard ink stays SoA mesh (same as closed-timeline world).
+ * false here so pasteboard ink stays Kit mesh (same as closed-timeline world).
  * Do not reintroduce DomHost promotion for surround.
  */
 export function worldNodeStacksAboveAnyFrame(

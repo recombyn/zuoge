@@ -7,13 +7,11 @@ import {
 } from '@/components/rcb/frames/frameContentClip';
 import { syncStackPaintOrder } from '@/components/rcb/scene/document/sceneStackPainter';
 import {
-  createSvgBoard,
-  nodeToSvgElement,
-} from '@/components/rcb/scene/paint/sceneToSvg';
-import {
-  getPencilBrushPaintRev,
-  subscribePencilBrushPaint,
-} from '@/components/rcb/tools/pencilBrushes';
+  createDomHostBoard,
+  mountDomHostAnchor,
+  syncHtmlMediaMountGeometry,
+} from '@/components/rcb/scene/dom/domHostShell';
+import { isEmptyGeneratorPlate } from '@/components/rcb/scene/document/nodeCapabilities';
 import {
   blendModeToCss,
   parseBlendMode,
@@ -32,7 +30,7 @@ import {
   unregisterShapeHost,
   updateShapeHostElement,
 } from '@/components/rcb/shapes/shapeHostRegistry';
-import type { SceneDocument } from '@/components/rcb/sceneNode';
+import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 
 type Props = {
   nodeId: string;
@@ -98,20 +96,20 @@ function setHostPaintOpacity(el: Element | null | undefined, hidden: boolean) {
 
 function resolveHostPaintEl(
   nodeId: string,
-  layer?: SVGGElement | null
-): SVGElement | null {
+  layer?: Element | null
+): Element | null {
   return (
     getSharedNodeEls()?.get(nodeId) ||
     (layer?.querySelector?.(
       `[data-scene-node-id="${CSS.escape(nodeId)}"]`
-    ) as SVGElement | null) ||
+    ) as Element | null) ||
     null
   );
 }
 
 /** Blend on the paint node only — never on the stack layer (under-plate bug). */
-function applyHostBlend(el: SVGElement | null | undefined, blendCss: string) {
-  if (!el) return;
+function applyHostBlend(el: Element | null | undefined, blendCss: string) {
+  if (!el || !(el instanceof HTMLElement || el instanceof SVGElement)) return;
   if (blendCss) el.style.mixBlendMode = blendCss;
   else el.style.removeProperty('mix-blend-mode');
 }
@@ -132,7 +130,6 @@ function RcbShapeHost({
 }: Props) {
   const camera = useRcbCamera();
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<SVGGElement | null>(null);
   const bootRef = useRef(0);
   const forceHiddenRef = useRef(forceHidden);
@@ -150,10 +147,7 @@ function RcbShapeHost({
       }),
     []
   );
-  const [brushPaintRev, setBrushPaintRev] = useState(() => getPencilBrushPaintRev());
-  useEffect(() => subscribePencilBrushPaint(() => setBrushPaintRev(getPencilBrushPaintRev())), []);
   const node = document?.deltaSetLike?.[nodeId];
-  const isPencilNode = String(node?.attrs?.shapeType || '').toLowerCase() === 'pencil';
   const clipGeometryToken = [node?.x, node?.y, node?.width, node?.height].join('|');
   const blendMode = parseBlendMode(node?.attrs?.blendMode, { allowPassThrough: false });
   const layerOpacity = parseLayerOpacity(node?.attrs?.opacity, 1);
@@ -200,12 +194,10 @@ function RcbShapeHost({
     node?.attrs?.textFrame,
     node?.attrs?.path,
     node?.attrs?.shapeType,
-    // Angle / flip are transform-only — previewSvgNodeTransform updates the host
+    // Angle / flip are transform-only — DomHost preview noop / Kit TransformPreview
     // without remounting (full rebuild corrupts boolean / outlined compound paths).
     node?.attrs?.brushStyle,
     node?.attrs?.pathPressure,
-    // Pencil silhouette depends on live brush option overrides (taper/thinning/…).
-    isPencilNode ? brushPaintRev : 0,
     // All effects share the SVG paint path. Include their complete input so a
     // path/line/pen gets the same immediate repaint as an image or rect.
     node?.attrs?.['shadow-enabled'],
@@ -240,18 +232,20 @@ function RcbShapeHost({
   ].join('|');
 
   const processing = String(node?.attrs?.processStatus || '') === 'running';
-  const [paintEl, setPaintEl] = useState<SVGElement | null>(null);
-  const paintElRef = useRef<SVGElement | null>(null);
+  const [paintEl, setPaintEl] = useState<Element | null>(null);
+  const paintElRef = useRef<Element | null>(null);
   paintElRef.current = paintEl;
+  const hostLayerRef = useRef<HTMLElement | null>(null);
 
-  const resolvePaintEl = (): SVGElement | null => {
+  const resolvePaintEl = (): Element | null => {
     const fromHost = getShapeHost(nodeId)?.el;
-    if (fromHost instanceof SVGElement) return fromHost;
-    return resolveHostPaintEl(nodeId, layerRef.current);
+    if (fromHost) return fromHost;
+    return resolveHostPaintEl(nodeId, layerRef.current ?? hostLayerRef.current);
   };
 
   const syncOwnedFrameClip = () => {
     const el = resolvePaintEl();
+    if (!(el instanceof SVGElement)) return;
     const root = getSceneWorldRoot();
     setShapeHostRevealOverflow(nodeId, revealOverflow);
     syncFrameContentClip(root, el, document, node as Record<string, unknown> | null, {
@@ -267,70 +261,82 @@ function RcbShapeHost({
     const seq = ++bootRef.current;
     const n = document.deltaSetLike?.[nodeId];
     let cancelled = false;
-    // Plates + all hosts share shapes mount (one data-z stack).
     const sharedRoot = getSceneWorldRoot();
     const sharedMount = getSceneShapesMount();
     if (!sharedRoot || !sharedMount) return undefined;
 
-    const { root, layer } = createSvgBoard(host, 1, 1, {
+    // Empty generators: Kit owns wash + Lucide + 1px hairline (no DomHost icon).
+    if (n && isEmptyGeneratorPlate(n)) {
+      return undefined;
+    }
+
+    // Kit paints SoftGlow in node local space — host is pill-only (no SVG plate).
+    // Video/audio upload must not mount HTML decoder FO (same SoftGlow as images).
+    if (n && String(n.attrs?.processStatus || '') === 'running') {
+      return undefined;
+    }
+
+    const { root, layer, hostLayer, shared } = createDomHostBoard(host, 1, 1, {
       infinite: true,
       sharedRoot,
       sharedMount,
     });
     layerRef.current = layer;
-    layer.setAttribute('data-rcb-shape-id', nodeId);
-    layer.setAttribute('data-z', String(paintZIndex));
-    layer.style.opacity = forceHiddenRef.current ? '0' : String(layerOpacity);
-    layer.style.removeProperty('mix-blend-mode');
+    hostLayerRef.current = hostLayer;
+    const orderEl = shared ? hostLayer : layer;
+    orderEl.setAttribute('data-rcb-shape-id', nodeId);
+    orderEl.setAttribute('data-rcb-shape-layer', nodeId);
+    orderEl.setAttribute('data-z', String(paintZIndex));
+    orderEl.style.opacity = forceHiddenRef.current ? '0' : String(layerOpacity);
+    if (orderEl instanceof HTMLElement) {
+      orderEl.style.removeProperty('mix-blend-mode');
+    } else {
+      (orderEl as SVGGElement).style.removeProperty('mix-blend-mode');
+    }
 
     const nodeEls = getSharedNodeEls() || new Map();
-    registerShapeHost({ nodeId, root, layer, el: null, kind: 'svg', revealOverflow });
+    registerShapeHost({
+      nodeId,
+      root,
+      layer: hostLayer,
+      svgLayer: layer,
+      el: null,
+      kind: 'svg',
+      revealOverflow,
+    });
     setPaintEl(null);
 
-    async function mountShape() {
-      try {
-        const el = await nodeToSvgElement(root, layer, document, n, nodeId);
-        if (cancelled || bootRef.current !== seq) {
-          try {
-            el?.remove();
-          } catch {
-            /* ignore */
-          }
-          return;
-        }
-        if (el) {
-          applyHostBlend(el, activeBlendCss);
-          el.style.opacity = '1';
-          el.setAttribute('opacity', '1');
-          if (forceHiddenRef.current) setHostPaintOpacity(el, true);
-          const reveal = revealOverflowRef.current;
-          setShapeHostRevealOverflow(nodeId, reveal);
-          syncFrameContentClip(root, el, document, n as Record<string, unknown> | null, {
-            zoom: camera.zoom,
-            revealOverflow: reveal,
-          });
-          const sharedMap = getSharedNodeEls();
-          if (sharedMap) sharedMap.set(nodeId, el);
-          else nodeEls.set(nodeId, el);
-          updateShapeHostElement(nodeId, el);
-          setPaintEl(el);
-        }
-      } catch (err) {
-        console.error('RcbShapeHost mount failed', nodeId, err);
-      }
+    const el = mountDomHostAnchor(layer, n, nodeId);
+    if (el && !cancelled && bootRef.current === seq) {
+      applyHostBlend(el, activeBlendCss);
+      el.style.opacity = '1';
+      el.setAttribute('opacity', '1');
+      if (forceHiddenRef.current) setHostPaintOpacity(el, true);
+      const reveal = revealOverflowRef.current;
+      setShapeHostRevealOverflow(nodeId, reveal);
+      syncFrameContentClip(root, el, document, n as Record<string, unknown> | null, {
+        zoom: camera.zoom,
+        revealOverflow: reveal,
+      });
+      const sharedMap = getSharedNodeEls();
+      if (sharedMap) sharedMap.set(nodeId, el);
+      else nodeEls.set(nodeId, el);
+      updateShapeHostElement(nodeId, el);
+      setPaintEl(el);
     }
-    mountShape();
 
     return () => {
       cancelled = true;
       setPaintEl(null);
       unregisterShapeHost(nodeId);
       try {
-        layer.remove();
+        if (shared) hostLayer.remove();
+        else layer.remove();
       } catch {
         /* ignore */
       }
       layerRef.current = null;
+      hostLayerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId, reloadToken, paintToken, worldEpoch]);
@@ -338,6 +344,12 @@ function RcbShapeHost({
   useEffect(() => {
     syncOwnedFrameClip();
   }, [camera.zoom, clipGeometryToken, document, frameClipToken, node, nodeId, revealOverflow, worldEpoch]);
+
+  // DomHost FO size follows SceneDocument geometry without full remount.
+  useEffect(() => {
+    if (!node || !paintEl || !(paintEl instanceof SVGElement)) return;
+    syncHtmlMediaMountGeometry(paintEl, node);
+  }, [clipGeometryToken, node, paintEl]);
 
   // replaceShapePaint swaps `el` without remounting — re-own clip and rebind SoftGlow.
   useEffect(
@@ -354,45 +366,48 @@ function RcbShapeHost({
   );
 
   useEffect(() => {
-    const el = resolveHostPaintEl(nodeId, layerRef.current);
+    const el = resolveHostPaintEl(nodeId, layerRef.current ?? hostLayerRef.current);
     setHostPaintOpacity(el, forceHidden);
-    const layer = layerRef.current;
+    const layer = layerRef.current ?? hostLayerRef.current;
     if (layer) layer.style.opacity = forceHidden ? '0' : String(layerOpacity);
   }, [forceHidden, nodeId, paintToken, reloadToken, layerOpacity]);
 
   useEffect(() => {
-    const layer = layerRef.current;
+    const layer = layerRef.current ?? hostLayerRef.current;
     if (layer) layer.style.removeProperty('mix-blend-mode');
     applyHostBlend(resolveHostPaintEl(nodeId, layer), activeBlendCss);
   }, [activeBlendCss, paintToken, nodeId]);
 
   useEffect(() => {
     const layer = layerRef.current;
+    const hostLayer = hostLayerRef.current;
     const mount = getSceneShapesMount();
-    if (!layer) return;
-    layer.setAttribute('data-z', String(paintZIndex));
-    if (!mount || layer.parentNode !== mount) return;
+    const orderEl = hostLayer ?? (layer as Element | null);
+    if (!orderEl || !mount) return;
+    const wrap = layer?.ownerSVGElement?.parentElement ?? null;
+    const zEl =
+      wrap instanceof HTMLElement && wrap.hasAttribute('data-rcb-dom-host-layer')
+        ? wrap
+        : orderEl;
+    zEl.setAttribute('data-z', String(paintZIndex));
+    if (zEl.parentNode !== mount) return;
     syncStackPaintOrder(mount);
   }, [paintZIndex, paintToken, worldEpoch]);
 
   return (
     <div
-      ref={wrapRef}
-      data-rcb-shape={nodeId}
+      ref={hostRef}
+      data-rcb-shape-host={nodeId}
       className="pointer-events-none absolute left-0 top-0 overflow-visible"
       style={{
         zIndex,
-        // Shared-world paint lives in the scene SVG; wrap is a React anchor only.
+        width: 0,
+        height: 0,
+        overflow: 'visible',
         opacity: 1,
       }}
     >
-      <div
-        ref={hostRef}
-        className="pointer-events-none absolute left-0 top-0 overflow-visible"
-        data-rcb-shape-host={nodeId}
-        style={{ width: 0, height: 0, overflow: 'visible' }}
-      />
-      {processing && paintEl && node ? (
+      {processing && node ? (
         <NodeProcessGlow nodeId={nodeId} node={node} paintHost={paintEl} />
       ) : null}
     </div>

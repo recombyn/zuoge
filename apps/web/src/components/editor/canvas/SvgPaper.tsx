@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, ReactNode, Ref } from 'react';
+import { memo, type CSSProperties, ReactNode, Ref, type RefCallback } from 'react';
 
 type SvgPaperProps = {
   paperRef: Ref<HTMLDivElement>;
@@ -16,8 +16,22 @@ type SvgPaperProps = {
   infinite?: boolean;
 };
 
+function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
+  if (!ref) return;
+  if (typeof ref === 'function') {
+    (ref as RefCallback<T>)(value);
+    return;
+  }
+  try {
+    (ref as { current: T | null }).current = value;
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Scene shapes host. Visual zoom/pan is owned by RcbCanvas world transform.
+ * Infinite/Kit path: one anchor div (no nested empty host).
  */
 function SvgPaper({
   paperRef,
@@ -31,11 +45,14 @@ function SvgPaper({
   infinite = false,
 }: SvgPaperProps) {
   if (infinite) {
+    const setAnchor = (el: HTMLDivElement | null) => {
+      assignRef(paperRef, el);
+      assignRef(hostRef, el);
+    };
     return (
       <div
-        ref={paperRef}
+        ref={setAnchor}
         className={className || 'rcb-shapes relative overflow-visible'}
-        data-rcb-shapes="1"
         style={{
           position: 'absolute',
           left: 0,
@@ -47,12 +64,6 @@ function SvgPaper({
           ...style,
         }}
       >
-        <div
-          ref={hostRef}
-          className="pointer-events-none absolute left-0 top-0 overflow-visible"
-          data-rcb-shapes-host="1"
-          style={{ width: 0, height: 0, overflow: 'visible' }}
-        />
         {children}
       </div>
     );

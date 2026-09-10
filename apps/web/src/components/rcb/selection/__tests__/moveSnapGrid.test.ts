@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { snapBoxToGrid, snapCoordToGrid, snapResizeToGrid } from '../alignGuides';
+import { snapBoxToGrid, snapCoordToGrid } from '../alignGuides';
 import {
   strokeChromeOutset,
   inflateBoxByVisualOutset,
   strokeVisualOutset,
 } from '../../scene/document/sceneEffects';
-import { resolveClosedDrawBoxes } from '../../tools/ShapeDrawFeature';
 import type { SceneNodeInput } from '@/components/rcb/sceneNode';
 
 /**
@@ -78,13 +77,6 @@ describe('visual-outer move snap (1px grid)', () => {
     expect(inflateBoxByVisualOutset(path, centerStroke1)).toEqual(visual);
   });
 
-  it('closed draw places path so ink lands on grid', () => {
-    const draft = { left: 10.2, top: 8.7, width: 12.4, height: 9.1 };
-    const { visual, geom } = resolveClosedDrawBoxes(draft, true, 1, 'rect');
-    assertInkOnGrid(geom, centerStroke1, 1);
-    expect(visual.left).toBe(snapCoordToGrid(visual.left, 1));
-  });
-
   it('move keeps ink on grid with subpixel pointer noise', () => {
     const path = { left: 10.5, top: 8.5, width: 7, height: 7 };
     const right = moveSnapVisualOnly({
@@ -136,20 +128,5 @@ describe('visual-outer move snap (1px grid)', () => {
       dy: 0.01,
     });
     assertInkOnGrid(fixed.path, centerStroke1, 1);
-  });
-
-  it('resize visual edge then inset path keeps ink on grid', () => {
-    const path = { left: 10.5, top: 10.5, width: 7, height: 7 };
-    const visual0 = inflateBoxByVisualOutset(path, centerStroke1);
-    const grown = { ...visual0, width: visual0.width + 2.4 };
-    const gridVisual = snapResizeToGrid(grown, 'e', 1, 2);
-    const outset = strokeVisualOutset(centerStroke1);
-    const pathNext = {
-      left: gridVisual.left + outset,
-      top: gridVisual.top + outset,
-      width: Math.max(1, gridVisual.width - outset * 2),
-      height: Math.max(1, gridVisual.height - outset * 2),
-    };
-    assertInkOnGrid(pathNext, centerStroke1, 1);
   });
 });

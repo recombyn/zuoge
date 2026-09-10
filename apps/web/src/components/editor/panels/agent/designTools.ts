@@ -24,7 +24,7 @@ import {
   openLottieTimelinePanel,
   type ArtboardFrame,
 } from '@/store/modules/editor';
-import { exportFabricImage } from '@/components/rcb/scene/paint/exportImage';
+import { exportFabricImage } from '@/components/rcb/scene/export/exportImage';
 import {
   addNodeToDocument,
   cloneSceneValue,
@@ -37,10 +37,12 @@ import { canBindNodeToArtboardFrame } from '@/components/rcb/frames/frameNodeBin
 import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
 import {
   getAnimationWorkbenchTimelineFocus,
+  tagCreatedNodeForWorkbenchSurround,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import {
   findFrameAnimationMediaId,
   resolveActiveAnimationFrameId,
+  resolveBooleanResultFrameId,
 } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
 import {
   createImageNode,
@@ -69,33 +71,70 @@ import {
 import { serializeFillGradient, serializeFillImageAttrs } from '@/components/rcb/scene/document/sceneFill';
 import { createMeshGrid, type MeshSize } from '@/components/rcb/scene/document/sceneDiffuseMesh';
 import { isStrokeStyle } from '@/components/rcb/scene/document/sceneStrokeStyle';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
-import { sceneToDocumentCoords, storedOriginForSceneResult } from '@/components/rcb/scene/paint/svgToScene';
-import { resolveBooleanResultFrameId } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
-import {
-  tagCreatedNodeForWorkbenchSurround,
-  WORKBENCH_SURROUND_ATTR,
-} from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
-import {
-  computeShapeBoolean,
-  applyBooleanResultPaint,
-  applyBooleanResultRadii,
-  type BoolMode,
-} from '@/components/rcb/selection/shapeBoolean';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
+import { sceneToDocumentCoords } from '@/components/rcb/scene/layout/coords';
 import { nanoid } from 'nanoid';
 import { getAllowedCanvasToolKeys, filterAllowedToolOps, dedupeToolOpsById, type AgentToolOp } from '@/components/editor/panels/agent/toolOpsContract';
-import {
-  buildOutlinePathAsync,
-  canOutlineNode,
-  outlineNodePatch,
-} from '@/components/rcb/scene/paint/outlineToPath';
+import { enterKitPathEditForRcbId, runKitBooleanOp } from '@/components/rcb/canvas/kitBridge';
 import { isCustomPathShape } from '@/components/rcb/scene/document/pathScale';
 import { rcbPlaceTextFontSize } from '@/components/rcb/core/layout';
-import {
-  polylinePathD,
-  simplifyPencilCenterline,
-} from '@/components/rcb/tools/pencilBrushes';
 import { normalizeHex } from '@/components/base/colorPanel';
+import { store } from '@/store';
+
+type ScenePoint = { x: number; y: number };
+
+/** Polyline → SVG path `d` (open centerline; Kit paints stroke). */
+function polylinePathD(points: ScenePoint[]): string {
+  if (points.length < 1) return '';
+  return points.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ');
+}
+
+/** RDP simplify for agent pencil/path edits — keep endpoints. */
+function simplifyPencilCenterline(points: ScenePoint[], epsilon: number): ScenePoint[] {
+  if (points.length <= 2) return points.map((p) => ({ ...p }));
+  const eps = Number(epsilon);
+  if (!(eps > 0)) return points.map((p) => ({ ...p }));
+
+  function distToSeg(p: ScenePoint, a: ScenePoint, b: ScenePoint): number {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  function rdp(i0: number, i1: number) {
+    if (i1 - i0 <= 1) return;
+    let maxDist = 0;
+    let maxIdx = i0;
+    const first = points[i0];
+    const last = points[i1];
+    for (let i = i0 + 1; i < i1; i += 1) {
+      const d = distToSeg(points[i], first, last);
+      if (d > maxDist) {
+        maxDist = d;
+        maxIdx = i;
+      }
+    }
+    if (maxDist <= eps) return;
+    keep[maxIdx] = 1;
+    rdp(i0, maxIdx);
+    rdp(maxIdx, i1);
+  }
+
+  rdp(0, points.length - 1);
+  const out: ScenePoint[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    if (keep[i]) out.push({ ...points[i] });
+  }
+  return out;
+}
 
 const IMAGE_PLACEHOLDER =
   "data:image/svg+xml," +
@@ -793,8 +832,6 @@ export const DESIGN_TOOL_NAMES = [
   'delete_frame',
   'finish',
 ] as const;
-
-type ScenePoint = { x: number; y: number };
 
 function coerceScenePoint(raw: unknown): ScenePoint | null {
   if (!raw) return null;
@@ -1545,66 +1582,40 @@ function parseNodeIdsOrSingle(args: Record<string, unknown>): string[] {
 
 async function execOutlineText(
   args: Record<string, unknown>,
-  ctx: DesignToolContext,
-  pushHistory: () => void
+  _ctx: DesignToolContext,
+  _pushHistory: () => void
 ): Promise<AgentToolResult> {
   const ids = parseNodeIdsOrSingle(args);
   if (!ids.length) {
     return {
       status: 'error',
       summary: 'outline_text requires nodeId or nodeIds',
-      next_actions: ['Pass text node id from SCENE'],
+      next_actions: ['Pass text/shape node id from SCENE'],
     };
   }
-  // One history snapshot — each patchDocumentNode would otherwise deep-clone
-  // the (now huge) path document again.
-  pushHistory();
   const outlined: string[] = [];
   const failed: string[] = [];
   for (const nodeId of ids) {
-    const doc = ctx.getDocument();
-    const node = doc?.deltaSetLike?.[nodeId];
-    if (!node || !canOutlineNode(node)) {
-      failed.push(nodeId);
-      continue;
-    }
-    const outline = await buildOutlinePathAsync(node);
-    if (!outline?.pathD) {
-      failed.push(nodeId);
-      continue;
-    }
-    const patch = outlineNodePatch(node, outline);
-    patchDocumentNode({
-        nodeId,
-        skipHistory: true,
-        patch: {
-          key: 'shape',
-          x: patch.x,
-          y: patch.y,
-          width: patch.width,
-          height: patch.height,
-          attrs: patch.attrs,
-        },
-      });
-    outlined.push(nodeId);
+    // Kit convertToPath + path-edit.
+    if (enterKitPathEditForRcbId(nodeId)) outlined.push(nodeId);
+    else failed.push(nodeId);
   }
   if (!outlined.length) {
     return {
       status: 'error',
-      summary: `outline_text failed (${failed.join(', ') || 'no valid text'})`,
+      summary: `outline_text failed (${failed.join(', ') || 'no valid nodes'})`,
       next_actions: [
-        'Ensure node is text with content',
+        'Ensure Kit canvas is mounted and node is convertible',
         'Or create_shape path / create_svg for letterforms',
       ],
     };
   }
   return {
-    status: failed.length ? 'warning' : 'success',
-    summary: `Outlined ${outlined.length} text node(s) to path${
-      failed.length ? `; skipped ${failed.length}` : ''
+    status: 'ok',
+    summary: `Entered Kit path-edit for ${outlined.length} node(s)${
+      failed.length ? `; skipped ${failed.join(', ')}` : ''
     }`,
-    artifacts: { nodeIds: outlined, failed },
-    next_actions: ['update_node fill/stroke on path', 'boolean_op if combining letterforms'],
+    data: { nodeIds: outlined, failed },
   };
 }
 
@@ -2982,7 +2993,7 @@ function execSetViewport(
       return { status: 'success', summary: 'Fit / reset canvas zoom' };
     }
     if (action === 'set') {
-      const z = Math.min(12, Math.max(0.05, num(args.percent, 100) / 100));
+      const z = Math.min(12, Math.max(0.01, num(args.percent, 100) / 100));
       if (!ui.setZoom) {
         return {
           status: 'error',
@@ -3006,7 +3017,18 @@ function execSetActiveTool(
   _pushHistory: () => void
 ): AgentToolResult {
   const tool = String(args.tool || '').trim().toLowerCase();
-  const allowed = new Set(['select', 'pan', 'frame', 'text', 'shape', 'image', 'pen', 'pencil']);
+  const allowed = new Set([
+    'select',
+    'pan',
+    'frame',
+    'text',
+    'shape',
+    'image',
+    'pen',
+    'pencil',
+    'bucket',
+    'eyedropper',
+  ]);
   if (!allowed.has(tool)) {
     return {
       status: 'error',
@@ -3594,8 +3616,8 @@ function execBooleanOp(
   pushHistory: () => void
 ): AgentToolResult {
     const ids = parseNodeIds(args);
-    const mode = String(args.mode || 'union') as BoolMode;
-    if (!['union', 'subtract', 'intersect', 'exclude'].includes(mode)) {
+    const mode = String(args.mode || 'union');
+    if (!['union', 'subtract', 'intersect', 'exclude', 'xor'].includes(mode)) {
       return { status: 'error', summary: `Unknown boolean mode: ${mode}` };
     }
     if (ids.length < 2) return { status: 'error', summary: 'boolean_op needs at least 2 nodeIds' };
@@ -3608,74 +3630,67 @@ function execBooleanOp(
         summary: 'Need 2+ closed shapes (not line/arrow/pen/pencil/text/image)',
       };
     }
-    const { result, usedFallback } = computeShapeBoolean(boxes, mode);
-    if (!result) {
+    void ctx;
+    void pushHistory; // Kit flushCreates already snapshots history
+    const newId = runKitBooleanOp(
+      boxes.map((b) => b.id),
+      mode as 'union' | 'subtract' | 'intersect' | 'xor' | 'exclude'
+    );
+    if (!newId) {
       return {
         status: 'error',
         summary: mode === 'intersect' ? 'No overlap for intersect' : 'Boolean operation failed',
       };
     }
-    const sample = boxes[0];
-    const sampleNode = doc?.deltaSetLike?.[sample.id];
+
+    const latest = store.getState().editor.document || doc;
+    const created = latest?.deltaSetLike?.[newId];
     const operandFrameIds = boxes
       .map((b) => String(doc?.deltaSetLike?.[b.id]?.attrs?.frameId || '').trim())
       .filter(Boolean);
-    const abs = sceneToDocumentCoords(doc, result.x, result.y);
-    const frameId = resolveBooleanResultFrameId(
-      doc,
-      operandFrameIds,
-      abs.x + result.width / 2,
-      abs.y + result.height / 2
-    );
-    const origin = storedOriginForSceneResult(doc, result.x, result.y, frameId);
-    const { id, node } = createShapeNode({
-      x: origin.x,
-      y: origin.y,
-      width: result.width,
-      height: result.height,
-      shapeType: 'path',
-      fill: sample.fill,
-      stroke: sample.stroke,
-      borderWidth: sample.borderWidth,
-      path: result.path,
-      closed: true,
-    });
-    const attrs = node.attrs as Record<string, unknown>;
-    attrs['fill-rule'] = result.fillRule;
-    attrs.closed = 'true';
-    if (frameId) {
-      attrs.frameId = frameId;
-      const orders = boxes
-        .map((b) => Number(doc?.deltaSetLike?.[b.id]?.attrs?.frameOrder))
-        .filter(Number.isFinite);
-      if (orders.length) attrs.frameOrder = Math.max(...orders) + 1;
-      delete attrs[WORKBENCH_SURROUND_ATTR];
-    }
-    applyBooleanResultPaint(
-      attrs,
-      sampleNode?.attrs as Record<string, unknown> | undefined,
-      { stroke: sample.stroke, borderWidth: sample.borderWidth }
-    );
-    applyBooleanResultRadii(attrs, boxes);
-    let next = addNodeToDocument(doc, id, node);
-    next = removeNodesFromDocument(next, boxes.map((b) => b.id));
-    if (!frameId) {
-      next = tagCreatedNodeForWorkbenchSurround(next, id);
-    }
-    pushHistory();
-    setDocument(next);
-    if (frameId) {
-      const frame = (next.frames || []).find((f) => String(f?.id) === frameId);
-      if (frame && isAnimationArtboardKind(frame.kind)) {
-        ensureAnimationFrameMedia({ frameId });
+    let frameId: string | undefined;
+    if (created && latest) {
+      const { left, top } = nodeLeftTop(latest, created);
+      const abs = sceneToDocumentCoords(latest, left, top);
+      frameId =
+        resolveBooleanResultFrameId(
+          latest,
+          operandFrameIds,
+          abs.x + Number(created.width || 0) / 2,
+          abs.y + Number(created.height || 0) / 2
+        ) || undefined;
+      const attrs: Record<string, unknown> = { outlined: 'true' };
+      if (frameId) {
+        attrs.frameId = frameId;
+        const orders = boxes
+          .map((b) => Number(doc?.deltaSetLike?.[b.id]?.attrs?.frameOrder))
+          .filter(Number.isFinite);
+        if (orders.length) attrs.frameOrder = Math.max(...orders) + 1;
+      }
+      patchDocumentNode({ nodeId: newId, patch: { attrs } });
+      if (frameId) {
+        const frame = (latest.frames || []).find((f) => String(f?.id) === frameId);
+        if (frame && isAnimationArtboardKind(frame.kind)) {
+          ensureAnimationFrameMedia({ frameId });
+        }
+      } else {
+        const after = store.getState().editor.document;
+        if (after) {
+          const tagged = tagCreatedNodeForWorkbenchSurround(after, newId);
+          if (tagged !== after) setDocument(tagged);
+        }
       }
     }
+
     return {
-      status: usedFallback ? 'warning' : 'success',
-      summary: usedFallback
-        ? `Boolean ${mode} → ${id} (bbox fallback)`
-        : `Boolean ${mode} → ${id}`,
-      artifacts: { nodeId: id, mode, removed: boxes.map((b) => b.id), frameId: frameId || undefined },
+      status: 'success',
+      summary: `Boolean ${mode} → ${newId}`,
+      artifacts: {
+        nodeId: newId,
+        mode,
+        removed: boxes.map((b) => b.id),
+        frameId,
+      },
     };
 
 }

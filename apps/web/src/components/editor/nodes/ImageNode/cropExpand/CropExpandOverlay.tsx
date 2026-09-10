@@ -269,7 +269,7 @@ export function expandFrameForRatio(
   return { w, h, ox: (cw - w) / 2, oy: 0 };
 }
 
-/** Match selection chrome (`SelectionChrome` SEL_BASELINE) — readable on photos. */
+/** Match selection chrome baseline blue — readable on photos. */
 const ACCENT = '#3388ff';
 const ACCENT_SOFT = 'rgba(51, 136, 255, 0.4)';
 const LABEL = '#ffffff';

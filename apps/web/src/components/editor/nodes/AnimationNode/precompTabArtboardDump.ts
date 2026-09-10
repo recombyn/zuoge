@@ -14,7 +14,8 @@ import { isHiddenByAnimationWorkbenchFocus } from '@/components/editor/nodes/Ani
 import { animationHostHasUnlinkedInk } from '@/components/editor/nodes/AnimationNode/animationFrameSync';
 import { getNodeTransformPreview } from '@/components/rcb/core/transformPreview';
 import { parseLottieAnimationData } from '@/components/rcb/scene/document/nodeFactories';
-import { findHtmlMediaMount } from '@/components/rcb/scene/paint/sceneToSvg';
+import { findHtmlMediaMount } from '@/components/rcb/scene/dom/domHostBoard';
+import { getShapeHost } from '@/components/rcb/shapes/shapeHostRegistry';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 import store from '@/store';
 
@@ -116,7 +117,8 @@ function nodeBrief(id: string, node: any) {
 }
 
 function mountDomBrief(nodeId: string) {
-  const mount = findHtmlMediaMount(nodeId);
+  const host = getShapeHost(nodeId);
+  const mount = findHtmlMediaMount(host?.el ?? host?.layer ?? null);
   if (!mount) return { present: false as const };
   const el = mount as HTMLElement | SVGElement;
   const cs = typeof window !== 'undefined' ? window.getComputedStyle(el) : null;
@@ -152,7 +154,8 @@ function emit(label: string, payload: unknown) {
 export function clearStuckLottieMountVisibility(nodeId: string) {
   const id = String(nodeId || '').trim();
   if (!id) return;
-  const mount = findHtmlMediaMount(id);
+  const host = getShapeHost(id);
+  const mount = findHtmlMediaMount(host?.el ?? host?.layer ?? null);
   if (!mount) return;
   const el = mount as HTMLElement | SVGElement;
   el.style?.removeProperty?.('visibility');

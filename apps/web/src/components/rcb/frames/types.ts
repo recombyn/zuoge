@@ -6,12 +6,12 @@
  * Edge ink uses the same Canvas miter closed-path recipe as plate hairlines
  * (`strokeCanvasPlateHairline`).
  */
-export const FRAME_PLATE_STROKE = 'color-mix(in srgb, var(--ink) 42%, transparent)';
+export const FRAME_PLATE_STROKE = '#c5c9d2';
 /**
- * Canvas / WebGL cannot resolve `var(--ink)` / color-mix — solid stand-in for
- * light theme plate hairlines (matches ~42% of #141414).
+ * Canvas / WebGL cannot resolve CSS vars — same cool light gray as
+ * {@link FRAME_PLATE_STROKE} / empty-gen plate edges.
  */
-export const FRAME_PLATE_STROKE_CANVAS = 'rgba(20, 20, 20, 0.55)';
+export const FRAME_PLATE_STROKE_CANVAS = 'rgba(197, 201, 210, 1)';
 /** Soft interior / context focus — same blue as selection chrome edge. */
 export const FRAME_HIGHLIGHT_STROKE = '#3388ff';
 /** Target hairline in CSS px after camera scale. */
@@ -24,7 +24,7 @@ export function framePlateStrokeSceneWidth(zoom: number): number {
 
 /**
  * Crisp axis-aligned hairline on a Canvas2D context that already has a scene
- * transform — same miter closed-path recipe as stroked SoA rects (not strokeRect AA).
+ * transform — same miter closed-path recipe as stroked Kit rects (not strokeRect AA).
  *
  * Prefer {@link applyArtboardPlateEdgeStroke} for live plate chrome: artboard ink
  * canvas backing is edge-capped (`ARTBOARD_INK_MAX_EDGE`), so canvas hairlines vanish
@@ -99,8 +99,9 @@ export type ArtboardFrame = {
   /** Artboard fill alpha, stored as a percentage from 0 to 100. */
   backgroundOpacity?: number;
   /**
-   * Plate role. `animation` = 动画工作台 (same HtmlArtboardFrame + clip,
-   * different selection toolbar). Default / omitted = normal artboard.
+   * Plate role. `animation` = 动画工作台 — same Kit artboard chrome
+   * (fill / border / label / handles) as `artboard`; selection toolbar differs.
+   * Default / omitted = normal artboard.
    */
   kind?: 'artboard' | 'animation';
   /** 动画工作台 composition length (seconds). */

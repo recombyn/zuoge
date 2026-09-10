@@ -71,6 +71,8 @@ export function resolveActiveAudioPlayerId(opts: {
   const audioWithSrc = (id: string): boolean => {
     const node = document?.deltaSetLike?.[id];
     if (!isAudioNode(node)) return false;
+    // Upload SoftGlow — no HTML player until process finishes (parity with images).
+    if (String(node?.attrs?.processStatus || '') === 'running') return false;
     return Boolean(String(node?.attrs?.src || '').trim());
   };
 
@@ -432,7 +434,7 @@ function AudioPlate({
  * Active audio player: one HTML plate portaled into the SVG foreignObject.
  * Idle (unselected) audio paints as canvas plates — no ShapeHost / FO.
  * Stays mounted during move — FO is inside the SVG group that
- * `previewSvgNodeGeometry` transforms (same as video).
+ * Kit / DomHost geometry preview drives (same as video).
  */
 function AudioNodeOverlay({
   document,

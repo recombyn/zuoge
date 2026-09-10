@@ -14,7 +14,7 @@ import {
   setStroke,
   svgEl,
   urlRef,
-} from '@/components/rcb/scene/paint/svgDom';
+} from '@/components/rcb/scene/dom/svgDom';
 import {
   PROCESS_PLATE_STROKE,
   processGlowForeignObjectBounds,

@@ -1,6 +1,6 @@
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 
-/** Stroke for SVG process plates — matches canvas process SoftGlow edge. */
+/** Optional plate edge color for process chrome (HTML pill / Kit path). */
 export const PROCESS_PLATE_STROKE = '#c5d3e4';
 
 /** Scene-unit bleed so foreignObject covers the plate during camera zoom (subpixel gaps). */

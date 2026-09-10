@@ -78,6 +78,11 @@ function zoomMenuSelectedKeys(opts: { zoom: number; fitActive: boolean }): strin
  * `window.dispatchEvent(new Event('rcb-fps-hud'))`.
  * Console: `window.__fpsHud.live()` / `.slice(name, t0, t1)`.
  * Persists in localStorage. Default OFF.
+ *
+ * Measurement: samples rAF intervals (wall time between frames). A ~2fps / p95
+ * ~1000ms reading means the main thread is blocked ~1s between frames — the HUD
+ * itself only keeps a light rAF sampler + 250ms React refresh and is not the
+ * paint cost. Turn it off (`__fpsHud.disable()`) to confirm.
  */
 const FPS_HUD_STORAGE_KEY = 'recombyn-editor-fps-hud';
 const FPS_HUD_EVENT = 'rcb-fps-hud';
@@ -263,8 +268,14 @@ function FpsHudOverlay() {
   useEffect(() => {
     const sampler = startFpsSampler();
     bindFpsHudWindowApi(sampler);
+    let lastLabel = '';
     const id = window.setInterval(() => {
-      setLive(sampler.live());
+      const next = sampler.live();
+      // Avoid React commits when the HUD digits did not change (idle 60fps).
+      const label = `${next.fps}|${next.median.toFixed(1)}|${next.p95.toFixed(1)}|${next.n}`;
+      if (label === lastLabel) return;
+      lastLabel = label;
+      setLive(next);
     }, 250);
     return () => {
       window.clearInterval(id);
@@ -480,7 +491,8 @@ function EditorBottomHud({
   dockPlacement = 'bottom',
   dockedTrailing = null,
 }: Props) {
-  const { t } = useTranslation();  const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
+  const { t } = useTranslation();
+  const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
   const [fpsHudOn, setFpsHudOn] = useState(readFpsHudEnabled);
   const bottomHudRef = useRef<HTMLDivElement | null>(null);
   const leftHudInsetPx = useLeftDockInset(layersOpen);

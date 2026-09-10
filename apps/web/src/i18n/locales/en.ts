@@ -998,6 +998,7 @@ const en = {
       frameTool: 'Switch to frame tool',
       textTool: 'Switch to text tool',
       penTool: 'Switch to pen tool',
+      pencilTool: 'Switch to pencil tool',
       bucketTool: 'Switch to bucket tool',
       nodeEdit: 'Node editing',
       copy: 'Copy selected nodes',
@@ -1634,7 +1635,7 @@ const en = {
       },
       tools: {
         title: 'Toolbar',
-        body: 'Select, shapes, pen, text, frames, upload images, and import files. Pick a shape, then drag on the canvas to draw.',
+        body: 'Select, shapes, pen/pencil, text, frames, upload images, and import files. Pick a shape, then drag on the canvas to draw.',
       },
       agent: {
         title: 'Design with Agent',

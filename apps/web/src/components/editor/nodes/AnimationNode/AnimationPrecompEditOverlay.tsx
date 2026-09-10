@@ -22,7 +22,7 @@ import {
   useRcbDevicePixelRatio,
   useRcbScreenToScene,
 } from '@/components/rcb';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
 import {
   extractPrecompAssetJson,

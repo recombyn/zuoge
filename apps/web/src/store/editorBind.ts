@@ -1,17 +1,34 @@
 /**
  * Bind editor case mutators to Zustand `set` via immer produce.
  * Call `bindEditorStore` once from store/index.ts during create().
+ *
+ * `runEditor` lives on globalThis so Vite HMR cannot fork a second binder
+ * while React still subscribes to the first Zustand instance (multi-select
+ * chrome would then see 1 id while Kit held N).
  */
 import { produce } from 'immer';
 
 export type EditorDraftFn = (fn: (draft: any) => void) => void;
 
-let runEditor: EditorDraftFn = () => {
-  throw new Error('Editor store not bound — import @/store before calling mutators');
+type EditorBindSlot = { runEditor: EditorDraftFn };
+
+const g = globalThis as typeof globalThis & {
+  __RCB_EDITOR_BIND__?: EditorBindSlot;
 };
 
+function editorBindSlot(): EditorBindSlot {
+  if (!g.__RCB_EDITOR_BIND__) {
+    g.__RCB_EDITOR_BIND__ = {
+      runEditor: () => {
+        throw new Error('Editor store not bound — import @/store before calling mutators');
+      },
+    };
+  }
+  return g.__RCB_EDITOR_BIND__;
+}
+
 export function bindEditorStore(run: EditorDraftFn) {
-  runEditor = run;
+  editorBindSlot().runEditor = run;
 }
 
 /**
@@ -29,7 +46,7 @@ export function bindEditorMutator<S, P = unknown>(
     ? () => void
     : (payload: P) => void {
   return ((payload?: P) => {
-    runEditor((draft) => {
+    editorBindSlot().runEditor((draft) => {
       reducer(draft, { payload: payload as P });
     });
   }) as unknown extends P

@@ -91,10 +91,12 @@ export class PathBuilder {
     const inner = Math.max(0, Math.min(0.92, Number(opts?.innerRatio) || 0));
     const rawArc = Number(opts?.arcPercent);
     const arc = Number.isFinite(rawArc) ? rawArc : 100;
-    const absPct = Math.min(100, Math.max(0, Math.abs(arc)));
-    const positiveDir = !(arc < 0);
+    // Match MIN_ELLIPSE_ARC_PERCENT — 0% collapses to a spike.
+    const absPct = Math.min(100, Math.max(0.5, Math.abs(arc)));
+    // Product arcs always open clockwise from the right (ignore legacy negative).
+    const positiveDir = true;
     const rawStart = Number(opts?.startDeg);
-    const startDeg = Number.isFinite(rawStart) ? rawStart : 90;
+    const startDeg = Number.isFinite(rawStart) ? rawStart : 0;
     const startRad = ((((startDeg % 360) + 360) % 360) * Math.PI) / 180;
     const irx = Math.max(0.25, rx * inner);
     const iry = Math.max(0.25, ry * inner);

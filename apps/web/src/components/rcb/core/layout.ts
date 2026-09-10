@@ -1,4 +1,4 @@
-import { rcbCameraCssZoom } from './math';
+import { RCB_MIN_ZOOM, rcbCameraCssZoom } from './math';
 import type { RcbCamera } from './types';
 import type { RcbVec } from './types';
 
@@ -24,7 +24,7 @@ export function rcbFitImageIntoViewport(
 ): { width: number; height: number } {
   const nw = Math.max(1, Number(natural.width) || 1);
   const nh = Math.max(1, Number(natural.height) || 1);
-  const z = Math.max(0.05, Number(zoom) || 1);
+  const z = Math.max(RCB_MIN_ZOOM, Number(zoom) || 1);
   // Visible scene rect (CSS px / zoom).
   const vw = Math.max(1, (Number(viewport.width) || 1) / z);
   const vh = Math.max(1, (Number(viewport.height) || 1) / z);
@@ -125,10 +125,21 @@ export function rcbLayoutGeneratorPlate(opts: {
 }
 
 /** Empty-state glyph size in scene units — always fits inside the plate. */
-export function generatorEmptyIconSize(boxW: number, boxH: number): number {
+/**
+ * Cap icon size in CSS px so large plates stay readable without dominating.
+ * (Was 48 — too small on typical artboard generators.)
+ */
+export const GENERATOR_EMPTY_ICON_MAX_CSS_PX = 88;
+/** Fraction of the plate's short side used for the glyph (before screen cap). */
+export const GENERATOR_EMPTY_ICON_PLATE_RATIO = 0.42;
+
+export function generatorEmptyIconSize(boxW: number, boxH: number, zoom = 1): number {
   const side = Math.min(Math.max(0, boxW), Math.max(0, boxH));
   // Never floor to a fixed scene px (old Math.max(72, …) overflowed at 3000% zoom).
-  return side * 0.28;
+  const byPlate = side * GENERATOR_EMPTY_ICON_PLATE_RATIO;
+  const z = Math.max(0.05, Number(zoom) || 1);
+  const byScreen = GENERATOR_EMPTY_ICON_MAX_CSS_PX / z;
+  return Math.min(byPlate, byScreen);
 }
 
 /**
@@ -155,7 +166,7 @@ export function rcbDefaultPlaceFontSize(
   zoom: number,
   screenPx = RCB_PLACE_TEXT_SCREEN_PX
 ): number {
-  const z = Math.max(0.05, Number(zoom) || 1);
+  const z = Math.max(RCB_MIN_ZOOM, Number(zoom) || 1);
   const target = Math.max(1, Number(screenPx) || RCB_PLACE_TEXT_SCREEN_PX);
   const raw = target / z;
   // Half-pixel steps (same lattice as odd center strokes); never below 1 scene px.
@@ -180,13 +191,13 @@ export function rcbPlaceTextFontSize(
   opts?: RcbPlaceTextFontSizeOpts
 ): number {
   const cam = { x: 0, y: 0, zoom: Number(zoom) || 1 } satisfies RcbCamera;
-  let z = Math.max(0.05, rcbCameraCssZoom(cam));
+  let z = Math.max(RCB_MIN_ZOOM, rcbCameraCssZoom(cam));
   const vw = opts?.viewportWidth;
   const dw = opts?.docWidth;
   if (vw != null && vw > 40 && dw != null && dw > vw + 1) {
     const visibleSceneW = vw / z;
     if (visibleSceneW >= dw * 0.85 && visibleSceneW <= dw * 1.15) {
-      z = Math.max(0.05, vw / dw);
+      z = Math.max(RCB_MIN_ZOOM, vw / dw);
     }
   }
   return rcbDefaultPlaceFontSize(z, screenPx);

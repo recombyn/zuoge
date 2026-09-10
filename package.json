@@ -2,7 +2,7 @@
   "name": "recombyn",
   "version": "0.1.0",
   "private": true,
-  "description": "zuoge — open-source AI design workspace with a document-derived SoA infinite artboard and Design Agent",
+  "description": "zuoge — open-source AI design workspace with a CanvasKit infinite artboard and Design Agent",
   "license": "Apache-2.0",
   "packageManager": "npm@10.9.2",
   "workspaces": [
@@ -67,6 +67,7 @@
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
     "husky": "^9.1.7",
+    "playwright": "^1.49.0",
     "turbo": "^2.5.4"
   }
 }

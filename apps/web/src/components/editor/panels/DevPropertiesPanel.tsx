@@ -25,8 +25,7 @@ import {
   isVideoNode,
 } from '@/components/rcb/scene/document/nodeCapabilities';
 import { parseNodeTextStyle } from '@/components/rcb/scene/document/sceneText';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
-
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 function formatPx(n: number) {
   const r = Math.round(n * 100) / 100;
   return Number.isInteger(r) ? String(r) : String(r);

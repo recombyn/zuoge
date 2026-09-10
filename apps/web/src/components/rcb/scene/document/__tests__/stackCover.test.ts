@@ -14,12 +14,7 @@ import {
 import {
   createImageGeneratorNode
 } from '../nodeFactories';
-import {
-  findHtmlMediaMount,
-  HTML_MEDIA_MOUNT_ATTR,
-  nodeToSvgElement,
-} from '../../paint/sceneToSvg';
-
+import { mountDomHostAnchor } from '../../dom/domHostBoard';
 function svgRoot(attrs: Record<string, string> = {}) {
   const root = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   root.setAttribute('data-rcb-infinite', '1');
@@ -156,12 +151,12 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(listSingleSelectionPaintRaiseNodeIds(doc, ['w1', 'c1'], [])).toEqual([]);
     expect(listSingleSelectionPaintRaiseNodeIds(doc, [], ['f1'])).toEqual(['c1']);
     expect(listSingleSelectionPaintRaiseNodeIds(doc, [], ['f1', 'f2'])).toEqual([]);
-    // World node after the artboard in stackOrder must leave SoA (under plates).
+    // World node after the artboard in stackOrder stacks above plates.
     expect(worldNodeStacksAboveAnyFrame(doc, 'w1')).toBe(true);
     expect(worldNodeStacksAboveAnyFrame(doc, 'c1')).toBe(false);
   });
 
-  it('workbench surround above a plate is not stack-above (stays SoA mesh)', () => {
+  it('workbench surround above a plate is not stack-above (Kit underlayer)', () => {
     let doc = createBareDocument();
     doc.frames = [
       { id: 'anim', name: 'Animation', backgroundColor: '#fff', x: 0, y: 0, width: 100, height: 100 },
@@ -208,7 +203,7 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(worldNodeStacksAboveAnyFrame(doc, 'w1')).toBe(false);
   });
 
-  it('world node below all frames can stay on SoA', () => {
+  it('world node below all frames stays under plate stack', () => {
     let doc = createBareDocument();
     doc = addNodeToDocument(doc, 'under', {
       id: 'under',
@@ -267,13 +262,11 @@ describe('unified HTML media stack (foreignObject)', () => {
     expect(doc.stackOrder[doc.stackOrder.length - 1]).toBe(`node:${id}`);
   });
 
-  it('lottie with animationData paints a foreignObject HTML mount in the SVG layer', async () => {
+  it('lottie mounts DomHost FO for HTML/lottie-web portal', () => {
     const { root, layer } = svgRoot();
     const anim = JSON.stringify({ v: '5.7.0', fr: 30, ip: 0, op: 30, w: 100, h: 100, layers: [] });
-    const el = await nodeToSvgElement(
-      root,
+    const el = mountDomHostAnchor(
       layer,
-      { x: 0, y: 0, deltaSetLike: {} },
       {
         key: 'lottie',
         x: 10,
@@ -285,28 +278,21 @@ describe('unified HTML media stack (foreignObject)', () => {
       'lot1'
     );
     expect(el).toBeTruthy();
-    const fo = el!.querySelector('svg[data-rcb-lottie-svg-ink="1"]');
+    expect(el!.getAttribute('data-rcb-dom-host')).toBe('1');
+    expect(el!.getAttribute('data-scene-node-id')).toBe('lot1');
+    const fo = el!.querySelector('foreignObject[data-rcb-html-media-fo="lottie"]');
     expect(fo).toBeTruthy();
-    expect(el!.querySelector('foreignObject[data-rcb-html-media-fo="lottie"]')).toBeNull();
-    const mount = el!.querySelector(`[${HTML_MEDIA_MOUNT_ATTR}="lot1"]`);
-    expect(mount).toBeTruthy();
-    expect(findHtmlMediaMount('lot1')).toBe(mount);
+    expect(fo!.getAttribute('width')).toBe('80');
+    expect(fo!.getAttribute('height')).toBe('60');
+    expect(el!.querySelector('[data-rcb-html-media-mount]')).toBeTruthy();
     root.remove();
   });
 
-  it('workbench nested lottie has no opaque SVG plate fill', async () => {
+  it('workbench nested lottie DomHost has FO but no SVG plate body', () => {
     const { root, layer } = svgRoot();
     const anim = JSON.stringify({ v: '5.7.0', fr: 30, ip: 0, op: 30, w: 100, h: 100, layers: [] });
-    const doc = {
-      x: 0,
-      y: 0,
-      deltaSetLike: {},
-      frames: [{ id: 'af1', kind: 'animation', x: 0, y: 0, width: 200, height: 200 }],
-    };
-    const el = await nodeToSvgElement(
-      root,
+    const el = mountDomHostAnchor(
       layer,
-      doc,
       {
         key: 'lottie',
         x: 10,
@@ -318,18 +304,16 @@ describe('unified HTML media stack (foreignObject)', () => {
       'lot-nested'
     );
     expect(el).toBeTruthy();
-    const plate = el!.querySelector('[data-radius-body="1"]');
-    expect(plate?.getAttribute('fill')).toBe('none');
+    expect(el!.querySelector('[data-radius-body="1"]')).toBeNull();
+    expect(el!.querySelector('foreignObject[data-rcb-html-media-fo="lottie"]')).toBeTruthy();
     root.remove();
   });
 
-  it('export surface does not mount lottie SVG ink mount', async () => {
+  it('export surface DomHost anchor does not embed lottie SVG ink', () => {
     const { root, layer } = svgRoot({ 'data-rcb-export-surface': '1' });
     const anim = JSON.stringify({ v: '5.7.0', fr: 30, ip: 0, op: 30, w: 100, h: 100, layers: [] });
-    const el = await nodeToSvgElement(
-      root,
+    const el = mountDomHostAnchor(
       layer,
-      { x: 0, y: 0, deltaSetLike: {} },
       {
         key: 'lottie',
         x: 0,
@@ -345,12 +329,10 @@ describe('unified HTML media stack (foreignObject)', () => {
     root.remove();
   });
 
-  it('video with src mounts foreignObject on world surface', async () => {
+  it('video mounts DomHost FO for HTML decoder portal', () => {
     const { root, layer } = svgRoot();
-    const el = await nodeToSvgElement(
-      root,
+    const el = mountDomHostAnchor(
       layer,
-      { x: 0, y: 0, deltaSetLike: {} },
       {
         key: 'video',
         x: 0,
@@ -361,7 +343,9 @@ describe('unified HTML media stack (foreignObject)', () => {
       },
       'vid1'
     );
+    expect(el!.getAttribute('data-rcb-dom-host')).toBe('1');
     expect(el!.querySelector('foreignObject[data-rcb-html-media-fo="video"]')).toBeTruthy();
+    expect(el!.querySelector('[data-rcb-html-media-mount]')).toBeTruthy();
     root.remove();
   });
 });

@@ -114,8 +114,8 @@ function overlapsFrame(node: Record<string, unknown>, frame: PlazaCoverFrame): b
 
 export type ExtractFrameOptions = {
   /**
-   * Crop the preview to the content bounding box (padded) so list cards
-   * center the design instead of a mostly-empty artboard.
+   * Crop the preview to the content bounding box so list cards
+   * fill the frame instead of a mostly-empty artboard.
    */
   contentFit?: boolean;
 };
@@ -154,7 +154,7 @@ function maybeContentFitCrop(
   if (!children.length) return null;
   const box = contentBoundsOfNodes(nodes, children);
   if (!box) return null;
-  const pad = Math.max(12, Math.round(Math.max(box.width, box.height) * 0.08));
+  const pad = 0;
   const x0 = Math.max(0, Math.floor(box.x - pad));
   const y0 = Math.max(0, Math.floor(box.y - pad));
   const x1 = Math.min(frame.width, Math.ceil(box.x + box.width + pad));
@@ -275,7 +275,7 @@ export function extractPlazaCoverDocument(
     : [];
   const box = contentBoundsOfNodes(dsl, children);
   if (!box) return document;
-  const pad = Math.max(12, Math.round(Math.max(box.width, box.height) * 0.08));
+  const pad = 0;
   const x0 = Math.floor(box.x - pad);
   const y0 = Math.floor(box.y - pad);
   const outW = Math.max(1, Math.ceil(box.width + pad * 2));

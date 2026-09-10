@@ -1,5 +1,5 @@
 /**
- * Stroke line styles (dash patterns) shared by panel UI + sceneToSvg.
+ * Stroke line styles (dash patterns) shared by panel UI + Kit style sync.
  */
 
 export type StrokeStyle =

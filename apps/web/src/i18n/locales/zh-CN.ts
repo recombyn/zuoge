@@ -990,6 +990,7 @@ const zhCN = {
       frameTool: '切换到画板工具',
       textTool: '切换到文字工具',
       penTool: '切换到钢笔工具',
+      pencilTool: '切换到画笔工具',
       bucketTool: '切换到油漆桶工具',
       nodeEdit: '节点编辑',
       copy: '复制选中的节点',
@@ -1625,7 +1626,7 @@ const zhCN = {
       },
       tools: {
         title: '底部工具栏',
-        body: '选择、形状、钢笔、文字、画板、上传图片与导入文件。点「形状」后在画布拖拽即可绘制。',
+        body: '选择、形状、钢笔/画笔、文字、画板、上传图片与导入文件。点「形状」后在画布拖拽即可绘制。',
       },
       agent: {
         title: '用 Agent 生成设计',

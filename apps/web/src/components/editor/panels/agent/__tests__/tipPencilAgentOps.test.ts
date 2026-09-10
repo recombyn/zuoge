@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createShapeNode
-} from '@/components/rcb/scene/document/nodeFactories';
-import { findPencilBrush } from '@/components/rcb/tools/pencilBrushes';
+import { createShapeNode } from '@/components/rcb/scene/document/nodeFactories';
 
 const PENCIL_OPS: Array<{ name: string; args: Record<string, unknown> }> = [
   {
@@ -56,7 +53,7 @@ const PENCIL_OPS: Array<{ name: string; args: Record<string, unknown> }> = [
 ];
 
 describe('agent pencil ops → FE attrs', () => {
-  it('maps brushStyle / pressure onto nodes', () => {
+  it('maps open centerline path + brushStyle / pressure onto nodes', () => {
     const created: ReturnType<typeof createShapeNode>['node'][] = [];
     for (const op of PENCIL_OPS) {
       const a = op.args || {};
@@ -64,7 +61,7 @@ describe('agent pencil ops → FE attrs', () => {
       const pathPressure = a.pathPressure != null ? String(a.pathPressure) : undefined;
       const pressureEnabled =
         a.pressureEnabled == null ? undefined : Boolean(a.pressureEnabled);
-      const brush = findPencilBrush(brushStyle);
+      const path = String(a.path || '');
       const { node } = createShapeNode({
         x: Number(a.x) || 40,
         y: Number(a.y) || 40,
@@ -73,7 +70,7 @@ describe('agent pencil ops → FE attrs', () => {
         shapeType: 'pencil',
         stroke: String(a.stroke || '#333'),
         borderWidth: Number(a.borderWidth) || 2,
-        path: String(a.path || ''),
+        path,
         closed: false,
         brushStyle,
         pressureEnabled,
@@ -81,10 +78,12 @@ describe('agent pencil ops → FE attrs', () => {
       });
       created.push(node);
       expect(node.attrs.shapeType).toBe('pencil');
+      expect(node.attrs.closed).toBe('false');
+      expect(String(node.attrs.path || '')).toBe(path);
+      expect(String(node.attrs.path || '').toUpperCase()).not.toContain('Z');
       expect(node.attrs.brushStyle).toBe(brushStyle);
       expect(node.attrs.pathPressure).toBeTruthy();
       expect(node.attrs.pressureEnabled).toBe(true);
-      expect(brush.id).toBe(brushStyle);
     }
 
     const styles = created.map((n) => n.attrs.brushStyle);

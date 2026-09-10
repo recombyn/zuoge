@@ -23,7 +23,7 @@
 
 # 左格（zuoge）
 
-开源 AI 设计工作台：文档派生的 **纯资源 SoA** 无限画板、LangGraph Design Agent，以及 MCP 服务——Codex 等外部工具可读写同一项目。用 Docker Compose 自托管。
+开源 AI 设计工作台：文档驱动的无限画板（CanvasKit + SceneDocument）、LangGraph Design Agent，以及 MCP 服务——Codex 等外部工具可读写同一项目。用 Docker Compose 自托管。
 
 **做个，设计从未如此简单。**
 
@@ -31,7 +31,7 @@
 
 ## ✨ 功能
 
-🎨 **纯资源 SoA 无限画板** — 文档驱动的 Canvas2D 墨水（`SceneRenderBuffer` + 四叉树）；缩放 5%–10000%。几何命中；DOM 仅用于光标 / 媒体 / SoftGlow / 路径编辑。
+🎨 **无限画板** — `SceneDocument` + CanvasKit 闲时墨水（`KitCanvasHost` / `@rcb-vector`）；缩放 5%–10000%。几何命中；DOM 仅用于光标 / 媒体 / SoftGlow / 路径编辑。
 
 🤖 **Design Agent** — 同一张画布上的流式对话：规划 → 挂 Skill → 产出 `tool_ops` → 落笔。LangGraph 内核固定；行为由 AgentProfile YAML、阶段提示词、Skills 与工具注册表配置。
 

@@ -14,20 +14,16 @@ import {
   parseFillType,
 } from '@/components/rcb/scene/document/sceneFill';
 import { boolEffectAttr } from '@/components/rcb/scene/document/sceneEffects';
-import {
-  nodeLeftTop,
-} from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import {
   sceneToDocumentCoords,
-  storedOriginForSceneResult,
-} from '@/components/rcb/scene/paint/svgToScene';
+} from '@/components/rcb/scene/layout/coords';
 import {
-  addNodeToDocument,
-  removeNodesFromDocument
-} from '@/components/rcb/scene/document/sceneDocument';
-import {
-  createShapeNode
-} from '@/components/rcb/scene/document/nodeFactories';
+  groupKitSelection,
+  ungroupKitSelection,
+  rcbIdsAllKitMapped,
+} from '@/components/rcb/canvas/kitBridge';
+import { kitOwnsStagePointer } from '@/components/rcb/canvas/toolMap';
 import {
   groupNodesInDocument,
   selectionSharedGroupId,
@@ -49,18 +45,19 @@ import {
 import {
   ensureAnimationFrameMedia,
   openShapeStylePanel,
+  patchDocumentNode,
   patchDocumentNodes,
   setDocument,
   setMixedSelection,
-  setSelectedNodeId,
   setSelectedNodeIds,
 } from '@/store/modules/editor';
+import { store } from '@/store';
 import { resolveBooleanResultFrameId } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
 import {
   tagCreatedNodeForWorkbenchSurround,
-  WORKBENCH_SURROUND_ATTR,
 } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { isAnimationArtboardKind } from '@/components/rcb/frames/types';
+import { runKitBooleanOp } from '@/components/rcb/canvas/kitBridge';
 import { cn } from '@/utils/classnames';
 import {
   SEL_ICON_BTN,
@@ -79,13 +76,56 @@ import {
   sizeFromAspectPreset,
 } from '../resizeGeometry';
 import { radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
-import {
-  computeShapeBoolean,
-  applyBooleanResultPaint,
-  type BoolMode,
-} from '../shapeBoolean';
+import { type BoolMode } from '../shapeBoolean';
 import { tidyLayoutPatches } from '../tidyLayout';
-import type { SceneDocument, SceneNode, SceneNodeInput } from '@/components/rcb/sceneNode';
+import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
+
+function shapeTypePatch(node: SceneNodeInput | null | undefined): Record<string, unknown> {
+  const shapeType = node?.attrs?.shapeType;
+  return shapeType != null ? { shapeType } : {};
+}
+
+function runGroupOp(opts: {
+  mode: 'group' | 'ungroup';
+  document: SceneDocument;
+  opNodeIds: string[];
+  frameIds: string[];
+  t: (key: string, opts?: { defaultValue?: string }) => string;
+}) {
+  const ids = unlockedGroupableIds(opts.document, opts.opNodeIds);
+  if (opts.mode === 'group' && ids.length < 2) return;
+  if (opts.mode === 'ungroup' && !ids.length) return;
+
+  const activeTool = String(store.getState()?.editor?.activeTool || 'select');
+  const shapeKind = String(store.getState()?.editor?.shapeKind || 'rect');
+  const useKit = kitOwnsStagePointer(activeTool, shapeKind) && rcbIdsAllKitMapped(ids);
+
+  if (useKit) {
+    const ok =
+      opts.mode === 'group' ? groupKitSelection(ids) : ungroupKitSelection(ids);
+    if (!ok) {
+      const key =
+        opts.mode === 'group'
+          ? 'editor.selectionToolbar.groupFailed'
+          : 'editor.selectionToolbar.ungroupFailed';
+      message.warning(
+        opts.t(key, {
+          defaultValue: opts.mode === 'group' ? '分组失败' : '取消分组失败',
+        })
+      );
+      return;
+    }
+    setMixedSelection({ nodeIds: ids, frameIds: opts.frameIds });
+    return;
+  }
+
+  const next =
+    opts.mode === 'group'
+      ? groupNodesInDocument(opts.document, ids)
+      : ungroupNodesInDocument(opts.document, ids);
+  setDocument(next);
+  setMixedSelection({ nodeIds: ids, frameIds: opts.frameIds });
+}
 
 const ASPECT_ORIG_W = 'aspect-original-width';
 const ASPECT_ORIG_H = 'aspect-original-height';
@@ -153,26 +193,6 @@ type NodeBox = {
   sides?: number;
   attrs?: Record<string, unknown>;
 };
-
-/** Axis-aligned overlap (strict) — boolean ops need shared area to be meaningful. */
-function sceneBoxesOverlap(a: SceneBox, b: SceneBox): boolean {
-  return (
-    a.left < b.left + b.width &&
-    a.left + a.width > b.left &&
-    a.top < b.top + b.height &&
-    a.top + a.height > b.top
-  );
-}
-
-/** True when at least one pair of shape AABBs overlaps. */
-function selectionHasShapeOverlap(boxes: SceneBox[]): boolean {
-  for (let i = 0; i < boxes.length; i += 1) {
-    for (let j = i + 1; j < boxes.length; j += 1) {
-      if (sceneBoxesOverlap(boxes[i], boxes[j])) return true;
-    }
-  }
-  return false;
-}
 
 function readBoxes(document: SceneDocument, nodeIds: string[]): NodeBox[] {
   return nodeIds
@@ -409,10 +429,9 @@ function MultiSelectionToolbar({
     opNodeIds.length > 0 &&
     opNodeIds.every((id) => pred(document?.deltaSetLike?.[id]));
 
-  const showBoolean =
-    shapeBoxes.length >= 2 &&
-    allSupport(supportsBooleanOp) &&
-    selectionHasShapeOverlap(shapeBoxes);
+  // Show boolean when ≥2 closed shapes are in the selection — even if an open
+  // path / image is co-selected. runBoolean already operates on shapeBoxes only.
+  const showBoolean = shapeBoxes.length >= 2;
   const showStroke = allSupport(supportsStroke);
   const showFill = allSupport(supportsFill);
   const showCornerRadius =
@@ -470,15 +489,10 @@ function MultiSelectionToolbar({
       message.warning(t('editor.selectionToolbar.boolNeed2'));
       return;
     }
-    if (!selectionHasShapeOverlap(shapeBoxes)) {
-      message.warning(t('editor.selectionToolbar.boolNoOverlap'));
-      return;
-    }
 
     const ids = shapeBoxes.map((b) => b.id);
-    const { result, usedFallback, hasNonRect } = computeShapeBoolean(shapeBoxes, mode);
-
-    if (!result) {
+    const newId = runKitBooleanOp(ids, mode);
+    if (!newId) {
       if (mode === 'intersect') {
         message.warning(t('editor.selectionToolbar.boolNoOverlap'));
       } else if (mode === 'subtract') {
@@ -489,93 +503,46 @@ function MultiSelectionToolbar({
       return;
     }
 
-    if (usedFallback && hasNonRect) {
-      message.warning(t('editor.selectionToolbar.boolApprox'));
-    }
-
-    const sample =
-      shapeBoxes.find((b) => {
-        const a = b.attrs || {};
-        const fill = String(a['fill-color'] || b.fill || '');
-        return (
-          fill &&
-          fill !== 'transparent' &&
-          fill !== 'none' &&
-          a['fill-enabled'] !== false &&
-          a['fill-enabled'] !== 'false'
-        );
-      }) ||
-      shapeBoxes.find((b) => {
-        const a = b.attrs || {};
-        return (
-          a['stroke-enabled'] !== false &&
-          a['stroke-enabled'] !== 'false' &&
-          Number(a['border-width'] ?? b.borderWidth) > 0
-        );
-      }) ||
-      shapeBoxes[0];
-    const sampleNode = document?.deltaSetLike?.[sample.id];
-    // Prefer a shared frameId from operands (paint sample may lack it).
+    // Product-only attrs — Kit already owns geometry / paint / operand removal.
+    const latest = store.getState().editor.document || document;
+    const created = latest?.deltaSetLike?.[newId];
     const operandFrameIds = shapeBoxes
-      .map((b) => String(document?.deltaSetLike?.[b.id]?.attrs?.frameId || '').trim())
+      .map((b) => String(b.attrs?.frameId || '').trim())
       .filter(Boolean);
-    const abs = sceneToDocumentCoords(document, result.x, result.y);
-    const frameId = resolveBooleanResultFrameId(
-      document,
-      operandFrameIds,
-      abs.x + result.width / 2,
-      abs.y + result.height / 2
-    );
-    // frameLocal: plate-relative x/y (not world abs — that shifts by artboard origin).
-    const origin = storedOriginForSceneResult(document, result.x, result.y, frameId);
-    const { id, node } = createShapeNode({
-      x: origin.x,
-      y: origin.y,
-      width: result.width,
-      height: result.height,
-      shapeType: 'path',
-      fill: sample.fill,
-      stroke: sample.stroke,
-      borderWidth: sample.borderWidth,
-      path: result.path,
-      closed: true,
-    });
-    const attrs = node.attrs as Record<string, unknown>;
-    attrs['fill-rule'] = result.fillRule;
-    attrs.closed = 'true';
-    // Same as 轮廓——densified boolean path: no corner-radius chrome.
-    attrs.outlined = 'true';
-    // Bind only when the result sits inside the plate — never force timeline focus.
-    if (frameId) {
-      attrs.frameId = frameId;
-      const orders = shapeBoxes
-        .map((b) => Number(document?.deltaSetLike?.[b.id]?.attrs?.frameOrder))
-        .filter(Number.isFinite);
-      if (orders.length) attrs.frameOrder = Math.max(...orders) + 1;
-      // Result is inside the plate — never mark as workbench surround pasteboard.
-      delete attrs[WORKBENCH_SURROUND_ATTR];
-    }
-    applyBooleanResultPaint(
-      attrs,
-      sampleNode?.attrs as Record<string, unknown> | undefined,
-      { stroke: sample.stroke, borderWidth: sample.borderWidth, fill: sample.fill }
-    );
-
-    let next = addNodeToDocument(document, id, node);
-    next = removeNodesFromDocument(next, ids);
-    // Outside the plate while timeline is open — pasteboard surround, not a track layer.
-    if (!frameId) {
-      next = tagCreatedNodeForWorkbenchSurround(next, id);
-    }
-    setDocument(next);
-    if (frameId) {
-      const frame = (next.frames || []).find((f) => String(f?.id) === frameId);
-      if (frame && isAnimationArtboardKind(frame.kind)) {
-        ensureAnimationFrameMedia({ frameId });
+    if (created && latest) {
+      const { left, top } = nodeLeftTop(latest, created);
+      const abs = sceneToDocumentCoords(latest, left, top);
+      const frameId = resolveBooleanResultFrameId(
+        latest,
+        operandFrameIds,
+        abs.x + Number(created.width || 0) / 2,
+        abs.y + Number(created.height || 0) / 2
+      );
+      const attrs: Record<string, unknown> = { outlined: 'true' };
+      if (frameId) {
+        attrs.frameId = frameId;
+        const orders = shapeBoxes
+          .map((b) => Number(b.attrs?.frameOrder))
+          .filter(Number.isFinite);
+        if (orders.length) attrs.frameOrder = Math.max(...orders) + 1;
+      }
+      patchDocumentNode({ nodeId: newId, patch: { attrs } });
+      if (frameId) {
+        const frame = (latest.frames || []).find((f) => String(f?.id) === frameId);
+        if (frame && isAnimationArtboardKind(frame.kind)) {
+          ensureAnimationFrameMedia({ frameId });
+        }
+      } else {
+        const after = store.getState().editor.document;
+        if (after) {
+          const tagged = tagCreatedNodeForWorkbenchSurround(after, newId);
+          if (tagged !== after) setDocument(tagged);
+        }
       }
     }
-    setSelectedNodeIds([id]);
-    setSelectedNodeId(id);
+
+    // Prefer setSelectedNodeIds only — setSelectedNodeId collapses multi to [id].
+    setSelectedNodeIds([newId]);
     setDistributeOpen(false);
     setBooleanOpen(false);
   };
@@ -618,18 +585,15 @@ function MultiSelectionToolbar({
   const toggleAspectLock = () => {
     const next = aspectLocked ? 'false' : 'true';
     applyPatches(
-      opNodeIds.map((id) => {
-        const shapeType = document?.deltaSetLike?.[id]?.attrs?.shapeType;
-        return {
-          nodeId: id,
-          patch: {
-            attrs: {
-              ...(shapeType != null ? { shapeType } : {}),
-              lockAspect: next,
-            },
+      opNodeIds.map((id) => ({
+        nodeId: id,
+        patch: {
+          attrs: {
+            ...shapeTypePatch(document?.deltaSetLike?.[id]),
+            lockAspect: next,
           },
-        };
-      })
+        },
+      }))
     );
   };
 
@@ -695,37 +659,23 @@ function MultiSelectionToolbar({
 
   const groupId = selectionSharedGroupId(document, opNodeIds);
 
-  const createGroup = () => {
-    const ids = unlockedGroupableIds(document, opNodeIds);
-    if (ids.length < 2) return;
-    const next = groupNodesInDocument(document, ids);
-    setDocument(next);
-    setMixedSelection({ nodeIds: ids, frameIds });
-  };
-
-  const ungroup = () => {
-    const ids = unlockedGroupableIds(document, opNodeIds);
-    if (!ids.length) return;
-    const next = ungroupNodesInDocument(document, ids);
-    setDocument(next);
-    setMixedSelection({ nodeIds: ids, frameIds });
-  };
+  const createGroup = () =>
+    runGroupOp({ mode: 'group', document, opNodeIds, frameIds, t });
+  const ungroup = () =>
+    runGroupOp({ mode: 'ungroup', document, opNodeIds, frameIds, t });
 
   const applyAspectPreset = (preset: (typeof ELEMENT_ASPECT_PRESETS)[number]) => {
     if (preset.id === 'original') {
       applyPatches(
-        boxes.map((b) => {
-          const shapeType = document?.deltaSetLike?.[b.id]?.attrs?.shapeType;
-          return {
-            nodeId: b.id,
-            patch: {
-              attrs: {
-                ...(shapeType != null ? { shapeType } : {}),
-                lockAspect: 'false',
-              },
+        boxes.map((b) => ({
+          nodeId: b.id,
+          patch: {
+            attrs: {
+              ...shapeTypePatch(document?.deltaSetLike?.[b.id]),
+              lockAspect: 'false',
             },
-          };
-        })
+          },
+        }))
       );
       return;
     }
@@ -743,20 +693,19 @@ function MultiSelectionToolbar({
         const hasOrig =
           Number(node?.attrs?.[ASPECT_ORIG_W]) > 0 &&
           Number(node?.attrs?.[ASPECT_ORIG_H]) > 0;
-        const shapeType = node?.attrs?.shapeType;
         return {
           nodeId: p.nodeId,
           patch: {
             ...p.patch,
             attrs: {
-              ...(shapeType != null ? { shapeType } : {}),
+              ...shapeTypePatch(node),
               lockAspect: 'true',
-              ...(!hasOrig
-                ? {
+              ...(hasOrig
+                ? {}
+                : {
                     [ASPECT_ORIG_W]: Math.round(b.width),
                     [ASPECT_ORIG_H]: Math.round(b.height),
-                  }
-                : {}),
+                  }),
             },
           },
         };

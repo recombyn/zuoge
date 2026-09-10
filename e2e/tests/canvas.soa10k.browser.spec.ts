@@ -1,9 +1,9 @@
 /**
- * Real Chromium: blank editor → inject N SoA shapes → host counts + pan FPS.
+ * Real Chromium: blank editor → inject N shapes → host counts + pan FPS.
  * Headed: `npx playwright test tests/canvas.soa10k.browser.spec.ts --headed --workers=1`
- * Count: `SOA_BROWSER_N=10000` (default 10000).
- * Mixed ladder: `SOA_BROWSER_MIXED=1` (default; 2k/5k/10k rect+text+image+video+path).
- * Homogeneous only: `SOA_BROWSER_MIXED=0`.
+ * Count: `CANVAS_BROWSER_N=10000` (default 10000).
+ * Mixed ladder: `CANVAS_BROWSER_MIXED=1` (default; 2k/5k/10k rect+text+image+video+path).
+ * Homogeneous only: `CANVAS_BROWSER_MIXED=0`.
  */
 import path from 'node:path';
 import { writeFileSync } from 'node:fs';
@@ -16,8 +16,12 @@ const API = (process.env.E2E_API || process.env.FUNC_API || 'http://127.0.0.1:80
   /\/$/,
   ''
 );
-const COUNT = Math.max(150, Number(process.env.SOA_BROWSER_N || 10_000) || 10_000);
-const RUN_MIXED_LADDER = (process.env.SOA_BROWSER_MIXED || '1').trim() !== '0';
+const COUNT = Math.max(
+  150,
+  Number(process.env.CANVAS_BROWSER_N || process.env.SOA_BROWSER_N || 10_000) || 10_000
+);
+const RUN_MIXED_LADDER =
+  (process.env.CANVAS_BROWSER_MIXED || process.env.SOA_BROWSER_MIXED || '1').trim() !== '0';
 /** 1×1 PNG — shared src so thousands of image/video nodes stay cheap. */
 const TINY_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -490,7 +494,7 @@ async function settleAndMeasure(page: Page, stage: Locator, opts?: { minVisible?
   return { counts, pan };
 }
 
-test.describe('SoA live editor (browser)', () => {
+test.describe('Kit canvas density (browser)', () => {
   test.skip(!TOKEN, E2E_TOKEN_SKIP_REASON);
 
   test.beforeEach(async ({ page }) => {
@@ -498,7 +502,7 @@ test.describe('SoA live editor (browser)', () => {
   });
 
   test(`inject ${COUNT} stroked rects — host counts + pan FPS`, async ({ page }) => {
-    test.skip(RUN_MIXED_LADDER, 'SOA_BROWSER_MIXED=1 runs the mixed ladder instead');
+    test.skip(RUN_MIXED_LADDER, 'CANVAS_BROWSER_MIXED=1 runs the mixed ladder instead');
     const { stage } = await openBlankEditor(page);
 
     const tInj0 = Date.now();
@@ -530,7 +534,7 @@ test.describe('SoA live editor (browser)', () => {
   });
 
   test('mixed ladder 2k/5k/10k — rect+text+image+video+path pan FPS', async ({ page }) => {
-    test.skip(!RUN_MIXED_LADDER, 'set SOA_BROWSER_MIXED=1 (default) for mixed ladder');
+    test.skip(!RUN_MIXED_LADDER, 'set CANVAS_BROWSER_MIXED=1 (default) for mixed ladder');
     console.log('[e2e:soa-mixed] open editor');
     const { stage } = await openBlankEditor(page);
     console.log('[e2e:soa-mixed] editor ready');
@@ -590,7 +594,7 @@ test.describe('SoA live editor (browser)', () => {
     expect(at2k.counts.canvasIdle).toBeGreaterThan(0);
     expect(at2k.counts.visible + at2k.counts.canvasIdle).toBeGreaterThan(0);
     expect(at10k.counts.hasInkCanvas || at10k.counts.canvasIdle > 0).toBe(true);
-    // Viewport hosts only — full scene stays on canvas idle / SoA.
+    // Viewport hosts only — full scene stays on Kit idle ink.
     expect(at10k.counts.fullHost).toBeLessThanOrEqual(400);
   });
 });

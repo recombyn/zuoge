@@ -14,10 +14,10 @@ import {
   TOKEN,
 } from './canvasStressHelpers';
 
-test.describe('canvas frame chrome â†?plate align', () => {
+test.describe('canvas frame chrome ï¿½?plate align', () => {
   test.skip(!TOKEN, E2E_TOKEN_SKIP_REASON);
   test.setTimeout(3 * 60_000);
-  // User repro: browser zoom â†?fractional DPR (MCP tab had data-rcb-dpr=0.75).
+  // User repro: browser zoom ï¿½?fractional DPR (MCP tab had data-rcb-dpr=0.75).
   test.use({ deviceScaleFactor: 0.75 });
 
   test.beforeEach(async ({ page }) => {
@@ -171,7 +171,7 @@ test.describe('canvas frame chrome â†?plate align', () => {
       return {
         z,
         geom,
-        dpr: stageEl?.getAttribute('data-rcb-dpr'),
+        dpr: typeof window !== 'undefined' ? String(window.devicePixelRatio || 1) : null,
         inkVsPred: {
           dx: ink.left - predicted.left,
           dy: ink.top - predicted.top,

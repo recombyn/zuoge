@@ -2,7 +2,7 @@ import type { VideoGeomOverride } from '@/components/editor/nodes/VideoNode/Vide
 
 /**
  * Coalesce HTML-media geometry publishes to one apply per animation frame.
- * SVG preview stays sync via previewSvgNodeGeometry; React setState must not
+ * Kit / DomHost geometry preview (noop under Kit); React setState must not
  * run on every pointermove (that re-reconciles SvgCanvas).
  */
 export function createDragWriteCoalescer(

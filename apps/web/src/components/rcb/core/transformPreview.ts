@@ -13,7 +13,7 @@ export type NodeTransformPreview = {
   /** Degrees; omit to keep document angle. */
   angle?: number;
   /**
-   * Playhead out-of-range / ink hide — SoA paint + hit skip while true.
+   * Playhead out-of-range / ink hide — Kit paint + hit skip while true.
    * Document visibility is unchanged (scrub-only).
    */
   hidden?: boolean;
@@ -118,7 +118,7 @@ export function setNodeTransformAngles(
   if (changed) notify();
 }
 
-/** Playhead in/out hide for SoA (keeps last box/angle). */
+/** Playhead in/out hide for Kit (keeps last box/angle). */
 export function setNodeTransformHidden(
   patches: ReadonlyArray<{ nodeId: string; hidden: boolean }>
 ): void {

@@ -7,12 +7,13 @@
  */
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import {
+  getShapeHost,
   getShapeHostNodeEpoch,
   subscribeShapeHost,
 } from '@/components/rcb/shapes/shapeHostRegistry';
-import { findHtmlMediaMount } from '@/components/rcb/scene/paint/sceneToSvg';
+import { findHtmlMediaMount } from '@/components/rcb/scene/dom/domHostBoard';
 
-export function useHtmlMediaMount(nodeId: string): Element | null {
+export function useHtmlMediaMount(nodeId: string): HTMLElement | null {
   const id = String(nodeId || '');
   const subscribe = useCallback(
     (onStoreChange: () => void) => subscribeShapeHost(id, onStoreChange),
@@ -20,5 +21,11 @@ export function useHtmlMediaMount(nodeId: string): Element | null {
   );
   const getSnapshot = useCallback(() => getShapeHostNodeEpoch(id), [id]);
   const epoch = useSyncExternalStore(subscribe, getSnapshot, () => 0);
-  return useMemo(() => findHtmlMediaMount(id), [id, epoch]);
+  return useMemo(() => {
+    if (!id) return null;
+    const host = getShapeHost(id);
+    const root = host?.el ?? host?.layer ?? null;
+    const mount = findHtmlMediaMount(root);
+    return mount instanceof HTMLElement ? mount : null;
+  }, [id, epoch]);
 }

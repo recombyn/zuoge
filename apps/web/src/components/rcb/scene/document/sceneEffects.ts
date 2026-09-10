@@ -95,69 +95,6 @@ export function resolveStrokeAlignForPaint(node: SceneNodeInput): StrokeAlign {
   return align;
 }
 
-/** Canvas `lineWidth` for a visual stroke under align (inside/outside use 2× + clip/fill). */
-export function canvasStrokeLineWidth(align: StrokeAlign, strokeWidth: number): number {
-  if (!(strokeWidth > 0)) return 0;
-  if (align === 'inside' || align === 'outside') return strokeWidth * 2;
-  return strokeWidth;
-}
-
-/**
- * Figma/SVG-style stroke align on Canvas2D.
- * - outside: stroke at 2× first, then fill (caller) covers the inward half
- * - inside: clip to path, stroke at 2× (fill already painted)
- * - center: normal stroke at width
- */
-export function strokeCanvasAligned(
-  ctx: CanvasRenderingContext2D,
-  opts: {
-    align: StrokeAlign;
-    stroke: string;
-    strokeWidth: number;
-    /** Trace geometry (beginPath + path). For Path2D pass `() => {}` and use `path`. */
-    trace: () => void;
-    path?: Path2D;
-    fillRule?: CanvasFillRule;
-    /** SVG stroke-dasharray; empty/undefined = solid. */
-    dasharray?: string;
-  }
-): void {
-  const { align, stroke, strokeWidth, trace, path, fillRule, dasharray } = opts;
-  if (!(strokeWidth > 0) || !stroke || stroke === 'transparent') return;
-  ctx.save();
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = canvasStrokeLineWidth(align, strokeWidth);
-  const dash = String(dasharray || '')
-    .trim()
-    .split(/[\s,]+/)
-    .map(Number)
-    .filter((n) => Number.isFinite(n) && n >= 0);
-  ctx.setLineDash(dash.length ? dash : []);
-  try {
-    if (align === 'inside') {
-      if (path) {
-        if (fillRule) ctx.clip(path, fillRule);
-        else ctx.clip(path);
-        ctx.stroke(path);
-      } else {
-        trace();
-        ctx.clip();
-        trace();
-        ctx.stroke();
-      }
-      return;
-    }
-    if (path) {
-      ctx.stroke(path);
-      return;
-    }
-    trace();
-    ctx.stroke();
-  } finally {
-    ctx.restore();
-  }
-}
-
 function strokePaintMeta(node: SceneNodeInput): { align: StrokeAlign; strokeWidth: number } | null {
   if (!node) return null;
   const key = String(node.key || '');
@@ -168,7 +105,7 @@ function strokePaintMeta(node: SceneNodeInput): { align: StrokeAlign; strokeWidt
   if (key === 'text' || key === 'frame') return null;
   if (key === 'image' || key === 'video' || key === 'lottie' || key === 'audio') return null;
 
-  // Same color fallback as sceneToSvg — a missing border-color still paints #333.
+  // Same color fallback as Kit style — a missing border-color still paints #333.
   const { stroke, strokeWidth } = resolveStroke(node, '#333333');
   if (!(strokeWidth > 0) || !stroke || stroke === 'transparent') return null;
   if (/rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*0\s*\)/i.test(stroke)) return null;

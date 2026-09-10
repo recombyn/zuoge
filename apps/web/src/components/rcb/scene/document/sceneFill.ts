@@ -500,9 +500,8 @@ export function isRichFillType(type: FillType | string | null | undefined): bool
 }
 
 /**
- * True when idle WebGL must not paint a solid `fill-color` mesh (would look white
- * while the panel shows a gradient / image). Product path bakes Path2D ink to a
- * per-node texture instead.
+ * True when the node must not be treated as a flat solid `fill-color`
+ * (gradient / image / diffuse). Kit + DomHost honor rich fill attrs instead.
  */
 export function nodeHasRichFill(node: SceneNodeInput | null | undefined): boolean {
   if (!node) return false;

@@ -95,7 +95,7 @@ function AnimationPlayheadSceneSync(_props: { document: SceneDocument }): ReactN
     onApply();
     return () => {
       window.removeEventListener(RCB_ANIMATION_PLAYHEAD_APPLY, onApply);
-      // Drop scrub TransformPreview so SoA bake / chrome return to document.
+      // Drop scrub TransformPreview so Kit bake / chrome return to document.
       clearNodeTransformPreviews();
     };
   }, []);

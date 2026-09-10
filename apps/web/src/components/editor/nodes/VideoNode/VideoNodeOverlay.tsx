@@ -35,7 +35,7 @@ function VideoZoomSync({ onZoom }: { onZoom: (zoom: number) => void }) {
  * Active video decoder: one HTML `<video>` portaled into the SVG foreignObject.
  * Idle (unselected) videos paint as canvas posters — no ShapeHost / FO.
  * Stays mounted during move/resize — FO is inside the SVG group that
- * `previewSvgNodeGeometry` transforms (same as audio). `geometryOverrides`
+ * Kit / DomHost geometry preview drives (same as audio). `geometryOverrides`
  * keeps plate width/height/angle chrome in sync while the editor store is still pre-gesture.
  */
 function VideoNodeOverlay({

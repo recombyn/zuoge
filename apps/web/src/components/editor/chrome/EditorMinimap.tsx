@@ -12,7 +12,7 @@ import {
 } from '@/components/rcb/scene/document/nodeCapabilities';
 import { resolveFillColor, resolveStroke } from '@/components/rcb/scene/document/sceneEffects';
 import { parseNodeTextStyle } from '@/components/rcb/scene/document/sceneText';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import type { SceneDocument, SceneNodeInput } from '@/components/rcb/sceneNode';
 
 type Box = { x: number; y: number; width: number; height: number };

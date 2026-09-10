@@ -1,18 +1,12 @@
 /**
- * Smart guides as scene-space SVG under the shared camera surface.
- * Must portal into `data-rcb-smart-guides-mount` on the chrome SVG (above
- * idle Canvas ink). Same CameraTransform as the ink SVG — a free-floating
- * HTML overlay would snap independently under fractional browser DPR.
- * Snap math stays in alignGuides; this file only paints.
- *
- * Paint contract: one continuous stroke per guide, then short × marks at
- * corners / edge mids. Keep mark arms short so they do not read as broken
- * guide dashes at high zoom.
+ * Idle smart guides as scene-space HTML under the HTML camera mount.
+ * Kit paints live snap guides on the canvas; this layer only paints idle /
+ * inspect badges + align/gap chrome when product asks. No stage-wide SVG.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useRcbCamera } from '@/components/rcb/camera/context';
-import { CHROME_STROKE_PX } from '../SelectionChrome';
+import { CHROME_STROKE_PX } from '../chromeMetrics';
 import {
   SMART_GUIDE_COLOR,
   type SceneBox,
@@ -32,6 +26,38 @@ function isGapGuide(g: SmartGuideLine): g is SmartGuideGap {
   return g.kind === 'gap';
 }
 
+function GuideLine({
+  x1,
+  y1,
+  x2,
+  y2,
+  strokeWidth,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  strokeWidth: number;
+}) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return null;
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const style: CSSProperties = {
+    position: 'absolute',
+    left: x1,
+    top: y1 - strokeWidth / 2,
+    width: len,
+    height: strokeWidth,
+    background: GUIDE_STROKE,
+    transformOrigin: '0 50%',
+    transform: `rotate(${angle}deg)`,
+    pointerEvents: 'none',
+  };
+  return <div data-rcb-guide-line="1" style={style} />;
+}
+
 function GuideBadge({
   text,
   x,
@@ -44,7 +70,8 @@ function GuideBadge({
   x: number;
   y: number;
   inv: number;
-  anchor: 'below' | 'right';
+  /** `center` — pill sits on the measure line (reference spacing chrome). */
+  anchor: 'below' | 'right' | 'center';
   fill?: string;
 }) {
   const fontSize = 11 * inv;
@@ -59,29 +86,28 @@ function GuideBadge({
   const cx = anchor === 'right' ? x + gap + w / 2 : x;
   const cy = anchor === 'below' ? y + gap + h / 2 : y;
   return (
-    <g>
-      <rect
-        x={cx - w / 2}
-        y={cy - h / 2}
-        width={w}
-        height={h}
-        rx={radius}
-        ry={radius}
-        fill={fill}
-      />
-      <text
-        x={cx}
-        y={cy}
-        fill="#fff"
-        fontSize={fontSize}
-        fontWeight={600}
-        fontFamily="system-ui, sans-serif"
-        textAnchor="middle"
-        dominantBaseline="central"
-      >
-        {text}
-      </text>
-    </g>
+    <div
+      style={{
+        position: 'absolute',
+        left: cx - w / 2,
+        top: cy - h / 2,
+        width: w,
+        height: h,
+        borderRadius: radius,
+        background: fill,
+        color: '#fff',
+        fontSize,
+        fontWeight: 600,
+        fontFamily: 'system-ui, sans-serif',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'none',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {text}
+    </div>
   );
 }
 
@@ -100,26 +126,10 @@ export function GuideMarkX({
   const arm = Math.max(r * 0.85, strokeWidth * 1.4);
   const sw = Math.max(strokeWidth, r * 0.35);
   return (
-    <g data-rcb-guide-mark="x" pointerEvents="none">
-      <line
-        x1={x - arm}
-        y1={y - arm}
-        x2={x + arm}
-        y2={y + arm}
-        stroke={GUIDE_STROKE}
-        strokeWidth={sw}
-        strokeLinecap="round"
-      />
-      <line
-        x1={x - arm}
-        y1={y + arm}
-        x2={x + arm}
-        y2={y - arm}
-        stroke={GUIDE_STROKE}
-        strokeWidth={sw}
-        strokeLinecap="round"
-      />
-    </g>
+    <div data-rcb-guide-mark="x" style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}>
+      <GuideLine x1={x - arm} y1={y - arm} x2={x + arm} y2={y + arm} strokeWidth={sw} />
+      <GuideLine x1={x - arm} y1={y + arm} x2={x + arm} y2={y - arm} strokeWidth={sw} />
+    </div>
   );
 }
 
@@ -127,6 +137,41 @@ function formatSizeBadge(box: SceneBox): string {
   const w = Math.max(0, Math.round(box.width));
   const h = Math.max(0, Math.round(box.height));
   return `${w} × ${h}`;
+}
+
+function ArrowTips({
+  axis,
+  at,
+  from,
+  to,
+  tip,
+  strokeWidth,
+}: {
+  axis: 'x' | 'y';
+  at: number;
+  from: number;
+  to: number;
+  tip: number;
+  strokeWidth: number;
+}) {
+  if (axis === 'x') {
+    return (
+      <>
+        <GuideLine x1={from + tip} y1={at - tip} x2={from} y2={at} strokeWidth={strokeWidth} />
+        <GuideLine x1={from + tip} y1={at + tip} x2={from} y2={at} strokeWidth={strokeWidth} />
+        <GuideLine x1={to - tip} y1={at - tip} x2={to} y2={at} strokeWidth={strokeWidth} />
+        <GuideLine x1={to - tip} y1={at + tip} x2={to} y2={at} strokeWidth={strokeWidth} />
+      </>
+    );
+  }
+  return (
+    <>
+      <GuideLine x1={at - tip} y1={from + tip} x2={at} y2={from} strokeWidth={strokeWidth} />
+      <GuideLine x1={at + tip} y1={from + tip} x2={at} y2={from} strokeWidth={strokeWidth} />
+      <GuideLine x1={at - tip} y1={to - tip} x2={at} y2={to} strokeWidth={strokeWidth} />
+      <GuideLine x1={at + tip} y1={to - tip} x2={at} y2={to} strokeWidth={strokeWidth} />
+    </>
+  );
 }
 
 export default function SmartGuidesOverlay({
@@ -140,13 +185,10 @@ export default function SmartGuidesOverlay({
   const camera = useRcbCamera();
   const z = Math.max(0.05, camera.zoom || 1);
   const inv = 1 / z;
-  // Keep ≥1 CSS px under camera scale so the guide never drops to a dashed hairline.
   const stroke = Math.max(1 / z, CHROME_STROKE_PX / z);
   const tip = 5 * inv;
   const markR = Math.max(stroke * 1.25, 4 * inv);
-  const dash = `${5 * inv} ${4 * inv}`;
 
-  // Remount when shared world SVG appears / is replaced.
   const [, setWorldEpoch] = useState(() => getSceneWorldEpoch());
   useEffect(
     () =>
@@ -172,74 +214,50 @@ export default function SmartGuidesOverlay({
         const midX = g.axis === 'x' ? (g.from + g.to) / 2 : g.at;
         const midY = g.axis === 'y' ? (g.from + g.to) / 2 : g.at;
         out.push(
-          <g key={`gap-${i}`}>
+          <div key={`gap-${i}`} style={{ position: 'absolute', left: 0, top: 0 }}>
             {g.rails?.map((rail, ri) => (
-              <line
+              <GuideLine
                 key={`rail-${ri}`}
                 x1={g.axis === 'y' ? Math.min(rail.from, rail.to) : rail.at}
                 y1={g.axis === 'y' ? rail.at : Math.min(rail.from, rail.to)}
                 x2={g.axis === 'y' ? Math.max(rail.from, rail.to) : rail.at}
                 y2={g.axis === 'y' ? rail.at : Math.max(rail.from, rail.to)}
-                stroke={GUIDE_STROKE}
                 strokeWidth={stroke}
-                strokeDasharray={dash}
-                strokeLinecap="butt"
-                shapeRendering="geometricPrecision"
               />
             ))}
-            <line
+            <GuideLine
               x1={g.axis === 'x' ? x0 : g.at}
               y1={g.axis === 'x' ? g.at : y0}
               x2={g.axis === 'x' ? x1 : g.at}
               y2={g.axis === 'x' ? g.at : y1}
-              stroke={GUIDE_STROKE}
               strokeWidth={stroke}
-              strokeLinecap="butt"
-              shapeRendering="geometricPrecision"
             />
-            {g.axis === 'x' ? (
-              <path
-                d={`M ${x0 + tip} ${g.at - tip} L ${x0} ${g.at} L ${x0 + tip} ${g.at + tip} M ${x1 - tip} ${g.at - tip} L ${x1} ${g.at} L ${x1 - tip} ${g.at + tip}`}
-                fill="none"
-                stroke={GUIDE_STROKE}
-                strokeWidth={stroke}
-              />
-            ) : (
-              <path
-                d={`M ${g.at - tip} ${y0 + tip} L ${g.at} ${y0} L ${g.at + tip} ${y0 + tip} M ${g.at - tip} ${y1 - tip} L ${g.at} ${y1} L ${g.at + tip} ${y1 - tip}`}
-                fill="none"
-                stroke={GUIDE_STROKE}
-                strokeWidth={stroke}
-              />
-            )}
-            <GuideBadge
-              text={String(g.dist)}
-              x={midX}
-              y={midY}
-              inv={inv}
-              anchor={g.axis === 'x' ? 'below' : 'right'}
+            <ArrowTips
+              axis={g.axis}
+              at={g.at}
+              from={g.axis === 'x' ? x0 : y0}
+              to={g.axis === 'x' ? x1 : y1}
+              tip={tip}
+              strokeWidth={stroke}
             />
-          </g>
+            <GuideBadge text={String(g.dist)} x={midX} y={midY} inv={inv} anchor="center" />
+          </div>
         );
         return;
       }
-      // Continuous align stroke first; × marks on top.
       out.push(
-        <g key={`align-${i}`}>
-          <line
+        <div key={`align-${i}`} style={{ position: 'absolute', left: 0, top: 0 }}>
+          <GuideLine
             x1={g.axis === 'x' ? g.at : g.from}
             y1={g.axis === 'x' ? g.from : g.at}
             x2={g.axis === 'x' ? g.at : g.to}
             y2={g.axis === 'x' ? g.to : g.at}
-            stroke={GUIDE_STROKE}
             strokeWidth={stroke}
-            strokeLinecap="butt"
-            shapeRendering="geometricPrecision"
           />
           {(g.marks || []).map((m, mi) => (
             <GuideMarkX key={mi} x={m.x} y={m.y} r={markR} strokeWidth={stroke} />
           ))}
-        </g>
+        </div>
       );
     });
     if (sizeBox && sizeBox.width > 0 && sizeBox.height > 0) {
@@ -256,14 +274,14 @@ export default function SmartGuidesOverlay({
       );
     }
     return out;
-  }, [guides, sizeBox, inv, stroke, tip, markR, dash]);
+  }, [guides, sizeBox, inv, stroke, tip, markR]);
 
   if (!nodes || !guidesMount) return null;
 
   return createPortal(
-    <g data-rcb-smart-guides="1" pointerEvents="none" aria-hidden>
+    <div data-rcb-smart-guides="1" aria-hidden style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}>
       {nodes}
-    </g>,
+    </div>,
     guidesMount
   );
 }

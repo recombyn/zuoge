@@ -88,4 +88,42 @@ describe('resolveActiveAudioPlayerId', () => {
       })
     ).toBeNull();
   });
+
+  it('skips uploading SoftGlow audio (no HTML player until finish)', () => {
+    const document = {
+      deltaSetLike: {
+        ROOT: {
+          id: 'ROOT',
+          key: 'entry',
+          children: ['a0'],
+          attrs: {},
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+        },
+        a0: {
+          id: 'a0',
+          key: 'audio',
+          x: 0,
+          y: 0,
+          width: 120,
+          height: 80,
+          attrs: {
+            src: 'blob:pending',
+            processStatus: 'running',
+            processKind: 'upload',
+          },
+          children: [],
+        },
+      },
+    } as SceneDocument;
+    expect(
+      resolveActiveAudioPlayerId({
+        document,
+        selectedNodeIds: ['a0'],
+        audioToolPanel: null,
+      })
+    ).toBeNull();
+  });
 });

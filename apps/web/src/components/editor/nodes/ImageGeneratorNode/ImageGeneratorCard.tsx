@@ -67,9 +67,9 @@ import {
   nextImageModelId,
 } from '@/components/editor/nodes/shared/generatorModelLists';
 import {
-  flyPickIntoComposer,
   attachSelectionToComposer,
   pickOrAttachFromCanvas,
+  usePendingCanvasAttachFly,
 } from '@/components/editor/nodes/shared/composerCanvasAttach';
 import { finishGeneratorGenerateSession } from '@/components/editor/nodes/shared/finishGeneratorGenerate';
 import { imageToolExitBtn } from '@/components/editor/nodes/ImageNode/imageToolbarShared';
@@ -93,7 +93,6 @@ import { isImageGeneratorNode } from '@/components/rcb/scene/document/nodeCapabi
 import {
   clearCanvasAttachPick,
   closeImageToolPanel,
-  consumePendingCanvasAttach,
   consumePendingImageGenMarkContexts,
   finishImageGenerator,
   openImageToolPanel,
@@ -246,26 +245,17 @@ function ImageGeneratorCard({
     mentionIx,
   } = useComposerMentionPanel(inputRef);
 
-  useEffect(() => {
-    if (!pendingCanvasAttach || pendingCanvasAttach.target !== pickTarget) return;
-    const payload = pendingCanvasAttach.payload;
-    consumePendingCanvasAttach();
-    const doc = editorDocument || (store.getState() as any).editor?.document;
-    async function flyPendingAttach() {
-      await flyPickIntoComposer({
-        landId: pickTarget,
-        document: doc,
-        payload,
-        existing: contextsRef.current,
-        setContexts,
-        insertChip: (ctx) => {
-          inputRef.current?.insertContextAtCaret(ctx);
-          inputRef.current?.focus();
-        },
-      });
-    }
-    flyPendingAttach();
-  }, [pendingCanvasAttach, pickTarget, editorDocument]);
+  usePendingCanvasAttachFly({
+    pickTarget,
+    pending: pendingCanvasAttach,
+    document: editorDocument || (store.getState() as any).editor?.document,
+    contextsRef,
+    setContexts,
+    insertChip: (ctx) => {
+      inputRef.current?.insertContextAtCaret(ctx);
+      inputRef.current?.focus();
+    },
+  });
 
   // Re-hydrate after overlay remount (e.g. geometry transform hides the portal).
   useEffect(() => {

@@ -16,9 +16,9 @@ import {
 import { useSelector } from '@/store';
 import { RcbOverlayPortal, useRcbCamera, rcbSceneToScreen } from '@/components/rcb';
 import type { SceneDocument } from '@/components/rcb/sceneNode';
-import { nodeLeftTop } from '@/components/rcb/scene/paint/sceneToSvg';
+import { nodeLeftTop } from '@/components/rcb/scene/layout/nodeLayout';
 import { buildPuppetWarpGrid, bakePuppetWarpDataUrl } from '@/components/rcb/scene/paint/puppetWarp';
-import { getFillImageReady } from '@/components/rcb/render/sceneRenderer';
+import { getFillImageReady } from '@/components/rcb/scene/media/fillImageCache';
 import { secToFrame } from '@/components/editor/nodes/AnimationNode/animationTimelineModel';
 import { getAnimationWorkbenchPlayheadSec } from '@/components/editor/nodes/AnimationNode/animationWorkbenchFocus';
 import { resolveAnimationFrameId } from '@/components/editor/nodes/AnimationNode/resolveAnimationFrameId';
@@ -123,7 +123,8 @@ function PuppetOverlay({
   angle: number;
   pins: PuppetPin[];
   density: number;
-}) {  const camera = useRcbCamera();
+}) {
+  const camera = useRcbCamera();
   const z = Math.max(0.05, camera.zoom || 1);
   const dragIdRef = useRef<string | null>(null);
   const pinsRef = useRef(pins);

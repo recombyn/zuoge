@@ -8,7 +8,12 @@ import {
   memo,
 } from 'react';
 import { cn } from '@/utils/classnames';
-import { toDisplayMediaUrl } from '@/utils/uploadImage';
+import {
+  isOurStoredImageUrl,
+  resolvePlayableMediaBlobUrl,
+  resolveUploadObjectKey,
+  toDisplayMediaUrl,
+} from '@/utils/uploadImage';
 import VideoPlaybackBar, {
   VIDEO_PLAYBACK_BAR_H,
   videoChromeLayout,
@@ -42,9 +47,73 @@ function resolveVideoElementAbsSrc(el: HTMLVideoElement): string {
   }
 }
 
-/** Canvas / upload video `src` → browser-playable URL (no auth blob round-trip). */
+function initialPlayableVideoSrc(display: string): string {
+  const s = String(display || '').trim();
+  if (s.startsWith('blob:') || s.startsWith('data:')) return s;
+  return '';
+}
+
+/**
+ * Canvas / upload video `src` → browser-playable URL.
+ * COS/CDN often needs an authenticated blob (same path as audio plates).
+ */
 export function usePlayableVideoSrc(src: string, uploadKey?: string | null): string {
-  return toDisplayMediaUrl(src, uploadKey);
+  const display = toDisplayMediaUrl(src, uploadKey);
+  const [playable, setPlayable] = useState(() => initialPlayableVideoSrc(display));
+
+  useEffect(() => {
+    const s = String(display || '').trim();
+    let cancelled = false;
+    let revoke = () => {
+      /* no blob yet */
+    };
+
+    if (!s) {
+      setPlayable('');
+      return undefined;
+    }
+    if (s.startsWith('blob:') || s.startsWith('data:')) {
+      setPlayable(s);
+      return undefined;
+    }
+
+    const key = String(uploadKey || '').trim() || resolveUploadObjectKey(s);
+    const needsAuthBlob = Boolean(key) || isOurStoredImageUrl(s);
+
+    if (!needsAuthBlob) {
+      setPlayable(s);
+      return undefined;
+    }
+
+    setPlayable('');
+
+    async function resolveBlob() {
+      try {
+        const resolved = await resolvePlayableMediaBlobUrl(s, {
+          uploadKey,
+          filename: 'video.mp4',
+          fallbackMime: 'video/mp4',
+        });
+        if (cancelled) {
+          resolved.revoke();
+          return;
+        }
+        revoke = resolved.revoke;
+        setPlayable(resolved.url);
+      } catch (err) {
+        console.warn('[video] resolve playable src failed', err);
+        if (!cancelled) setPlayable(s);
+      }
+    }
+
+    resolveBlob();
+    return () => {
+      cancelled = true;
+      revoke();
+    };
+  }, [display, uploadKey]);
+
+  return playable;
 }
 
 export type VideoCropNorm = { x: number; y: number; w: number; h: number };

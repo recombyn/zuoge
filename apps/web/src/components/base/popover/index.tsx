@@ -204,52 +204,50 @@ const CustomPopover = ({
           ) : null}
         </div>
       )}
-      <FloatingPortal>
-        <div
-          ref={refs.setFloating}
-          style={{
-            ...floatingStyles,
-            visibility: open ? 'visible' : 'hidden',
-            pointerEvents: open ? 'auto' : 'none',
-          }}
-          className={cn('z-20', className)}
-          {...getFloatingProps({
-            ...(trigger === 'hover'
-              ? {
-                onMouseLeave: () => onMouseLeave(open),
-                onMouseEnter: () => onMouseEnter(open),
-              }
-              : {}),
-          })}
-        >
+      {open ? (
+        <FloatingPortal>
           <div
-            className={cn(
-              'w-fit min-w-[130px] overflow-hidden bg-[var(--color-background-default-base)] p-2 shadow-lg',
-              'focus:outline-none focus-visible:outline-none',
-              !popupClassName?.includes('rounded') && 'rounded-xl',
-              popupClassName
-            )}
-            {...(trigger === 'hover'
-              ? {
-                onMouseLeave: () => onMouseLeave(open),
-                onMouseEnter: () => onMouseEnter(open),
-              }
-              : {})}
-          >
-            {isValidElement(htmlContent)
-              ? cloneElement(htmlContent as React.ReactElement<HtmlContentProps>, {
-                open,
-                onClose: handleClose,
-                ...(manualClose
-                  ? {
-                    onClick: handleClose,
+            ref={refs.setFloating}
+            style={floatingStyles}
+            className={cn('z-20', className)}
+            {...getFloatingProps({
+              ...(trigger === 'hover'
+                ? {
+                    onMouseLeave: () => onMouseLeave(open),
+                    onMouseEnter: () => onMouseEnter(open),
                   }
-                  : {}),
-              })
-              : htmlContent}
+                : {}),
+            })}
+          >
+            <div
+              className={cn(
+                'w-fit min-w-[130px] overflow-hidden bg-[var(--color-background-default-base)] p-2 shadow-lg',
+                'focus:outline-none focus-visible:outline-none',
+                !popupClassName?.includes('rounded') && 'rounded-xl',
+                popupClassName
+              )}
+              {...(trigger === 'hover'
+                ? {
+                    onMouseLeave: () => onMouseLeave(open),
+                    onMouseEnter: () => onMouseEnter(open),
+                  }
+                : {})}
+            >
+              {isValidElement(htmlContent)
+                ? cloneElement(htmlContent as React.ReactElement<HtmlContentProps>, {
+                    open,
+                    onClose: handleClose,
+                    ...(manualClose
+                      ? {
+                          onClick: handleClose,
+                        }
+                      : {}),
+                  })
+                : htmlContent}
+            </div>
           </div>
-        </div>
-      </FloatingPortal>
+        </FloatingPortal>
+      ) : null}
     </>
   );
 };

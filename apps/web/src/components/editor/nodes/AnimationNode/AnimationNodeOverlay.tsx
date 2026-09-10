@@ -166,7 +166,7 @@ function LottiePlate({
   loop: boolean;
   speed: number;
   hidden?: boolean;
-  mount: SVGSVGElement;
+  mount: HTMLElement;
   /** Shape-host paint generation — SVG rebuild wipes mount; must reload like 主场景 first open. */
   paintEpoch: number;
 }) {
@@ -404,7 +404,7 @@ function LottiePlateHost({
       }
   );
   const node = document?.deltaSetLike?.[nodeId];
-  if (!node || !(mount instanceof SVGSVGElement)) return null;
+  if (!node || !(mount instanceof HTMLElement)) return null;
 
   const frameHost = isAnimationFrameHostNode(node, document);
   const workbenchNested = isWorkbenchNestedLottieNode(node, document);

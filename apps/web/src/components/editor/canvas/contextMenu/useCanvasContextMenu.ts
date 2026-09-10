@@ -8,7 +8,7 @@ import {
 
 import { rcbResolveViewportEl, useRcbScreenToScene } from '@/components/rcb';
 import type { ContextMenuState } from '@/components/rcb/selection/chrome/CanvasContextMenu';
-import { parseFrameSelId } from '@/components/rcb/selection/frameSelectionIds';
+import { parseFrameSelId } from '@/components/rcb/frames/frameSceneQuery';
 import {
   setActiveFrameId,
   setFrameChromeMode,
@@ -216,7 +216,7 @@ export function resolveContextMenuHit(opts: {
       clientY: opts.clientY,
     }) || nodeIdFromEventTarget(opts.target);
 
-  // sceneRenderer returns `__frame__:id` for plate hits — same as SelectionFeature.
+  // Kit hitTest returns `__frame__:id` for plate hits — same as SelectionFeature.
   // Treating that string as a node id clears artboard selection and makes
   // 副本 / copy / cut no-op (no deltaSetLike entry).
   const frameFromHit = rawHit ? parseFrameSelId(rawHit) : null;

@@ -1,5 +1,6 @@
 /**
- * Selection paint raise / overflow reveal registries.
+ * DomHost paint raise / overflow reveal registries (HTML FO shells).
+ * Kit owns ink z-order; this only affects DomHost clip / raise for lottie/group/media.
  * Kept out of frameContentClip so that module stays clip geometry only.
  */
 
@@ -46,7 +47,7 @@ export function listSelectionRevealOverflowIds(opts: {
   } | null;
   processingNodeIds?: readonly string[];
   editingTextId?: string | null;
-  editingPenId?: string | null;
+  kitPathEditNodeId?: string | null;
 }): string[] {
   const selectedFrames = new Set(
     (opts.selectedFrameIds || []).map((id) => String(id || '').trim()).filter(Boolean)
@@ -66,7 +67,7 @@ export function listSelectionRevealOverflowIds(opts: {
   // Do not push selectedNodeIds — selection keep clipContent.
   for (const id of opts.processingNodeIds || []) push(id);
   push(opts.editingTextId);
-  push(opts.editingPenId);
+  push(opts.kitPathEditNodeId);
   return out;
 }
 

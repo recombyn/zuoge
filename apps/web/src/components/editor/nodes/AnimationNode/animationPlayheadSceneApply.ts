@@ -10,15 +10,9 @@ import { getSharedNodeEls, notifyShapeHostGeometry } from '@/components/rcb/shap
 import {
   isFrameLocalCoordSpace,
   nodeLeftTop,
-  previewSvgNodeAngle,
-  previewSvgNodeCornerRadii,
-  previewSvgNodeGeometry,
-  previewSvgNodeTransform,
-} from '@/components/rcb/scene/paint/sceneToSvg';
-import { clearNodeTransformPreviews, setNodeTransformHidden } from '@/components/rcb/core/transformPreview';
-import { getSharedSceneSpatialRuntime } from '@/components/rcb/core/spatialIndex';
+} from '@/components/rcb/scene/layout/nodeLayout';
+import { clearNodeTransformPreviews, setNodeTransformHidden, setNodeTransformPreviews } from '@/components/rcb/core/transformPreview';
 import { parseLottieAnimationData } from '@/components/rcb/scene/document/nodeFactories';
-import { radiiFromAttrs } from '@/components/rcb/scene/document/sceneRadii';
 import { lottieLocalToScenePoint } from '@/components/editor/nodes/AnimationNode/animationPrecompEditModel';
 import { secToFrame } from '@/components/editor/nodes/AnimationNode/animationTimelineModel';
 import {
@@ -94,11 +88,8 @@ function restoreDocumentGeometry(
   const top = abs.top;
   const width = Math.max(1, Number(node.width) || 1);
   const height = Math.max(1, Number(node.height) || 1);
-  // Drop TransformPreview first so SoA snaps to document without a publish flash.
+  // Drop TransformPreview first so ink snaps to document without a publish flash.
   clearNodeTransformPreviews([sceneNodeId]);
-  previewSvgNodeGeometry(nodeEls, sceneNodeId, { left, top, width, height }, {
-    publishPreview: false,
-  });
   const el = nodeEls.get(sceneNodeId) as any;
   if (el) {
     el.__sceneAngle = Number(node.attrs?.angle) || 0;
@@ -110,10 +101,6 @@ function restoreDocumentGeometry(
     delete el.__sceneDragBaseW;
     delete el.__sceneDragBaseH;
   }
-  previewSvgNodeAngle(nodeEls, sceneNodeId, Number(node.attrs?.angle) || 0, null, {
-    publishPreview: false,
-  });
-  previewSvgNodeTransform(nodeEls, sceneNodeId);
   notifyShapeHostGeometry(sceneNodeId);
   return { left, top, width, height };
 }
@@ -468,7 +455,7 @@ export function applyAnimationPlayheadScenePose(opts: {
    */
   applyGeometry?: boolean;
 }): string {
-  // Plate / selection gestures own child TransformPreview (+ SoA ink). Restoring
+  // Plate / selection gestures own child TransformPreview (+ Kit ink). Restoring
   // document geometry here would snap linked children back to pre-drag coords.
   if (isPlayheadScenePoseBlocked()) return '';
 
@@ -564,9 +551,8 @@ export function applyAnimationPlayheadScenePose(opts: {
           continue;
         }
 
-        const { left, top, width: w, height: h, rotation, opacity, skew, skewAxis, roundness } =
+        const { left, top, width: w, height: h, rotation, opacity, skew, skewAxis } =
           pose;
-        previewSvgNodeGeometry(nodeEls, sceneNodeId, { left, top, width: w, height: h });
         const el = nodeEls.get(sceneNodeId) as any;
         if (el) {
           el.__sceneAngle = rotation;
@@ -574,26 +560,18 @@ export function applyAnimationPlayheadScenePose(opts: {
           el.__sceneSkewY = 0;
           el.__sceneSkewAxis = skewAxis;
         }
-        previewSvgNodeAngle(nodeEls, sceneNodeId, rotation);
-        previewSvgNodeTransform(nodeEls, sceneNodeId);
-        setNodeTransformHidden([{ nodeId: sceneNodeId, hidden: !inRange }]);
-
-        const shapeType = String(node.attrs?.shapeType || '');
-        if (shapeType && roundness >= 0) {
-          const radii = radiiFromAttrs({
-            ...(node.attrs || {}),
-            rx: roundness,
-            ry: roundness,
-            cornerRadius: roundness,
-          });
-          previewSvgNodeCornerRadii(nodeEls, sceneNodeId, {
+        setNodeTransformPreviews([
+          {
+            nodeId: sceneNodeId,
+            left,
+            top,
             width: w,
             height: h,
-            shapeType,
-            radii,
-            attrs: node.attrs || {},
-          });
-        }
+            angle: rotation,
+            hidden: !inRange,
+          },
+        ]);
+        setNodeTransformHidden([{ nodeId: sceneNodeId, hidden: !inRange }]);
 
         notifyShapeHostGeometry(sceneNodeId);
         applyLayerInkVisibility(el, inRange, opacity);
@@ -635,7 +613,6 @@ export function applyAnimationPlayheadScenePose(opts: {
       const left = center.x - w / 2;
       const top = center.y - h / 2;
 
-      previewSvgNodeGeometry(nodeEls, sceneNodeId, { left, top, width: w, height: h });
       const el = nodeEls.get(sceneNodeId) as any;
       if (el) {
         el.__sceneAngle = sampled.rotation;
@@ -643,26 +620,18 @@ export function applyAnimationPlayheadScenePose(opts: {
         el.__sceneSkewY = 0;
         el.__sceneSkewAxis = sampled.skewAxis;
       }
-      previewSvgNodeAngle(nodeEls, sceneNodeId, sampled.rotation);
-      previewSvgNodeTransform(nodeEls, sceneNodeId);
-      setNodeTransformHidden([{ nodeId: sceneNodeId, hidden: !inRange }]);
-
-      const shapeType = String(node.attrs?.shapeType || '');
-      if (shapeType && sampled.roundness >= 0) {
-        const radii = radiiFromAttrs({
-          ...(node.attrs || {}),
-          rx: sampled.roundness,
-          ry: sampled.roundness,
-          cornerRadius: sampled.roundness,
-        });
-        previewSvgNodeCornerRadii(nodeEls, sceneNodeId, {
+      setNodeTransformPreviews([
+        {
+          nodeId: sceneNodeId,
+          left,
+          top,
           width: w,
           height: h,
-          shapeType,
-          radii,
-          attrs: node.attrs || {},
-        });
-      }
+          angle: sampled.rotation,
+          hidden: !inRange,
+        },
+      ]);
+      setNodeTransformHidden([{ nodeId: sceneNodeId, hidden: !inRange }]);
 
       notifyShapeHostGeometry(sceneNodeId);
       applyLayerInkVisibility(el, inRange, sampled.opacity);
@@ -691,16 +660,10 @@ export function applyAnimationPlayheadScenePose(opts: {
   }
 
   // Resting path: restore already cleared per-node previews — wipe any leftovers
-  // so SoA bake is not stuck gated after dock close.
+  // so Kit bake is not stuck gated after dock close.
   if (!applyGeometry) {
     const linked = listLinkedSceneNodeIds(anim, document, frameId);
     if (linked.length) clearNodeTransformPreviews(linked);
   }
-
-  const spatial = getSharedSceneSpatialRuntime();
-  if (spatial && touchedIds.length) {
-    spatial.patchNodes(document, touchedIds);
-  }
-
   return sigParts.join('|');
 }

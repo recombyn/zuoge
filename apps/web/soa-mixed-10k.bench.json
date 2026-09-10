@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-09-06T03:30:30.023Z",
-  "env": "vitest+jsdom (SoA sync/cull/Canvas2D paint proxy)",
+  "env": "vitest+jsdom (Kit sync/cull/Canvas2D paint proxy)",
   "budgets": {
     "dirtyStripePaintFrameMs": 16,
     "fullViewportPaintFrameMs": 20

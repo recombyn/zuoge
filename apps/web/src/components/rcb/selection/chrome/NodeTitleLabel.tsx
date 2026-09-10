@@ -30,7 +30,7 @@ import {
   WorldScreenChromeRoot,
   orientedBoxAabb,
 } from './SelectionToolbarShell';
-import { liveShapeGeomBox } from '../HostPathChrome';
+import { liveShapeGeomBox } from '../hostGeom';
 import { shiftConstrainedMoveDelta } from '../selectionLogic';
 import { cn } from '@/utils/classnames';
 

@@ -1,4 +1,4 @@
-/** Artboard: SVG plate + world-layer title / process chrome. */
+/** Artboard: Kit paints fill / idle / soft / selected stroke; SoftGlow when generating. */
 import {
   useEffect,
   useLayoutEffect,
@@ -7,10 +7,10 @@ import {
   type ReactNode,
   memo,
 } from 'react';
-import { useRcbCamera, useRcbViewportEl } from '../camera/context';
-import { rcbCameraCssZoom, rcbViewportSceneBounds } from '../core/math';
-import { createSvgBoard } from '@/components/rcb/scene/paint/sceneToSvg';
-import { append, setAttrs, setFill, setStroke, svgEl } from '@/components/rcb/scene/paint/svgDom';
+import { useRcbCamera } from '../camera/context';
+import { rcbCameraCssZoom } from '../core/math';
+import { createDomHostBoard } from '@/components/rcb/scene/dom/domHostShell';
+import { append, setAttrs, svgEl } from '@/components/rcb/scene/dom/svgDom';
 import {
   getShapeHost,
   getSceneShapesMount,
@@ -24,32 +24,25 @@ import {
 } from '@/components/rcb/shapes/shapeHostRegistry';
 import NodeTitleLabel from '../selection/chrome/NodeTitleLabel';
 import { ProcessGlowShell } from '@/components/rcb/process/ProcessGlowShell';
-import { appendProcessPlatePaths, syncProcessPlateGeometry } from '@/components/rcb/process/processPlateSvg';
+import {
+  appendProcessPlatePaths,
+  syncProcessPlateGeometry,
+} from '@/components/rcb/process/processPlateSvg';
 import { roundedRectPath } from '@/components/rcb/scene/document/sceneRadii';
-import type { ArtboardFrame } from '@/components/rcb/frames/types';
 import {
   FRAME_HIGHLIGHT_STROKE,
   FRAME_PLATE_STROKE,
   applyArtboardPlateEdgeStroke,
   framePlateStrokeSceneWidth,
-  isAnimationArtboardKind,
+  type ArtboardFrame,
 } from '@/components/rcb/frames/types';
-import {
-  getSceneCanvasIdlePaint,
-  subscribeSceneCanvasIdlePaint,
-} from '@/components/rcb/render/sceneRenderer';
-import { getSoaPaintDocument } from '@/components/rcb/render/sceneRenderBuffer';
-import {
-  registerArtboardInkSurface,
-  scheduleArtboardInkPaint,
-  updateArtboardInkChrome,
-} from '@/components/rcb/frames/artboardInkSurface';
+import { isKitBridgeAttached } from '@/components/rcb/canvas/kitBridge';
 
 /**
- * Clear plate stroke only when SelectionChrome owns the outline.
- * - Sole full-chrome plate: SelectionChrome paints **this** plate's box.
- * - Bound child selected: keep the idle gray hairline (plate silhouette); blue
- *   soft-focus is suppressed separately via {@link framePlateShowsHighlightEdge}.
+ * Clear plate stroke only when selection chrome owns the outline.
+ * - Sole full-chrome plate: selection paints **this** plate's box.
+ * - Bound child selected: keep the idle gray hairline (plate silhouette); soft
+ *   blue edge still shows via {@link framePlateShowsHighlightEdge} (generator-like).
  * Multi-frame full chrome uses a union outline — members must keep their edges.
  */
 export function framePlateClearsIdleStroke(opts: {
@@ -67,14 +60,17 @@ export function framePlateClearsIdleStroke(opts: {
   );
 }
 
-/** Soft / multi-member highlight edge when SelectionChrome is not owning the plate. */
+/** Soft / multi-member highlight edge when selection chrome is not owning the plate. */
 export function framePlateShowsHighlightEdge(opts: {
   chromeMode: 'soft' | 'full';
   selectedFrameIds: readonly string[];
   frameId: string;
   activeFrameId?: string | null;
   moving?: boolean;
-  /** Bound child SelectionChrome — suppress competing plate soft edge. */
+  /**
+   * Bound child selected — still allow soft edge when this plate is the soft
+   * context (`activeFrameId` / selectedFrameIds), like an occupied generator.
+   */
   boundChildSelected?: boolean;
 }): boolean {
   const {
@@ -83,10 +79,8 @@ export function framePlateShowsHighlightEdge(opts: {
     frameId,
     activeFrameId = null,
     moving = false,
-    boundChildSelected = false,
   } = opts;
   if (moving) return true;
-  if (boundChildSelected) return false;
   if (chromeMode === 'soft') {
     return activeFrameId === frameId || selectedFrameIds.includes(frameId);
   }
@@ -99,7 +93,7 @@ export function framePlateShowsHighlightEdge(opts: {
 
 type HtmlArtboardFrameProps = {
   frame: ArtboardFrame;
-  /** Full chrome selected — plate stroke off (SelectionChrome owns the box). */
+  /** Full chrome selected — plate stroke off (selection owns the box). */
   selected?: boolean;
   /** Soft context focus — blue edge only (interior click / working inside). */
   highlighted?: boolean;
@@ -162,7 +156,7 @@ export function getLiveArtboardFrameIds(): readonly string[] {
   return [...liveArtboardGeomById.keys()];
 }
 
-/** SoA / host ink must re-read `nodeLeftTop` when the live plate moves. */
+/** Kit / host must re-read `nodeLeftTop` when the live plate moves. */
 export function subscribeLiveArtboardFrameGeometry(listener: () => void): () => void {
   liveArtboardListeners.add(listener);
   return () => {
@@ -229,6 +223,8 @@ export function previewArtboardFrameGeometry(
     );
     return true;
   }
+  // Kit paints artboard fill / selected ring.
+  // Idle hairline: SVG edge tracks resize via previewArtboardFrameGeometry.
   const plate = el.querySelector<SVGRectElement>(
     'rect[data-rcb-artboard-edge="1"], rect[data-baseline="1"]'
   );
@@ -247,16 +243,6 @@ export function previewArtboardFrameGeometry(
       setAttrs(plate, { x: 0, y: 0, width, height });
     }
   }
-  const fill = el.querySelector<SVGRectElement>('rect[data-rcb-artboard-fill="1"]');
-  if (fill) setAttrs(fill, { width, height });
-  const fo = el.querySelector<SVGForeignObjectElement>('foreignObject[data-rcb-artboard-ink="1"]');
-  if (fo) setAttrs(fo, { width, height });
-  const inkCanvas = el.querySelector<HTMLCanvasElement>('canvas[data-rcb-artboard-ink-canvas]');
-  if (inkCanvas) {
-    inkCanvas.style.width = `${width}px`;
-    inkCanvas.style.height = `${height}px`;
-  }
-  scheduleArtboardInkPaint(id);
   return true;
 }
 
@@ -266,12 +252,8 @@ function paintFramePlate(
   selected: boolean,
   highlighted: boolean,
   generating: boolean,
-  zoom: number,
-  getViewScene?: () => { left: number; top: number; width: number; height: number } | null
+  zoom: number
 ): SVGGElement {
-  const prevPlate = layer.querySelector<SVGGElement>(':scope > g[data-rcb-frame-plate="1"]');
-  const prevHost = prevPlate as PlateInkHost | null;
-  prevHost?.__artboardInkUnregister?.();
   while (layer.firstChild) layer.removeChild(layer.firstChild);
 
   const x = Number(frame.x) || 0;
@@ -293,6 +275,11 @@ function paintFramePlate(
   g.sceneWidth = w;
   g.sceneHeight = h;
 
+  // Kit paints SoftGlow + plate chrome when generating (drawProcessingPlates).
+  if (generating && isKitBridgeAttached()) {
+    return g;
+  }
+
   const root = layer.ownerSVGElement;
   if (generating && root) {
     const stroke = selected
@@ -306,7 +293,25 @@ function paintFramePlate(
     return g;
   }
 
-  mountArtboardInk(g, frame, w, h, selected, highlighted, zoom, getViewScene);
+  // Kit paints artboard fill / idle gray / selected+soft blue (dadaki drawArtboards).
+  // When Kit is attached, never paint an SVG soft edge — it drifts from Kit's
+  // plate stroke (same geometry must be recolored in drawArtboards instead).
+  const edge = svgEl('rect') as SVGRectElement;
+  setAttrs(edge, {
+    fill: 'none',
+    'data-rcb-artboard-edge': '1',
+    'pointer-events': 'none',
+  });
+  const kitOwnsIdleEdge = isKitBridgeAttached();
+  applyArtboardPlateEdgeStroke(edge, {
+    // Kit owns all plate strokes — suppress SVG edge entirely.
+    selected: selected || kitOwnsIdleEdge,
+    highlighted: kitOwnsIdleEdge ? false : highlighted && !selected,
+    zoom,
+    width: w,
+    height: h,
+  });
+  append(g, edge);
   return g;
 }
 
@@ -315,112 +320,7 @@ type PlateInkHost = {
   __sceneTop?: number;
   sceneWidth?: number;
   sceneHeight?: number;
-  __artboardInkCanvas?: HTMLCanvasElement;
-  __artboardInkUnregister?: () => void;
 };
-
-function inkPaintFrameFrom(frame: ArtboardFrame) {
-  const geom = resolvePaintFrameGeometry(frame);
-  return {
-    id: frame.id,
-    x: Number(geom.x) || 0,
-    y: Number(geom.y) || 0,
-    width: Math.max(1, Number(geom.width) || 1),
-    height: Math.max(1, Number(geom.height) || 1),
-    backgroundColor: frame.backgroundColor,
-    backgroundOpacity: frame.backgroundOpacity,
-  };
-}
-
-function mountArtboardInk(
-  g: SVGGElement & PlateInkHost,
-  frame: ArtboardFrame,
-  w: number,
-  h: number,
-  selected: boolean,
-  highlighted: boolean,
-  zoom: number,
-  getViewScene?: () => { left: number; top: number; width: number; height: number } | null
-): void {
-  // SVG fill owns the plate silhouette so selection chrome AABB matches pixels
-  // (Canvas FO fill under CSS scale could bleed past the blue box by ~1px).
-  const { css, alpha } = (() => {
-    const raw = frame.backgroundColor;
-    const fill = raw && raw !== 'transparent' ? String(raw) : '#FFFFFF';
-    const a = Math.max(0, Math.min(100, Number(frame.backgroundOpacity ?? 100))) / 100;
-    return { css: fill, alpha: a };
-  })();
-  const fillRect = svgEl('rect', {
-    x: 0,
-    y: 0,
-    width: w,
-    height: h,
-    'data-rcb-artboard-fill': '1',
-  });
-  append(g, fillRect);
-  setFill(fillRect, css);
-  setStroke(fillRect, 'none');
-  if (alpha < 1) setAttrs(fillRect, { opacity: String(alpha) });
-  setAttrs(fillRect, { 'pointer-events': 'none' });
-
-  const fo = svgEl('foreignObject', {
-    x: 0,
-    y: 0,
-    width: w,
-    height: h,
-    'data-rcb-artboard-ink': '1',
-  }) as SVGForeignObjectElement;
-  // FO default can be visible — keep plate-bound idle pixels inside the board.
-  fo.style.overflow = 'hidden';
-  append(g, fo);
-
-  const canvas = document.createElement('canvas');
-  canvas.setAttribute('data-rcb-artboard-ink-canvas', frame.id);
-  canvas.style.display = 'block';
-  canvas.style.position = 'absolute';
-  canvas.style.left = '0';
-  canvas.style.top = '0';
-  canvas.style.width = `${w}px`;
-  canvas.style.height = `${h}px`;
-  // Do not force pixelated — AA strokes + nearest-neighbor looked soft inside plates.
-  fo.style.position = 'relative';
-  fo.appendChild(canvas);
-
-  g.__artboardInkCanvas = canvas;
-  g.__artboardInkUnregister = registerArtboardInkSurface({
-    canvas,
-    frameId: frame.id,
-    selected,
-    highlighted,
-    zoom,
-    getFrame: () => inkPaintFrameFrom(frame),
-    getDocument: () => getSceneCanvasIdlePaint()?.document ?? getSoaPaintDocument() ?? null,
-    getViewScene,
-  });
-
-  const plate = svgEl('rect', {
-    x: 0,
-    y: 0,
-    width: w,
-    height: h,
-    'data-baseline': '1',
-    'data-radius-body': '1',
-    'data-rcb-artboard-edge': '1',
-  });
-  append(g, plate);
-  setFill(plate, 'none');
-  setAttrs(plate, { 'pointer-events': 'none' });
-  // SVG edge (not canvas): ink FO backing is resolution-capped — canvas
-  // hairlines drop below 1px and vanish when zoomed in.
-  applyArtboardPlateEdgeStroke(plate, {
-    selected,
-    highlighted,
-    zoom,
-    width: w,
-    height: h,
-  });
-}
-
 
 function HtmlArtboardFrame({
   frame,
@@ -438,29 +338,13 @@ function HtmlArtboardFrame({
   aiProcessLabel,
 }: HtmlArtboardFrameProps): ReactNode {
   const camera = useRcbCamera();
-  const viewportEl = useRcbViewportEl();
   const z = rcbCameraCssZoom(camera);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<SVGGElement | null>(null);
-  const cameraRef = useRef(camera);
-  cameraRef.current = camera;
-  const viewportElRef = useRef(viewportEl);
-  viewportElRef.current = viewportEl;
 
-  function readInkViewScene() {
-    const el = viewportElRef.current;
-    const cam = cameraRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    const sw = Math.max(1, rect.width);
-    const sh = Math.max(1, rect.height);
-    const b = rcbViewportSceneBounds(cam, { width: sw, height: sh });
-    return { left: b.x, top: b.y, width: b.width, height: b.height };
-  }
   const generating = Boolean(aiGenerating);
   const processLabel = String(aiProcessLabel || 'Preparing…');
-  // Remount into shared world SVG when it appears (same as RcbShapeHost).
-  // Private fallback SVGs stack via HTML z-index and cover shared shape paint.
+  // Remount into shared world SVG when it appears (same as media hosts).
   const [worldEpoch, setWorldEpoch] = useState(() => getSceneWorldEpoch());
   useEffect(
     () =>
@@ -483,17 +367,17 @@ function HtmlArtboardFrame({
     const sharedRoot = getSceneWorldRoot();
     const sharedMount = getSceneShapesMount();
     if (!sharedRoot || !sharedMount) return undefined;
-    const { root, layer: sceneLayer, shared } = createSvgBoard(host, 1, 1, {
+    const { root, layer: sceneLayer, hostLayer, shared } = createDomHostBoard(host, 1, 1, {
       infinite: true,
       sharedRoot,
       sharedMount,
     });
     layerRef.current = sceneLayer;
-    // createSvgBoard tags shared layers as shape; frames must not share that attr
-    // or shape-only reorder / hit paths treat the plate as a node layer.
-    sceneLayer.removeAttribute('data-rcb-shape-layer');
-    sceneLayer.setAttribute('data-rcb-frame-layer', frame.id);
-    sceneLayer.setAttribute('data-z', String(zIndex));
+    // data-z / frame-layer on the HTML wrap (sharedMount child), not the private SVG g.
+    const orderEl = shared ? hostLayer : sceneLayer;
+    orderEl.removeAttribute('data-rcb-shape-layer');
+    orderEl.setAttribute('data-rcb-frame-layer', frame.id);
+    orderEl.setAttribute('data-z', String(zIndex));
     const paintFrame = { ...frame, ...resolvePaintFrameGeometry(frame) };
     const el = paintFramePlate(
       sceneLayer,
@@ -501,22 +385,20 @@ function HtmlArtboardFrame({
       selected,
       highlighted,
       generating,
-      z,
-      readInkViewScene
+      z
     );
     registerShapeHost({ nodeId: frame.id, root, layer: sceneLayer, el, kind: 'svg' });
     updateShapeHostElement(frame.id, el);
 
-    if (shared && sharedMount && sceneLayer.parentNode === sharedMount) {
+    if (shared && sharedMount) {
       syncSharedMountPaintOrder(sharedMount);
     }
 
     return () => {
-      const plate = sceneLayer.querySelector<SVGGElement>(':scope > g[data-rcb-frame-plate="1"]');
-      (plate as PlateInkHost | null)?.__artboardInkUnregister?.();
       unregisterShapeHost(frame.id);
       try {
-        sceneLayer.remove();
+        if (shared) hostLayer.remove();
+        else sceneLayer.remove();
       } catch {
         /* ignore */
       }
@@ -525,40 +407,13 @@ function HtmlArtboardFrame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layer, frame.id, worldEpoch]);
 
-  // Idle SoA / document paint → restamp every artboard small-canvas.
-  useEffect(() => {
-    if (layer !== 'body') return undefined;
-    return subscribeSceneCanvasIdlePaint(() => {
-      scheduleArtboardInkPaint(frame.id);
-    });
-  }, [layer, frame.id]);
-
-  // Live plate geometry → restamp ink (bounds already updated in previewArtboardFrameGeometry).
-  useEffect(() => {
-    if (layer !== 'body') return undefined;
-    return subscribeLiveArtboardFrameGeometry(() => {
-      scheduleArtboardInkPaint(frame.id);
-    });
-  }, [layer, frame.id]);
-
   // Selection / zoom hairline: repaint plate in place (do not remount the layer g).
   useLayoutEffect(() => {
     if (layer !== 'body') return;
     const sceneLayer = layerRef.current;
     if (!sceneLayer) return;
-    // During frame drag, previewArtboardFrameGeometry owns translate/size.
-    // A full paintFramePlate rebuild here races children TransformPreview and
-    // makes bound content look like it is sliding inside the plate.
-    const live = getLiveArtboardFrameGeometry(frame.id);
-    if (live) {
-      updateArtboardInkChrome(frame.id, {
-        selected,
-        highlighted,
-        zoom: z,
-        getViewScene: readInkViewScene,
-      });
-      return;
-    }
+    // Live drag still needs edge W/H + stroke-width — previewArtboardFrameGeometry
+    // only patches an existing edge rect; paintFramePlate rebuilds it from live geom.
     const paintFrame = { ...frame, ...resolvePaintFrameGeometry(frame) };
     const el = paintFramePlate(
       sceneLayer,
@@ -566,8 +421,7 @@ function HtmlArtboardFrame({
       selected,
       highlighted,
       generating,
-      z,
-      readInkViewScene
+      z
     );
     // Avoid bumpHostEpoch on every parent render when only the frame object
     // identity changed (SelectionFeature hostEpoch would thrash).
@@ -594,11 +448,19 @@ function HtmlArtboardFrame({
     if (layer !== 'body') return;
     const sceneLayer = layerRef.current;
     const sharedMount = getSceneShapesMount();
-    if (!sceneLayer || !sharedMount || sceneLayer.parentNode !== sharedMount) return;
-    sceneLayer.setAttribute('data-z', String(zIndex));
+    if (!sceneLayer || !sharedMount) return;
+    const wrap = sceneLayer.ownerSVGElement?.parentElement ?? null;
+    const orderEl =
+      wrap instanceof HTMLElement && wrap.hasAttribute('data-rcb-dom-host-layer')
+        ? wrap
+        : sceneLayer;
+    if (orderEl.parentNode !== sharedMount) return;
+    orderEl.setAttribute('data-z', String(zIndex));
     syncSharedMountPaintOrder(sharedMount);
   }, [layer, zIndex]);
   if (layer === 'label') {
+    // Kit drawArtboards owns artboard / 动画工作台 titles — no HTML fork.
+    if (hideTitle) return null;
     const live = resolvePaintFrameGeometry(frame);
     return (
       <>
@@ -613,9 +475,9 @@ function HtmlArtboardFrame({
           sizeWidth={live.width}
           sizeHeight={live.height}
           dataAttr="frame-label"
-          icon={isAnimationArtboardKind(frame.kind) ? 'lottie' : 'frame'}
+          icon="frame"
           dataProps={{ 'data-frame-id': frame.id }}
-          hidden={hideTitle}
+          hidden={false}
           onSelect={onSelect}
           onRename={onRename}
           onMove={onMove}
@@ -650,24 +512,13 @@ function HtmlArtboardFrame({
   }
 
   return (
-    <>
-      <div
-        className="pointer-events-none absolute left-0 top-0 overflow-visible"
-        // Plate paints on the shared stack SVG via data-z. Do not mirror
-        // stack z on this HTML anchor — a private-SVG fallback with high CSS z
-        // covers shapes while still letting clicks through (SVG is none).
-        style={{ zIndex: 0 }}
-        data-rcb-frame={frame.id}
-        data-frame-id={frame.id}
-      >
-        <div
-          ref={hostRef}
-          className="pointer-events-none absolute left-0 top-0 overflow-visible"
-          data-rcb-shape-host={frame.id}
-          style={{ width: 0, height: 0, overflow: 'visible' }}
-        />
-      </div>
-    </>
+    <div
+      ref={hostRef}
+      className="pointer-events-none absolute left-0 top-0 overflow-visible"
+      data-frame-id={frame.id}
+      data-rcb-shape-host={frame.id}
+      style={{ width: 0, height: 0, overflow: 'visible', zIndex: 0 }}
+    />
   );
 }
 

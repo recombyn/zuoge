@@ -3,9 +3,10 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"],
-      "@canvas-plugins/*": ["../../plugins/canvas/*"]
+      "@canvas-plugins/*": ["../../plugins/canvas/*"],
+      "@rcb-vector/*": ["../../vendor/vector-editor-ref/packages/editor/src/*"]
     }
   },
-  "include": ["src", "../../plugins/canvas", "vite.config.ts"],
-  "exclude": ["src/private"]
+  "include": ["src", "../../plugins/canvas", "../../vendor/vector-editor-ref/packages/editor/src", "vite.config.ts"],
+  "exclude": ["src/private", "../../vendor/vector-editor-ref/packages/editor/src/**/*.test.ts"]
 }
