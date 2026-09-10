@@ -1,34 +1,32 @@
-/** Regular polygon / star / stroke (line閻犺櫣妫弐row) geometry helpers. */
-
-import { ARROW_HEAD as ARROW_HEAD_GEOM } from '@/components/rcb/core/geometry';
+/** Regular polygon / star / stroke (line/arrow) geometry helpers. */
 
 export const DEFAULT_SHAPE_SIDES = 5;
 export const MIN_SHAPE_SIDES = 3;
 export const MAX_SHAPE_SIDES = 24;
 /** Inner / outer radius ratio for stars (闂佸憡鍔曢幊鎾伙綖濡ゅ懎纭€濠电姴鍊荤粣?. */
 export const DEFAULT_STAR_INNER_RATIO = 0.45;
-export const MIN_STAR_INNER_RATIO = 0.08;
-export const MAX_STAR_INNER_RATIO = 0.92;
+const MIN_STAR_INNER_RATIO = 0.08;
+const MAX_STAR_INNER_RATIO = 0.92;
 
-/** Circle / ellipse hole as fraction of outer radii (闂佸憡鍔曢幊搴＄暦閹邦剦鍤?. */
+/** Circle / ellipse hole as fraction of outer radii. */
 export const DEFAULT_ELLIPSE_INNER_RATIO = 0;
-export const MIN_ELLIPSE_INNER_RATIO = 0;
-export const MAX_ELLIPSE_INNER_RATIO = 0.92;
-/** Circle / ellipse remaining sweep as % of full turn (弧度 / 周弧度). Signed. */
+const MIN_ELLIPSE_INNER_RATIO = 0;
+const MAX_ELLIPSE_INNER_RATIO = 0.92;
+/** Circle / ellipse remaining sweep as % of full turn. Signed. */
 export const DEFAULT_ELLIPSE_ARC_PERCENT = 100;
 /**
  * Minimum |arc| — 0% collapses to a degenerate spike (triangle mess).
  * Keep a tiny wedge so geometry + knobs stay stable.
  */
 export const MIN_ELLIPSE_ARC_PERCENT = 0.5;
-export const MAX_ELLIPSE_ARC_PERCENT = 100;
+const MAX_ELLIPSE_ARC_PERCENT = 100;
 /**
- * Snap inner hole 闂?solid disk when ratio is within this.
- * Generous so dragging the hole closed is easy (was 3.5% 闂?1闂?px on small shapes).
+ * Snap inner hole to solid disk when ratio is within this.
+ * Generous so dragging the hole closed is easy.
  */
-export const ELLIPSE_INNER_SNAP_SOLID = 0.12;
+const ELLIPSE_INNER_SNAP_SOLID = 0.12;
 /** Also snap closed when the pointer is within this many screen px of the center. */
-export const ELLIPSE_INNER_SNAP_SOLID_PX = 18;
+const ELLIPSE_INNER_SNAP_SOLID_PX = 18;
 /**
  * Fixed cut-end / 开始位置 in atan2 degrees (0 = east/right, 90 = south).
  * Arc always opens clockwise from the right toward the left (bottom path).
@@ -79,7 +77,7 @@ export function snapEllipseInnerRatio(
 }
 
 /** Normalize degrees into [0, 360). */
-export function clampEllipseStartDeg(
+function clampEllipseStartDeg(
   n: unknown,
   fallback = DEFAULT_ELLIPSE_START_DEG
 ): number {
@@ -89,8 +87,8 @@ export function clampEllipseStartDeg(
   return m < 0 ? m + 360 : m;
 }
 
-/** Normalize an incremental angle delta into (闂佹剚鍘藉畷濠氬焵? 闁挎粎顕? */
-export function wrapAngleDelta(delta: number): number {
+/** Normalize an incremental angle delta into (−π, π]. */
+function wrapAngleDelta(delta: number): number {
   let d = delta;
   while (d > Math.PI) d -= Math.PI * 2;
   while (d <= -Math.PI) d += Math.PI * 2;
@@ -253,8 +251,7 @@ export function ellipseParametricAngle(
   );
 }
 
-/** Fixed arrowhead length in local (pre-rotation) units. */
-export const ARROW_HEAD = ARROW_HEAD_GEOM;
+/** Fixed arrowhead length lives in `@/components/rcb/core/geometry` (`ARROW_HEAD`). */
 export function clampShapeSides(n: unknown, fallback = DEFAULT_SHAPE_SIDES): number {
   const v = Math.round(Number(n));
   if (!Number.isFinite(v)) return fallback;
@@ -338,10 +335,6 @@ export function patchLiveShapeParamsPreview(
   setLiveShapeParamsPreview({ ...prev, nodeId, ...patch });
 }
 
-export function hasLiveShapeParamsPreview(): boolean {
-  return liveShapeParamsPreview != null;
-}
-
 export function getLiveShapeParamsPreviewNodeId(): string | null {
   return liveShapeParamsPreview?.nodeId ?? null;
 }
@@ -357,57 +350,7 @@ export function subscribeLiveShapeParamsPreview(onStoreChange: () => void): () =
   };
 }
 
-export function mergeLiveShapeParamsIntoAttrs(
-  nodeId: string,
-  attrs: Record<string, unknown> | null | undefined
-): Record<string, unknown> {
-  const live = liveShapeParamsFor(nodeId);
-  if (!live) return attrs ? { ...attrs } : {};
-  const merged = { ...(attrs || {}) };
-  if (live.sides != null) merged.sides = live.sides;
-  if (live.starInnerRatio != null) merged.starInnerRatio = live.starInnerRatio;
-  if (live.ellipseInnerRatio != null) merged.ellipseInnerRatio = live.ellipseInnerRatio;
-  if (live.ellipseArcPercent != null) merged.ellipseArcPercent = live.ellipseArcPercent;
-  return merged;
-}
-
-export function effectiveSidesFromAttrs(
-  nodeId: string,
-  attrs: Record<string, unknown> | null | undefined
-): number {
-  const live = liveShapeParamsFor(nodeId);
-  if (live?.sides != null) return clampShapeSides(live.sides);
-  return sidesFromAttrs(attrs);
-}
-
-export function effectiveStarInnerRatioFromAttrs(
-  nodeId: string,
-  attrs: Record<string, unknown> | null | undefined
-): number {
-  const live = liveShapeParamsFor(nodeId);
-  if (live?.starInnerRatio != null) return clampStarInnerRatio(live.starInnerRatio);
-  return starInnerRatioFromAttrs(attrs);
-}
-
-export function effectiveEllipseInnerRatioFromAttrs(
-  nodeId: string,
-  attrs: Record<string, unknown> | null | undefined
-): number {
-  const live = liveShapeParamsFor(nodeId);
-  if (live?.ellipseInnerRatio != null) return clampEllipseInnerRatio(live.ellipseInnerRatio);
-  return ellipseInnerRatioFromAttrs(attrs);
-}
-
-export function effectiveEllipseArcPercentFromAttrs(
-  nodeId: string,
-  attrs: Record<string, unknown> | null | undefined
-): number {
-  const live = liveShapeParamsFor(nodeId);
-  if (live?.ellipseArcPercent != null) return clampEllipseArcPercent(live.ellipseArcPercent);
-  return ellipseArcPercentFromAttrs(attrs);
-}
-
-export function starPoints(
+function starPoints(
   cx: number,
   cy: number,
   spikes: number,
@@ -426,7 +369,7 @@ export function starPoints(
   return points;
 }
 
-export function polygonPoints(
+function polygonPoints(
   cx: number,
   cy: number,
   sides: number,
@@ -441,7 +384,7 @@ export function polygonPoints(
 }
 
 /** Scale/translate points so their AABB exactly fills width × height. */
-export function fitPointsToBox(
+function fitPointsToBox(
   points: Array<[number, number]>,
   width: number,
   height: number
@@ -464,8 +407,8 @@ export function fitPointsToBox(
   return points.map(([x, y]) => [((x - minX) / bw) * w, ((y - minY) / bh) * h]);
 }
 
-/** Uniform scale + center 闂?keeps regular polygon / star proportions. */
-export function fitPointsUniformToBox(
+/** Uniform scale + center — keeps regular polygon / star proportions. */
+function fitPointsUniformToBox(
   points: Array<[number, number]>,
   width: number,
   height: number
@@ -672,38 +615,3 @@ export function strokeEndpointsFromBox(
     y1: cy + hy,
   };
 }
-
-/**
- * Drag an endpoint freely: opposite end stays fixed; length + angle update together.
- * `handle` `e` moves the right/local end; `w` moves the left/local start.
- */
-export function resizeStrokeByEndpoint(
-  box: { left: number; top: number; width: number; height: number },
-  angleDeg: number,
-  handle: 'e' | 'w',
-  pointerX: number,
-  pointerY: number,
-  snapToOctant = false
-) {
-  const ep = strokeEndpointsFromBox(box, angleDeg);
-  const fixed = handle === 'e' ? { x: ep.x0, y: ep.y0 } : { x: ep.x1, y: ep.y1 };
-  let nextX = pointerX;
-  let nextY = pointerY;
-  if (snapToOctant) {
-    const dx = pointerX - fixed.x;
-    const dy = pointerY - fixed.y;
-    const length = Math.hypot(dx, dy);
-    if (length > 1e-6) {
-      const snapped = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
-      nextX = fixed.x + Math.cos(snapped) * length;
-      nextY = fixed.y + Math.sin(snapped) * length;
-    }
-  }
-  if (handle === 'e') {
-    return strokeNodeFromEndpoints({ x0: ep.x0, y0: ep.y0, x1: nextX, y1: nextY });
-  }
-  return strokeNodeFromEndpoints({ x0: nextX, y0: nextY, x1: ep.x1, y1: ep.y1 });
-}
-
-/** Outlined text / dense logos - avoid re-parsing heavy path d. */
-export const HEAVY_PATH_D_CHARS = 12_000;

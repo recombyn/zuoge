@@ -51,18 +51,6 @@ export function radiusParkSceneForBox(
   return Math.min(total, half * 0.45);
 }
 
-export type OverlayHandleSeat = {
-  pickKey: string;
-  interactive?: boolean;
-  start: (e: globalThis.PointerEvent) => void;
-  onDoubleClick?: (e: globalThis.MouseEvent) => void;
-  onEnter?: () => void;
-  onLeave?: () => void;
-};
-
-/** Seat contention unused with Kit — keep API for overlay compile. */
-export function setOverlayHandleSeats(_ownerId: string, _seats: OverlayHandleSeat[] | null): void {}
-
 export function scenePointToLocal(
   sceneX: number,
   sceneY: number,

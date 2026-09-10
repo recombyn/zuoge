@@ -30,7 +30,6 @@ import {
   localPointToScene,
   previewShapeParamsToKit,
   scenePointToLocal,
-  setOverlayHandleSeats,
 } from './shapeHandleChrome';
 
 const DRAG_DISTANCE_SQUARED = 16;
@@ -80,14 +79,6 @@ function PolygonShapeHandlesOverlay({
   const [dragValue, setDragValue] = useState<number | null>(null);
   const [liveSides, setLiveSides] = useState<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const seatOwnerId = `poly:${nodeId}`;
-
-  useEffect(
-    () => () => {
-      setOverlayHandleSeats(seatOwnerId, null);
-    },
-    [seatOwnerId]
-  );
 
   const w = Math.max(1, box.width);
   const h = Math.max(1, box.height);
@@ -97,12 +88,9 @@ function PolygonShapeHandlesOverlay({
   const sides = liveSides ?? baseSides;
   const baseRadii = clampCornerRadii(radiiFromAttrs(node?.attrs), w, h);
   const linked = isRadiusLinked(node?.attrs);
-  const baseR = Math.round(
-    linked
-      ? (baseRadii.tl + baseRadii.tr + baseRadii.br + baseRadii.bl) / 4
-      : baseRadii.tl
-  );
-  const radius = dragValue != null && activeKey === 'radius' ? dragValue : baseR;
+  const linkedAvg = (baseRadii.tl + baseRadii.tr + baseRadii.br + baseRadii.bl) / 4;
+  const baseR = Math.round(linked ? linkedAvg : baseRadii.tl);
+  const radius = activeKey === 'radius' && dragValue != null ? dragValue : baseR;
 
   const previewRadii = (r: number, nextSides?: number) => {
     previewShapeParamsToKit(
@@ -236,11 +224,15 @@ function PolygonShapeHandlesOverlay({
   const sidesLabel = t('editor.imageToolbar.sideCount', { defaultValue: '边数' });
   const radiusLabel = t('editor.imageToolbar.cornerRadius');
 
-  const badgePos = activeKey === 'sides' ? sidesPos : activeKey === 'radius' ? radiusPos : null;
-  const badgeText =
-    activeKey === 'sides'
-      ? `${sidesLabel} ${dragValue ?? sides}`
-      : `${radiusLabel} ${dragValue ?? radius}`;
+  let badgePos: { x: number; y: number } | null = null;
+  let badgeText = '';
+  if (activeKey === 'sides') {
+    badgePos = sidesPos;
+    badgeText = `${sidesLabel} ${dragValue ?? sides}`;
+  } else if (activeKey === 'radius') {
+    badgePos = radiusPos;
+    badgeText = `${radiusLabel} ${dragValue ?? radius}`;
+  }
 
   type KnobSpec = {
     key: 'radius' | 'sides';
@@ -293,18 +285,6 @@ function PolygonShapeHandlesOverlay({
       },
     },
   ];
-
-  if (interactive && knobs.length > 0) {
-    setOverlayHandleSeats(
-      seatOwnerId,
-      knobs.map((knob) => ({
-        pickKey: `poly-${knob.key}`,
-        start: (e) => knob.onDown(e as unknown as ReactPointerEvent),
-      }))
-    );
-  } else {
-    setOverlayHandleSeats(seatOwnerId, null);
-  }
 
   return (
     <>

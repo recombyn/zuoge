@@ -297,8 +297,8 @@ export function useCanvasContextMenu(args: UseCanvasContextMenuArgs) {
 
     const openMenuAt = (clientX: number, clientY: number, target: EventTarget | null) => {
       const p = toSceneRef.current(clientX, clientY);
-      const selected = selectedIdsRef.current;
-      const selectedFrames = selectedFrameIdsRef.current;
+      const selected = [...selectedIdsRef.current];
+      const selectedFrames = [...selectedFrameIdsRef.current];
       const hit = resolveContextMenuHit({
         sceneX: p.x,
         sceneY: p.y,
@@ -313,6 +313,8 @@ export function useCanvasContextMenu(args: UseCanvasContextMenuArgs) {
 
       let menuNodeId = hit.nodeId;
       let menuFrameId = hit.frameId;
+      let keepMultiFrames = selectedFrames.length > 1;
+      let keepMultiNodes = selected.length > 1;
 
       if (hit.nodeId && !selected.includes(hit.nodeId)) {
         const boundFrame = String(
@@ -325,6 +327,8 @@ export function useCanvasContextMenu(args: UseCanvasContextMenuArgs) {
           menuFrameId = boundFrame;
         } else {
           selectNodeOnly(hit.nodeId);
+          keepMultiFrames = false;
+          keepMultiNodes = false;
         }
       } else if (
         !hit.nodeId &&
@@ -332,6 +336,8 @@ export function useCanvasContextMenu(args: UseCanvasContextMenuArgs) {
         !selectedFrames.includes(hit.frameId)
       ) {
         selectFrameOnly(hit.frameId);
+        keepMultiFrames = false;
+        keepMultiNodes = false;
       }
 
       setCtxMenu({
@@ -341,6 +347,8 @@ export function useCanvasContextMenu(args: UseCanvasContextMenuArgs) {
         sceneY: p.y,
         nodeId: menuNodeId,
         frameId: menuFrameId,
+        selectionNodeIds: keepMultiNodes ? selected : undefined,
+        selectionFrameIds: keepMultiFrames ? selectedFrames : undefined,
       });
     };
 

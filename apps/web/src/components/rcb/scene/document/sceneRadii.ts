@@ -25,7 +25,7 @@ export function isRadiusLinked(attrs: Record<string, unknown> | null | undefined
 }
 
 /** Parse `radiusVertices` ("12,0,8,…" or number[]). */
-export function parseRadiusVertices(raw: unknown): number[] {
+function parseRadiusVertices(raw: unknown): number[] {
   if (Array.isArray(raw)) {
     return raw.map((v) => Math.max(0, Math.round(Number(v) || 0)));
   }
@@ -140,7 +140,7 @@ const SHARP_CORNER_DENSE_VERT_COUNT = 24;
  * Turn away from a straight line at `curr` (0 = collinear, 90 = right angle).
  * Vectors are from the vertex toward its neighbors.
  */
-export function vertexTurnDegrees(
+function vertexTurnDegrees(
   prev: [number, number],
   curr: [number, number],
   next: [number, number]
@@ -264,7 +264,7 @@ export type SharpCornerSite = {
 };
 
 /** Geometry for a tangent fillet at one polyline corner. */
-export function filletCornerMetric(
+function filletCornerMetric(
   prev: [number, number],
   curr: [number, number],
   next: [number, number]
@@ -859,7 +859,7 @@ export function roundedPolygonPath(
 }
 
 /** Map rect corner radii onto polygon vertices (best-effort). */
-export function polygonRadiiFromCorners(
+function polygonRadiiFromCorners(
   pointCount: number,
   r: CornerRadii,
   shapeHint?: string
@@ -897,11 +897,6 @@ export function cornerRadiusToolbarDisplay(
   return Math.round(maxRadius(r));
 }
 
-export function cornerRadiusDisplayFromRadii(radii: CornerRadii, linked: boolean): number {
-  if (linked) return Math.round(radii.tl);
-  return Math.round(maxRadius(radii));
-}
-
 export function setLiveCornerRadiusPreview(next: LiveCornerRadiusPreview | null) {
   const prev = liveCornerRadiusPreview;
   if (
@@ -919,45 +914,8 @@ export function setLiveCornerRadiusPreview(next: LiveCornerRadiusPreview | null)
   liveCornerRadiusListeners.forEach((l) => l());
 }
 
-export function hasLiveCornerRadiusPreview(): boolean {
-  return liveCornerRadiusPreview != null;
-}
-
 export function getLiveCornerRadiusPreviewNodeId(): string | null {
   return liveCornerRadiusPreview?.nodeId ?? null;
-}
-
-export function getLiveCornerRadiusPreviewRadii(nodeId: string): CornerRadii | null {
-  if (!nodeId || liveCornerRadiusPreview?.nodeId !== nodeId) return null;
-  return liveCornerRadiusPreview.radii;
-}
-
-/**
- * Overlay live corner-radius preview onto attrs for Kit / DomHost paint.
- * Document attrs stay idle mid-drag; paint callers merge here.
- */
-export function mergeLiveCornerRadiiIntoAttrs(
-  nodeId: string,
-  attrs: Record<string, unknown> | null | undefined
-): Record<string, unknown> {
-  const base = attrs ? { ...attrs } : {};
-  const live = getLiveCornerRadiusPreviewRadii(nodeId);
-  if (!live) return base;
-  const avg = (live.tl + live.tr + live.br + live.bl) / 4;
-  return {
-    ...base,
-    radiusTL: live.tl,
-    radiusTR: live.tr,
-    radiusBR: live.br,
-    radiusBL: live.bl,
-    // Fingerprint / legacy aliases
-    tl: live.tl,
-    tr: live.tr,
-    br: live.br,
-    bl: live.bl,
-    radius: avg,
-    cornerRadius: avg,
-  };
 }
 
 export function getLiveCornerRadiusPreview(nodeId: string): number | null {

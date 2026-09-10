@@ -32,7 +32,6 @@ import {
   radiusHandleParkScreenPx,
   radiusParkSceneForBox,
   scenePointToLocal,
-  setOverlayHandleSeats,
 } from './shapeHandleChrome';
 
 const DRAG_DISTANCE_SQUARED = 16;
@@ -82,14 +81,6 @@ function CircleShapeHandlesOverlay({
   const [liveInner, setLiveInner] = useState<number | null>(null);
   const [liveArc, setLiveArc] = useState<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const seatOwnerId = `circle:${nodeId}`;
-
-  useEffect(
-    () => () => {
-      setOverlayHandleSeats(seatOwnerId, null);
-    },
-    [seatOwnerId]
-  );
 
   const w = Math.max(1, box.width);
   const h = Math.max(1, box.height);
@@ -387,28 +378,6 @@ function CircleShapeHandlesOverlay({
       onDoubleClick: resetArcFull,
     },
   ];
-
-  if (interactive && knobs.length > 0) {
-    setOverlayHandleSeats(
-      seatOwnerId,
-      knobs.map((knob) => ({
-        pickKey: `circle-${knob.key}`,
-        interactive: knob.interactive,
-        start: (e) => {
-          if (knob.onDown) {
-            knob.onDown(e as unknown as ReactPointerEvent);
-          }
-        },
-        onDoubleClick: knob.onDoubleClick
-          ? (e) => knob.onDoubleClick?.(e as unknown as ReactMouseEvent)
-          : undefined,
-        onEnter: knob.onEnter,
-        onLeave: knob.onLeave,
-      }))
-    );
-  } else {
-    setOverlayHandleSeats(seatOwnerId, null);
-  }
 
   return (
     <>

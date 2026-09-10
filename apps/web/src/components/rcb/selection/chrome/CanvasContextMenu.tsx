@@ -54,6 +54,12 @@ export type ContextMenuState = {
   nodeId: string | null;
   /** Artboard under cursor / selected when opening the menu. */
   frameId?: string | null;
+  /**
+   * Snapshot of multi-selection at menu open. Delete/copy must use this when
+   * set — opening the menu must not collapse multi artboard delete to one plate.
+   */
+  selectionNodeIds?: string[];
+  selectionFrameIds?: string[];
 };
 
 type CanvasContextMenuProps = {

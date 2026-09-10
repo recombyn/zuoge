@@ -2919,17 +2919,28 @@ export class Renderer {
                 // RCB clipContent: intersect world artboard before local xform
                 // so overflow ink cannot paint onto the pasteboard.
                 const abClip = this.getNodeArtboardClip?.(nodeId);
-                if (abClip && abClip.w > 0 && abClip.h > 0) {
-                    canvas.clipRect(
-                        this.ck.LTRBRect(
-                            abClip.x,
-                            abClip.y,
-                            abClip.x + abClip.w,
-                            abClip.y + abClip.h,
-                        ),
-                        this.ck.ClipOp.Intersect,
-                        contentAA,
-                    );
+                if (abClip) {
+                    if (abClip.w > 0 && abClip.h > 0) {
+                        canvas.clipRect(
+                            this.ck.LTRBRect(
+                                abClip.x,
+                                abClip.y,
+                                abClip.x + abClip.w,
+                                abClip.y + abClip.h,
+                            ),
+                            this.ck.ClipOp.Intersect,
+                            contentAA,
+                        );
+                    } else {
+                        // Zero clip = focus-hidden plate. Empty intersect culls
+                        // all draws (do not skip the hook — fallthrough used to
+                        // paint other workbench paths unclipped).
+                        canvas.clipRect(
+                            this.ck.LTRBRect(0, 0, 0, 0),
+                            this.ck.ClipOp.Intersect,
+                            false,
+                        );
+                    }
                 }
                 canvas.concat(matrix);
 
