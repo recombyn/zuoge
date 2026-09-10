@@ -19,16 +19,21 @@ import { resolve } from 'node:path';
 import type { CanvasKit } from 'canvaskit-wasm';
 import CanvasKitInit from 'canvaskit-wasm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { conicHandleRatio, pathToSubpaths } from './boolean_ops';
+import { conicHandleRatio, pathToSubpaths, appendSubpathsToPath } from './boolean_ops';
 import { evalCubic } from './path_ops';
-import type { Subpath } from './types';
+import type { PathPoint, Subpath } from './types';
 
 let ck: CanvasKit;
 
 beforeAll(async () => {
     ck = await CanvasKitInit({
         locateFile: (f: string) =>
-            resolve('node_modules/.pnpm/canvaskit-wasm@0.39.1/node_modules/canvaskit-wasm/bin', f),
+            resolve(
+                process.cwd().includes('vector-editor-ref')
+                    ? '../../node_modules/canvaskit-wasm/bin'
+                    : 'node_modules/canvaskit-wasm/bin',
+                f,
+            ),
     });
 }, 60_000);
 
@@ -113,5 +118,75 @@ describe('conic → cubic', () => {
         for (const w of [0, -1, 2, Number.NaN, Number.POSITIVE_INFINITY]) {
             expect(Number.isFinite(conicHandleRatio(w))).toBe(true);
         }
+    });
+});
+
+describe('polygon ∪ oval PathOps cleanup', () => {
+    function regularHexPoints(cx: number, cy: number, r: number): PathPoint[] {
+        const pts: PathPoint[] = [];
+        for (let i = 0; i < 6; i++) {
+            const a = (Math.PI / 3) * i - Math.PI / 6;
+            const x = cx + r * Math.cos(a);
+            const y = cy + r * Math.sin(a);
+            pts.push({ x, y, cp1: [x, y], cp2: [x, y] });
+        }
+        return pts;
+    }
+
+    function cleanupBoolean(result: NonNullable<ReturnType<CanvasKit['Path']['MakeFromOp']>>) {
+        result.simplify();
+        const wound = result.makeAsWinding();
+        if (wound) {
+            result.delete();
+            return wound;
+        }
+        return result;
+    }
+
+    it('emits line verbs for collapsed cubic handles on a polygon', () => {
+        const path = new ck.Path();
+        appendSubpathsToPath(path, [
+            {
+                closed: true,
+                points: regularHexPoints(0, 0, 50),
+            },
+        ]);
+        const cmds = Array.from(path.toCmds());
+        path.delete();
+        const LINE = (ck as unknown as { LINE_VERB: number }).LINE_VERB ?? 1;
+        const CUBIC = (ck as unknown as { CUBIC_VERB: number }).CUBIC_VERB ?? 4;
+        expect(cmds.includes(LINE)).toBe(true);
+        expect(cmds.includes(CUBIC)).toBe(false);
+    });
+
+    it('hexagon ∪ oval contains overlap and hex core after cleanup', () => {
+        const hex = new ck.Path();
+        appendSubpathsToPath(hex, [{ closed: true, points: regularHexPoints(0, 0, 100) }]);
+        hex.setFillType(ck.FillType.Winding);
+        const oval = new ck.Path();
+        oval.addOval(ck.LTRBRect(40, -90, 220, 90));
+        oval.setFillType(ck.FillType.Winding);
+        let result = ck.Path.MakeFromOp(hex, oval, ck.PathOp.Union)!;
+        result = cleanupBoolean(result);
+        hex.delete();
+        oval.delete();
+
+        // Hex core (left of circle) and overlap region must both be inside.
+        expect(result.contains(0, 0)).toBe(true);
+        expect(result.contains(80, 0)).toBe(true);
+        // Far outside stays outside.
+        expect(result.contains(-200, 0)).toBe(false);
+
+        // No vertex deep inside near the centroid (the sharp-V failure mode).
+        const subpaths = pathToSubpaths(ck, result);
+        let minR = Infinity;
+        for (const sp of subpaths) {
+            for (const p of sp.points) {
+                minR = Math.min(minR, Math.hypot(p.x, p.y));
+            }
+        }
+        expect(minR).toBeGreaterThan(40);
+
+        result.delete();
     });
 });

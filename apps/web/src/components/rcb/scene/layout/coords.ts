@@ -45,7 +45,7 @@ export function storedOriginForSceneResult(
   return documentPointToNodeLocal(document, { attrs: { frameId: fid } } as never, abs.x, abs.y);
 }
 
-export type TextResizeMode = 'scale' | 'wrap' | 'frame';
+export type TextResizeMode = 'scale' | 'wrap';
 
 export type PatchGeometryOptions = {
   /** Remeasure text height so chrome hugs ink (keep wrap width). */
@@ -54,7 +54,6 @@ export type PatchGeometryOptions = {
    * text resize:
    * - `scale`: corner handles → scale font with box
    * - `wrap`: left/right edges → change width only, remeasure height (no font scale)
-   * - `frame`: fixed text plate → resize box only, font unchanged
    */
   textResizeMode?: TextResizeMode;
 };
@@ -115,9 +114,7 @@ export function patchNodeGeometry(
     let style = parseNodeTextStyle(attrs || node.attrs || {});
     const mode = inferTextResizeMode(oldW, oldH, newW, newH, options?.textResizeMode);
 
-    if (mode === 'frame') {
-      // Fixed plate: geometry only.
-    } else if (mode === 'scale') {
+    if (mode === 'scale') {
       const sx = newW / oldW;
       const sy = newH / oldH;
       const s = Math.abs(sx - sy) < 0.02 ? sx : sy;

@@ -1,5 +1,5 @@
 import { markdownToPlain } from './sceneMarkdown';
-import { normalizeColor, TEXT_FRAME_PADDING } from './sceneEffects';
+import { normalizeColor } from './sceneEffects';
 
 const APP_FONT_FAMILY = 'Alibaba PuHuiTi';
 const FABRIC_FONT_FAMILY = APP_FONT_FAMILY;
@@ -135,18 +135,7 @@ export function measureTextNodeBoxAfterStyleChange(
   };
   const plain = parseNodeText(node.attrs || {}) || ' ';
   const autoSize = String(node.attrs?.autoSize ?? 'true') !== 'false';
-  const textFrame =
-    node.attrs?.textFrame === true ||
-    node.attrs?.textFrame === 'true' ||
-    node.attrs?.textFrame === 1 ||
-    node.attrs?.textFrame === '1';
   const currentW = Math.max(1, Number(node.width) || DEFAULT_TEXT_BOX_WIDTH);
-  const currentH = Math.max(1, Number(node.height) || Math.ceil(merged.fontSize * merged.lineHeight));
-
-  // Image-like text plate: keep the authored box; content scrolls inside.
-  if (textFrame) {
-    return { width: Math.max(8, Math.round(currentW)), height: Math.max(8, Math.round(currentH)) };
-  }
 
   if (autoSize) {
     const measured = measurePlainTextSize(plain, merged);
@@ -163,33 +152,6 @@ export function measureTextNodeBoxAfterStyleChange(
       8,
       Math.round(Math.max(wrapped.height, merged.fontSize))
     ),
-  };
-}
-
-/**
- * Box when leaving fixed text-frame mode — font-scaled wrap width + height to ink.
- */
-export function measureTextFrameExitBox(
-  node: { width?: number; height?: number; attrs?: Record<string, unknown> },
-  style: Partial<TextStyle> = {}
-): { width: number; height: number } {
-  const merged: TextStyle = {
-    ...parseNodeTextStyle(node.attrs || {}),
-    ...style,
-    fontSize: normalizeTextFontSize(
-      style.fontSize ?? parseNodeTextStyle(node.attrs || {}).fontSize
-    ),
-  };
-  const plain = parseNodeText(node.attrs || {}) || ' ';
-  const fontSize = Math.max(1, Number(merged.fontSize) || 14);
-  const frameW = Math.max(1, Number(node.width) || DEFAULT_TEXT_BOX_WIDTH);
-  const innerW = Math.max(fontSize, frameW - TEXT_FRAME_PADDING * 2);
-  const preferred = defaultTextWrapWidthForFontSize(fontSize);
-  const wrapW = Math.min(preferred * 2, Math.max(preferred, innerW));
-  const wrapped = measureWrappedTextSize(plain, merged, wrapW);
-  return {
-    width: Math.max(8, Math.round(wrapW)),
-    height: Math.max(8, Math.round(Math.max(wrapped.height, fontSize))),
   };
 }
 

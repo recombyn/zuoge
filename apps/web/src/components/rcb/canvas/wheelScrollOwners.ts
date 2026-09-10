@@ -25,50 +25,11 @@ export function composerConsumesWheel(target: Element | null, e: WheelEvent): bo
   return elementConsumesWheel(composer, e);
 }
 
-/** Selected fixed text-frame plate or its inline editor scroll surface. */
-export function isTextFrameWheelSurface(target: Element | null): boolean {
-  if (!target) return false;
-  if (target.closest?.('[data-text-frame-overlay]')) return true;
-  if (target.closest?.('[data-text-frame-scroll]')) return true;
-  const editor = target.closest?.('[data-text-inline-editor]');
-  if (!editor) return false;
-  return Boolean(editor.querySelector('[data-text-frame-scroll]'));
-}
-
-/**
- * Fixed text-frame FO / inline editor textarea — wheel must scroll ink, not pan the stage.
- * Checked from the canvas native wheel listener (runs before React portal handlers).
- */
-export function textFrameConsumesWheel(target: Element | null, e: WheelEvent): boolean {
-  if (!isTextFrameWheelSurface(target)) return false;
-  const overlay = target?.closest?.('[data-text-frame-overlay]') as HTMLElement | null;
-  if (overlay) {
-    const scroll =
-      typeof overlay.matches === 'function' && overlay.matches('[data-text-frame-scroll]')
-        ? overlay
-        : ((typeof overlay.querySelector === 'function'
-            ? (overlay.querySelector('[data-text-frame-scroll]') as HTMLElement | null)
-            : null) ?? overlay);
-    return elementConsumesWheel(scroll, e);
-  }
-  const editor = target?.closest?.('[data-text-inline-editor]');
-  const scroll =
-    (editor?.querySelector('[data-text-frame-scroll]') as HTMLElement | null) ||
-    (editor?.querySelector('textarea') as HTMLElement | null);
-  return elementConsumesWheel(scroll, e);
-}
-
-/** Ctrl/meta+wheel over text-frame — canvas must preventDefault (browser zoom) then zoom. */
-export function textFrameBlocksBrowserZoom(target: Element | null, e: WheelEvent): boolean {
-  return isTextFrameWheelSurface(target) && (e.ctrlKey || e.metaKey);
-}
-
-/** Scrollable panels/menus that own wheel — composer / text-frame handled separately. */
+/** Scrollable panels/menus that own wheel — composer handled separately. */
 export const RCB_WHEEL_SCROLL_OWNERS =
   '[data-image-tool-panel],[data-product-scene-toolbar],[data-color-panel],[data-select-dropdown],[data-account-settings],[role="dialog"],[data-headlessui-portal]';
 
 export function wheelShouldStayLocal(target: Element | null, e: WheelEvent): boolean {
   if (composerConsumesWheel(target, e)) return true;
-  if (textFrameConsumesWheel(target, e)) return true;
   return Boolean(target?.closest?.(RCB_WHEEL_SCROLL_OWNERS));
 }

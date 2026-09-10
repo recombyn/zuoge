@@ -17,6 +17,7 @@ import {
 import { isImageProcessRunning } from '@/components/rcb/scene/document/nodeCapabilities';
 import { buildNodeAdjustFilterCss } from '@/components/rcb/scene/document/sceneFill';
 import { toolbarBoxForSelection } from '@/components/rcb/selection/selectionLogic';
+import { useKitSelectionDockAabb } from '@/components/rcb/selection/useKitSelectionDockAabb';
 import {
   RcbOverlayPortal,
   useRcbCamera,
@@ -159,6 +160,13 @@ function ImageToolPanelHost({
   const effectiveSelectedId =
     selectedNodeId ||
     (selectedNodeIds.length === 1 ? String(selectedNodeIds[0]) : null);
+  // Prefer Kit selection AABB (visual blue box) so opacity / effects dock to the
+  // same top-right as shapes — text RCB geom can lag Kit Paragraph bounds.
+  const dockIds = useMemo(() => {
+    if (panel?.nodeId) return [String(panel.nodeId)];
+    return selectedNodeIds.map(String);
+  }, [panel?.nodeId, selectedNodeIds]);
+  const kitDockAabb = useKitSelectionDockAabb(dockIds);
 
   const [brushSize, setBrushSize] = useState(96);
   const [hasStrokes, setHasStrokes] = useState(false);
@@ -262,10 +270,12 @@ function ImageToolPanelHost({
     liveHistoryPushedRef.current = false;
   }, [panel?.kind, panel?.nodeId]);
 
-  const box = useMemo(() => {
+  const docBox = useMemo(() => {
     if (!panel) return null;
     return panelNodeBox(document, document?.deltaSetLike?.[panel.nodeId]);
   }, [document, panel]);
+  // Dock side panels to Kit chrome; fall back to document geom while Kit maps.
+  const box = kitDockAabb ?? docBox;
 
   if (!panel || !box) return null;
   // Flip/rotate + Chat quick-edit use the selection floating toolbar; crop/expand use on-canvas frame.

@@ -65,6 +65,12 @@ function makeRenderer(zoom = 1): Renderer {
         // Measured text metrics need real fonts; null makes the text overlay
         // fall back to the node's own em box, which is what these tests assume.
         getTextLocalBounds: () => null,
+        getTextLayoutWidth: () => undefined,
+        setTextLayoutWidth() {},
+        clearTextLayoutWidth() {},
+        getTextDecoration: () => 0,
+        setTextDecoration() {},
+        clearTextDecoration() {},
         hoverEdgeId: -1,
         hoverFaceId: -1,
         selectedArtboardId: null,
@@ -291,16 +297,29 @@ describe('sweep: text', () => {
         expect(overlay()).not.toBeNull();
     });
 
-    it('typing then Enter commits a text node with that content', () => {
+    it('typing then Ctrl+Enter commits a text node with that content', () => {
+        const scene = makeScene();
+        const { input } = makeInput(scene, 'text');
+        input.onMouseDown(mouse(50, 60));
+        const el = overlay()!;
+        el.value = 'Hello';
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
+        const ids = texts(scene);
+        expect(ids.length).toBe(1);
+        expect(scene.getNode(ids[0])?.geometry?.Text?.content).toBe('Hello');
+    });
+
+    it('plain Enter inserts a newline instead of committing', () => {
         const scene = makeScene();
         const { input } = makeInput(scene, 'text');
         input.onMouseDown(mouse(50, 60));
         const el = overlay()!;
         el.value = 'Hello';
         el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        const ids = texts(scene);
-        expect(ids.length).toBe(1);
-        expect(scene.getNode(ids[0])?.geometry?.Text?.content).toBe('Hello');
+        expect(overlay()).not.toBeNull();
+        expect(texts(scene).length).toBe(0);
     });
 
     it('committing nothing leaves no empty text node behind', () => {
@@ -309,7 +328,9 @@ describe('sweep: text', () => {
         input.onMouseDown(mouse(50, 60));
         const el = overlay()!;
         el.value = '';
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         expect(texts(scene).length).toBe(0);
     });
 
@@ -341,7 +362,9 @@ describe('sweep: text', () => {
         input.onMouseDown(mouse(50, 60));
         const el = overlay()!;
         el.value = 'Undo me';
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         expect(texts(scene).length).toBe(1);
         scene.undo();
         expect(texts(scene).length).toBe(0);
@@ -424,7 +447,9 @@ describe('sweep: text — editing what is already there', () => {
         input.onDoubleClick(mouse(60, 30));
         const el = overlay()!;
         el.value = 'After';
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         expect(texts(scene).length).toBe(1);
         expect(content(scene, t)).toBe('After');
     });
@@ -442,7 +467,7 @@ describe('sweep: text — editing what is already there', () => {
         expect(content(scene, t)).toBe('Keep me');
     });
 
-    it('shift-Enter makes a new line rather than committing', () => {
+    it('shift-Enter keeps editing; Ctrl+Enter commits multiline', () => {
         const scene = makeScene();
         const { input } = makeInput(scene, 'text');
         input.onMouseDown(mouse(50, 60));
@@ -453,7 +478,9 @@ describe('sweep: text — editing what is already there', () => {
         );
         expect(overlay()).not.toBeNull(); // still editing
         el.value = 'line one\nline two';
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         const ids = texts(scene);
         expect(ids.length).toBe(1);
         expect(content(scene, ids[0])).toContain('\n');
@@ -468,7 +495,9 @@ describe('sweep: text — editing what is already there', () => {
         input.onDoubleClick(mouse(60, 30));
         const el = overlay()!;
         el.value = '';
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         expect(texts(scene).length).toBe(0);
     });
 
@@ -481,7 +510,9 @@ describe('sweep: text — editing what is already there', () => {
         input.onDoubleClick(mouse(60, 30));
         const el = overlay()!;
         el.value = 'Changed';
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         expect(content(scene, t)).toBe('Changed');
         scene.undo();
         expect(content(scene, t)).toBe('Original');
@@ -532,7 +563,9 @@ describe('sweep: work in progress must not vanish', () => {
         const el = overlay();
         expect(el).not.toBeNull();
         el!.value = 'Edited';
-        el!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        el!.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+        );
         expect(texts(scene).length).toBe(1);
         expect(scene.getNode(t)?.geometry?.Text?.content).toBe('Edited');
     });

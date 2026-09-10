@@ -1715,8 +1715,6 @@ const zhCN = {
     text: '文本',
     editText: '编辑文字',
     openTextEditor: '弹窗编辑',
-    textBoxModeOn: '固定文本框（框内滚动）',
-    textBoxModeOff: '取消固定文本框',
     fullscreen: '全屏',
     exitFullscreen: '退出全屏',
     exit: '退出',

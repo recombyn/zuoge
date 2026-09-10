@@ -136,6 +136,20 @@ describe('paintIntent', () => {
     expect(resolvePaintIntent(doc, 'g', doc.deltaSetLike!.g).kind).toBe('dom-host');
   });
 
+  it('keeps plain auto-size text on Kit', () => {
+    let doc = createEmptyDocument();
+    doc = addNodeToDocument(doc, 't', {
+      id: 't',
+      key: 'text',
+      x: 0,
+      y: 0,
+      width: 80,
+      height: 32,
+      attrs: { text: 'hi', autoSize: 'true' },
+    } as any);
+    expect(resolvePaintIntent(doc, 't', doc.deltaSetLike!.t).kind).toBe('kit');
+  });
+
   it('routes empty image generator plates to Kit (wash + glyph)', () => {
     let doc = createEmptyDocument();
     doc = addNodeToDocument(doc, 'gen', {

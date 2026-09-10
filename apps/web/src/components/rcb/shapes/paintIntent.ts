@@ -20,8 +20,8 @@ export type PaintIntentCtx = {
 
 /**
  * Resolve paint route. Kit owns vector / image ink.
- * DomHost: lottie/group shells, active video/audio FO. SoftGlow → Kit overlay.
- * Empty generators: Kit gray wash + Lucide glyph overlay (no DomHost).
+ * DomHost: lottie/group shells, active video/audio FO.
+ * SoftGlow → Kit overlay. Empty generators: Kit gray wash + Lucide glyph.
  */
 export function resolvePaintIntent(
   _document: SceneDocument | null | undefined,

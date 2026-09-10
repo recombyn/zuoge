@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  composerConsumesWheel,
-  textFrameBlocksBrowserZoom,
-  textFrameConsumesWheel,
-  wheelShouldStayLocal,
-} from '../wheelScrollOwners';
+import { composerConsumesWheel, wheelShouldStayLocal } from '../wheelScrollOwners';
 
 function wheel(overrides: Partial<WheelEvent> = {}): WheelEvent {
   return {
@@ -64,36 +59,11 @@ describe('composerConsumesWheel', () => {
   });
 });
 
-describe('textFrameConsumesWheel', () => {
-  it('consumes wheel on a scrollable text-frame overlay', () => {
-    const overlay = mockScrollEl(
-      { scrollHeight: 400, clientHeight: 200, scrollTop: 0 },
-      {}
-    );
-    (overlay as any).closest = (sel: string) =>
-      sel === '[data-text-frame-overlay]' ? overlay : null;
-    expect(textFrameConsumesWheel(overlay, wheel({ deltaY: 20 }))).toBe(true);
-    expect(wheelShouldStayLocal(overlay, wheel({ deltaY: 20 }))).toBe(true);
-  });
-
-  it('does not pan-block when text frame cannot scroll further', () => {
-    const overlay = mockScrollEl(
-      { scrollHeight: 400, clientHeight: 200, scrollTop: 0 },
-      {}
-    );
-    (overlay as any).closest = (sel: string) =>
-      sel === '[data-text-frame-overlay]' ? overlay : null;
-    expect(textFrameConsumesWheel(overlay, wheel({ deltaY: -20 }))).toBe(false);
-  });
-
-  it('blocks browser pinch-zoom over text-frame surface', () => {
-    const overlay = mockScrollEl(
-      { scrollHeight: 400, clientHeight: 200, scrollTop: 0 },
-      {}
-    );
-    (overlay as any).closest = (sel: string) =>
-      sel === '[data-text-frame-overlay]' ? overlay : null;
-    expect(textFrameBlocksBrowserZoom(overlay, wheel({ ctrlKey: true }))).toBe(true);
-    expect(textFrameBlocksBrowserZoom(overlay, wheel())).toBe(false);
+describe('wheelShouldStayLocal', () => {
+  it('stays local for known scroll-owner panels', () => {
+    const panel = mockScrollEl({ scrollHeight: 100, clientHeight: 100 }, {});
+    (panel as any).closest = (sel: string) =>
+      sel.includes('data-image-tool-panel') ? panel : null;
+    expect(wheelShouldStayLocal(panel, wheel())).toBe(true);
   });
 });

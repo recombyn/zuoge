@@ -7387,31 +7387,50 @@ impl Engine {
 ///
 /// The origin is the BASELINE of the first line, so the first line spans
 /// `-font_size..0` and every further line sits one `line_height` below;
-/// `text_align` shifts the run left (1 = centre, 2 = right), exactly as the
-/// renderer draws it.
+/// Local-space AABB of a text run. Origin is the first-line baseline; width is
+/// an em estimate (the engine has no font metrics — JS measures for the
+/// selection frame). Alignment no longer shifts the box: Paragraph lays out in
+/// a hug / fixed width and draws from x=0 (center/right align inside that box).
 ///
-/// The width is an em estimate — the engine has no font metrics, and the JS
-/// side measures properly for the selection frame — but it is the LONGEST LINE
-/// rather than the whole content. Measuring the content as one line made a
-/// paragraph's box far too wide and only one line tall: clicking the second
-/// line of a three-line text selected nothing, while a strip of empty canvas
-/// out to the right of the first line selected the text. Alignment was ignored
-/// too, so centred text was clickable everywhere except where its glyphs were.
-fn text_local_bbox(content: &str, font_size: f32, line_height: f32, text_align: u8) -> [f32; 4] {
+/// Width uses a per-character advance so CJK (~1em) is not clipped to the Latin
+/// 0.6em estimate — that left the right half of Chinese runs unselectable.
+fn text_char_advance_em(c: char) -> f32 {
+    // Fullwidth / CJK / Hangul / kana / emoji presentation ≈ 1em.
+    if c <= '\u{007f}' {
+        // ASCII: average Latin advance.
+        0.6
+    } else if ('\u{1100}'..='\u{11ff}').contains(&c) // Hangul Jamo
+        || ('\u{2e80}'..='\u{9fff}').contains(&c) // CJK radicals … CJK Unified
+        || ('\u{ac00}'..='\u{d7af}').contains(&c) // Hangul syllables
+        || ('\u{f900}'..='\u{faff}').contains(&c) // CJK Compatibility Ideographs
+        || ('\u{fe10}'..='\u{fe1f}').contains(&c) // Vertical forms
+        || ('\u{ff01}'..='\u{ff60}').contains(&c) // Fullwidth forms
+        || ('\u{ffe0}'..='\u{ffe6}').contains(&c)
+    {
+        1.0
+    } else {
+        // Other scripts (Cyrillic, Arabic, …): between Latin and CJK.
+        0.85
+    }
+}
+
+fn text_local_bbox(content: &str, font_size: f32, line_height: f32, _text_align: u8) -> [f32; 4] {
     let mut lines = 0usize;
-    let mut longest = 0usize;
+    let mut longest_em = 0.0f32;
     for line in content.split('\n') {
         lines += 1;
-        longest = longest.max(line.chars().count());
+        let mut em = 0.0f32;
+        for c in line.chars() {
+            em += text_char_advance_em(c);
+        }
+        if em > longest_em {
+            longest_em = em;
+        }
     }
-    let w = longest as f32 * font_size * 0.6;
-    let x0 = match text_align {
-        1 => -w / 2.0,
-        2 => -w,
-        _ => 0.0,
-    };
+    let w = longest_em * font_size;
     let below = (lines.saturating_sub(1)) as f32 * font_size * line_height;
-    [x0, -font_size, x0 + w, below]
+    // Hug / fixed Paragraph box starts at x=0 (see renderer drawParagraph).
+    [0.0, -font_size, w, below]
 }
 
 fn geometry_control_bbox(geo: &Geometry) -> Option<[f32; 4]> {
@@ -8037,7 +8056,7 @@ mod tests {
     /// The text box was the whole content measured as ONE line: a three-line
     /// text was one line tall and three lines wide, so the second and third
     /// lines selected nothing while a strip of empty canvas to the right of the
-    /// first line selected the text. Alignment was ignored on top of that.
+    /// first line selected the text.
     #[test]
     fn a_paragraph_is_clickable_on_every_line_and_nowhere_else() {
         let mut engine = Engine::new();
@@ -8048,6 +8067,7 @@ mod tests {
         let b = engine.get_node_bounds(t);
         assert!((b[1] - 276.0).abs() < 0.01, "top is the first line's ascent");
         assert!((b[3] - (300.0 + 2.0 * 24.0 * 1.2)).abs() < 0.01, "bottom reaches the last line");
+        // Longest line "Hello" / "World" / "Again" = 5 ASCII × 0.6em.
         assert!((b[2] - (200.0 + 5.0 * 24.0 * 0.6)).abs() < 0.01, "width is the LONGEST line");
 
         assert_eq!(engine.hit_test(210.0, 292.0), Some(t), "first line");
@@ -8057,19 +8077,34 @@ mod tests {
         assert_eq!(engine.hit_test(210.0, 380.0), None, "nor below the last line");
     }
 
-    /// Centred and right-aligned text is drawn shifted off the origin, so that
-    /// is where it has to be clickable.
+    /// CJK advances ~1em — the old 0.6em Latin estimate left the right half
+    /// of Chinese runs outside the hit AABB (marquee / click miss).
+    #[test]
+    fn cjk_text_hit_covers_full_run() {
+        let mut engine = Engine::new();
+        let t = engine.add_text(100.0, 200.0, "打算阿萨", 32.0);
+        let b = engine.get_node_bounds(t);
+        // 4 CJK × 1.0em
+        assert!((b[2] - (100.0 + 4.0 * 32.0)).abs() < 0.01, "CJK width ≈ N×em");
+        assert_eq!(engine.hit_test(100.0 + 8.0, 190.0), Some(t), "left glyphs");
+        assert_eq!(engine.hit_test(100.0 + 4.0 * 32.0 - 8.0, 190.0), Some(t), "right glyphs");
+        assert_eq!(engine.hit_test(100.0 + 4.0 * 32.0 + 20.0, 190.0), None, "past the run");
+    }
+
+    /// Center/right align inside the hug box (x=0…w) — hit AABB stays at origin.
     #[test]
     fn aligned_text_is_clickable_where_it_is_drawn() {
         let mut engine = Engine::new();
         let t = engine.add_text(200.0, 300.0, "Hello", 24.0);
         let w = 5.0 * 24.0 * 0.6;
         engine.set_text_properties(t, "", 1, 1.2); // centre
-        assert_eq!(engine.hit_test(200.0 - w / 2.0 + 2.0, 295.0), Some(t));
-        assert_eq!(engine.hit_test(200.0 + w / 2.0 + 5.0, 295.0), None);
+        assert_eq!(engine.hit_test(200.0 + 2.0, 295.0), Some(t));
+        assert_eq!(engine.hit_test(200.0 + w - 2.0, 295.0), Some(t));
+        assert_eq!(engine.hit_test(200.0 + w + 5.0, 295.0), None);
         engine.set_text_properties(t, "", 2, 1.2); // right
-        assert_eq!(engine.hit_test(200.0 - w + 2.0, 295.0), Some(t));
-        assert_eq!(engine.hit_test(200.0 + 5.0, 295.0), None);
+        assert_eq!(engine.hit_test(200.0 + 2.0, 295.0), Some(t));
+        assert_eq!(engine.hit_test(200.0 + w - 2.0, 295.0), Some(t));
+        assert_eq!(engine.hit_test(200.0 - 5.0, 295.0), None);
     }
 
     /// A shape cut out of a scaled group comes back the size it left at.

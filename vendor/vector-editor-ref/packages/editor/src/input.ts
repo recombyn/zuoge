@@ -154,6 +154,8 @@ export class InputManager {
     isMouseDown: boolean;
     startPos: { x: number; y: number };
     currentPos: { x: number; y: number };
+    /** True after at least one canvas pointer sample — gates paste-at-pointer. */
+    private pointerSceneReady = false;
 
     /** Maps plain-letter shortcuts to tool ids. Double-tapping the same letter
      *  within {@link TOOL_LOCK_WINDOW_MS} locks the tool (keyboard equivalent of
@@ -1552,6 +1554,8 @@ export class InputManager {
 
         // Enter: finalize pen path → finish path editing → enter group / edit selected object
         if (e.key === 'Enter') {
+            // Inline text overlay owns Enter (newline / Ctrl+Enter commit).
+            if (this.activeTextOverlay) return;
             if (this.currentPathPoints.length > 0) {
                 this.finalizePenPath();
             } else if (this.editingNodeId !== null) {
@@ -1725,7 +1729,7 @@ export class InputManager {
             }
         }
 
-        // Cmd+V: Paste, offset from the original so the copy is visible.
+        // Cmd+V: Paste with union top-left at the pointer (last canvas pos).
         // Shift+Cmd+V: Paste in Place — exactly on top of what was copied, which
         // is how you move something between documents without losing its
         // position on the artwork.
@@ -1794,6 +1798,10 @@ export class InputManager {
         placeholder?: string;
         /** Fixed wrap width in world units (auto-height). Omit ⇒ grow sideways. */
         layoutWidth?: number;
+        /** CSS text-decoration (underline / overline / line-through). */
+        textDecoration?: string;
+        /** CSS text-align for the overlay (left / center / right). */
+        textAlign?: string;
         /**
          * How many ems the overlay top sits above the text baseline (node
          * origin). From `-getTextLocalBounds().y / fontSize`. Defaults to 1.
@@ -1801,7 +1809,7 @@ export class InputManager {
         boxTopEm?: number;
         /** Turn of the text on the canvas, in degrees, about `world`. */
         rotationDeg?: number;
-        /** Content (trailing newlines stripped) on Enter/blur. */
+        /** Content (trailing newlines stripped) on Ctrl/Cmd+Enter or blur. */
         onCommit: (content: string) => void;
         onCancel?: () => void;
         /** Always runs when the overlay closes (commit or cancel). */
@@ -1830,6 +1838,8 @@ export class InputManager {
             fontStyle: fontStyleCss,
             lineHeight: String(opts.lineHeight),
             color: opts.color,
+            textDecoration: opts.textDecoration || 'none',
+            textAlign: opts.textAlign || 'left',
             padding: '0',
             border: 'none',
             margin: '0',
@@ -1914,8 +1924,9 @@ export class InputManager {
         };
 
         input.addEventListener('keydown', (ev: KeyboardEvent) => {
-            // Enter commits; Shift+Enter (or Cmd/Ctrl+Enter) inserts a newline.
-            if (ev.key === 'Enter' && !ev.shiftKey && !ev.metaKey && !ev.ctrlKey) {
+            // Enter inserts a newline (textarea default). Ctrl/Cmd+Enter commits
+            // (matches product TextInlineEditor). Shift+Enter also keeps editing.
+            if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && !ev.shiftKey) {
                 ev.preventDefault();
                 commit();
             } else if (ev.key === 'Escape') {
@@ -1968,6 +1979,14 @@ export class InputManager {
         // right-aligned runs are drawn left of the node's origin).
         const local = this.renderer.getTextLocalBounds(id) ?? { x: 0, y: -fontSize };
         const layoutW = this.renderer.getTextLayoutWidth(id);
+        const decoFlags = this.renderer.getTextDecoration(id);
+        const decoCss = [
+            decoFlags & 1 ? 'underline' : '',
+            decoFlags & 2 ? 'overline' : '',
+            decoFlags & 4 ? 'line-through' : '',
+        ]
+            .filter(Boolean)
+            .join(' ');
         this.spawnTextOverlay({
             // Overlay top = measured glyph box top; padding pins the CSS
             // first-line baseline onto the node origin (Skia baseline).
@@ -1980,6 +1999,13 @@ export class InputManager {
             letterSpacing: (geo.Text.letter_spacing || 0) * scaleX,
             lineHeight: geo.Text.line_height || 1.2,
             color,
+            textDecoration: decoCss || 'none',
+            textAlign:
+                geo.Text.text_align === 1
+                    ? 'center'
+                    : geo.Text.text_align === 2
+                      ? 'right'
+                      : 'left',
             value: originalContent,
             layoutWidth: layoutW != null ? layoutW * scaleX : undefined,
             boxTopEm: fontSize > 0 ? Math.max(0.1, -local.y / fontSize) : 1,
@@ -1987,6 +2013,7 @@ export class InputManager {
                 if (!content) {
                     // Emptied → delete the node (Figma behaviour), single undo step.
                     this.renderer.clearTextLayoutWidth(id);
+                    this.renderer.clearTextDecoration(id);
                     this.scene.removeNode(id);
                     this.ui.updateLayerList();
                     this.ui.syncWithSelection();
@@ -2366,22 +2393,49 @@ export class InputManager {
         return newId;
     }
 
-    /** Paste the copied nodes. `inPlace` (⇧⌘V) lands them exactly over what was
-     *  copied; otherwise they arrive offset, the way ⌘D duplicates. */
     /** True while the last clipboard operation was a Cut, so ⌘V should pull from
      *  the engine's clipboard rather than duplicating the copied ids. */
     private cutPending = false;
 
+    /**
+     * ⌘V (not in-place): translate pasted roots so the union top-left sits on
+     * {@link currentPos} (last canvas pointer). Matches product paste-at-click.
+     * No-op until the pointer has been sampled on the canvas (avoids 0,0).
+     */
+    private movePasteToPointer(ids: number[]) {
+        if (!ids.length || !this.pointerSceneReady) return;
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const id of ids) {
+            const b = this.scene.getNodeBounds(id);
+            if (!b || b.length < 4) continue;
+            minX = Math.min(minX, Number(b[0]));
+            minY = Math.min(minY, Number(b[1]));
+            maxX = Math.max(maxX, Number(b[2]));
+            maxY = Math.max(maxY, Number(b[3]));
+        }
+        if (!(minX < maxX && minY < maxY)) return;
+        const dx = this.currentPos.x - minX;
+        const dy = this.currentPos.y - minY;
+        if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
+        this.scene.moveNodesWorld(ids, dx, dy);
+    }
+
     /** Paste what was cut. The clipboard isn't consumed, so ⌘X ⌘V ⌘V gives two
      *  copies, the same as a copy would. */
     private pasteCut(inPlace: boolean) {
-        const off = inPlace ? 0 : 20;
+        // In-place: land on the cut origin. Pointer paste: spawn at 0 then snap.
+        // No pointer yet: classic +20 nudge so the copy stays visible.
+        const off = inPlace || this.pointerSceneReady ? 0 : 20;
         // Read the context before the paste changes the selection.
         const container = this.drawContainerTarget();
         this.scene.transaction(() => {
             const ids = this.scene.pasteClipboard(off, off);
             if (ids.length === 0) return;
             this.pasteIntoContainer(ids, container);
+            if (!inPlace) this.movePasteToPointer(ids);
             this.scene.engine!.clear_selection();
             for (const id of ids) {
                 this.ui.collapseSubtreeByDefault(id);
@@ -2406,6 +2460,8 @@ export class InputManager {
         this.scene.reorderNodes(ids, container, index);
     }
 
+    /** Paste the copied nodes. `inPlace` (⇧⌘V) lands them exactly over what was
+     *  copied; otherwise union top-left follows the pointer. */
     private pasteNodes(inPlace: boolean) {
         const eng = this.scene.engine!;
         // The clipboard holds live node ids, so anything deleted since the copy
@@ -2423,7 +2479,8 @@ export class InputManager {
             const pasted: number[] = [];
             for (const id of live) {
                 const newId = this.scene.duplicateNode(id);
-                // duplicate_node builds in a +20,+20 offset; take it back off.
+                // duplicate_node builds in a +20,+20 offset; take it back off for
+                // in-place, or before pointer snap (movePasteToPointer uses bounds).
                 if (inPlace) eng.move_node(newId, -20, -20);
                 // Every clone is born at the ROOT wearing the local transform it
                 // had inside its parent, so a copy of a shape in a group scaled
@@ -2437,21 +2494,33 @@ export class InputManager {
                 pasted.push(newId);
             }
             this.pasteIntoContainer(pasted, container);
+            if (!inPlace) this.movePasteToPointer(pasted);
             for (const id of pasted) this.scene.selectNode(id, true);
         });
         this.ui.updateLayerList();
         this.ui.syncWithSelection();
     }
 
-    /** Paste the copied artwork (frame + contents) — beside the original, or
+    /** Paste the copied artwork (frame + contents) — at the pointer, or
      *  squarely on top of it for ⇧⌘V. */
     private pasteArtboard(inPlace: boolean) {
         const clip = this.artboardClipboard;
         if (!clip) return;
         let newId = -1;
+        let ox = 0;
+        let oy = 0;
+        if (!inPlace) {
+            if (this.pointerSceneReady) {
+                ox = this.currentPos.x - clip.ab.x;
+                oy = this.currentPos.y - clip.ab.y;
+            } else {
+                ox = clip.ab.w + 40;
+                oy = 0;
+            }
+        }
         this.scene.transaction(() => {
             this.scene.engine!.clear_selection();
-            newId = this.cloneArtboard(clip.ab, clip.nodeIds, inPlace ? 0 : clip.ab.w + 40, 0);
+            newId = this.cloneArtboard(clip.ab, clip.nodeIds, ox, oy);
         });
         this.selectArtboard(newId);
         this.ui.updateLayerList();
@@ -2627,6 +2696,7 @@ export class InputManager {
         this._canvasRect = null; // gestures never start against a stale rect
         this.startPos = this.getPos(e);
         this.currentPos = { ...this.startPos };
+        this.pointerSceneReady = true;
         this.hoverNodeId = null;
         // Any fresh press deselects the current guide; the guide-grab block below
         // re-selects one if the press landed on it.
@@ -5935,6 +6005,7 @@ export class InputManager {
     onMouseMove(e: MouseEvent) {
         this.lastMouseEvent = e;
         this.currentPos = this.getPos(e);
+        this.pointerSceneReady = true;
         this.shiftKey = e.shiftKey;
         this.altKey = e.altKey;
         this.metaKey = e.metaKey;
@@ -6363,8 +6434,7 @@ export class InputManager {
                 } else if (nodeType === 4) {
                     // Text: E/W mid-handles change wrap WIDTH (auto-height box,
                     // like RCB textResizeMode:'wrap'). N/S and corners still
-                    // scale font size — there is no free height stretch without
-                    // a fixed plate (textFrame).
+                    // scale font size with the box.
                     const tg = this.scene.getNodeGeometry(id)?.Text;
                     if (tg) {
                         if (t === 'e' || t === 'w') {
@@ -7719,7 +7789,24 @@ export class InputManager {
         if (geo.Text) {
             const b = this.renderer.getTextLocalBounds(id);
             if (b) return b;
-            const approxW = geo.Text.content.length * geo.Text.font_size * 0.6;
+            // Fallback without fonts: ASCII ≈0.6em, CJK ≈1em (matches engine).
+            let em = 0;
+            for (const line of geo.Text.content.split('\n')) {
+                let lineEm = 0;
+                for (const ch of line) {
+                    const cp = ch.codePointAt(0) ?? 0;
+                    lineEm +=
+                        cp <= 0x7f
+                            ? 0.6
+                            : (cp >= 0x2e80 && cp <= 0x9fff) ||
+                                (cp >= 0xac00 && cp <= 0xd7af) ||
+                                (cp >= 0xff01 && cp <= 0xff60)
+                              ? 1
+                              : 0.85;
+                }
+                em = Math.max(em, lineEm);
+            }
+            const approxW = Math.max(em, 1) * geo.Text.font_size;
             return { x: 0, y: -geo.Text.font_size, w: approxW, h: geo.Text.font_size };
         }
         return null;

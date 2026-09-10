@@ -322,33 +322,6 @@ export function geometryPatchForStrokeOutsetChange(
 /** Scene-space air between text glyphs and selection chrome (flush / ~0). */
 export const TEXT_SELECTION_PAD = 0;
 
-/**
- * Content inset for fixed text-frame plates (glyphs only — scroll track stays
- * flush to the plate edge like an artboard).
- */
-export const TEXT_FRAME_PADDING = 15;
-
-/** Default corner radius for text-frame plates (artboard-sharp). */
-export const TEXT_FRAME_RADIUS = 0;
-
-/**
- * Text-frame plate corners — artboard-sharp by default.
- */
-export function textFrameCornerRadii(
-  attrs: Record<string, unknown> | null | undefined
-): { tl: number; tr: number; br: number; bl: number } {
-  const tl = Math.max(0, Math.round(Number(attrs?.radiusTL) || 0));
-  const tr = Math.max(0, Math.round(Number(attrs?.radiusTR) || 0));
-  const br = Math.max(0, Math.round(Number(attrs?.radiusBR) || 0));
-  const bl = Math.max(0, Math.round(Number(attrs?.radiusBL) || 0));
-  return {
-    tl: tl > 0 ? tl : TEXT_FRAME_RADIUS,
-    tr: tr > 0 ? tr : TEXT_FRAME_RADIUS,
-    br: br > 0 ? br : TEXT_FRAME_RADIUS,
-    bl: bl > 0 ? bl : TEXT_FRAME_RADIUS,
-  };
-}
-
 export function inflateBoxByTextSelectionPad<
   T extends { left: number; top: number; width: number; height: number },
 >(box: T, node: SceneNodeInput): T {

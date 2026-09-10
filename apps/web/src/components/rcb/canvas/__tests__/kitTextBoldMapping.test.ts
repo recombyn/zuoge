@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isTextBold, toFabricFontFamily } from '@/components/rcb/scene/document/sceneText';
+import {
+  isTextBold,
+  isTextOverline,
+  isTextStrike,
+  isTextUnderline,
+  toFabricFontFamily,
+  toggleTextDecoration,
+} from '@/components/rcb/scene/document/sceneText';
 
 /**
  * Mirror of kitBridge.kitTextTypoFromStyle mapping rules — keep in sync.
@@ -16,6 +23,16 @@ function kitFamilyAndWeight(fontFamily: string, fontWeight: string) {
   }
   const family = raw.replace(/\s+Bold$/i, '').trim() || raw;
   return { family, weight };
+}
+
+/** Mirror of kitBridge.kitTextDecorationFlags — Skia bitflags. */
+function kitDecorationFlags(textDecoration: string) {
+  const style = { textDecoration };
+  let flags = 0;
+  if (isTextUnderline(style)) flags |= 1;
+  if (isTextOverline(style)) flags |= 2;
+  if (isTextStrike(style)) flags |= 4;
+  return flags;
 }
 
 describe('Kit text bold face mapping', () => {
@@ -38,5 +55,21 @@ describe('Kit text bold face mapping', () => {
       family: 'Alibaba PuHuiTi',
       weight: 400,
     });
+  });
+});
+
+describe('Kit text decoration flags', () => {
+  it('maps underline / overline / strike to Skia bitflags', () => {
+    expect(kitDecorationFlags('underline')).toBe(1);
+    expect(kitDecorationFlags('overline')).toBe(2);
+    expect(kitDecorationFlags('line-through')).toBe(4);
+    expect(kitDecorationFlags('underline line-through')).toBe(5);
+    expect(kitDecorationFlags('none')).toBe(0);
+  });
+
+  it('toggleTextDecoration round-trips tokens', () => {
+    const next = toggleTextDecoration('none', 'underline');
+    expect(next).toBe('underline');
+    expect(toggleTextDecoration(next, 'underline')).toBe('none');
   });
 });

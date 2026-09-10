@@ -44,14 +44,6 @@ export function isTextNode(node: SceneNodeRef): boolean {
   return Boolean(node) && node!.key === 'text';
 }
 
-/**
- * Fixed W×H text plate (image-like): content scrolls/clips inside the box.
- * Distinct from autoSize=false wrap-height text.
- */
-export function isTextFrameNode(node: SceneNodeRef): boolean {
-  return isTextNode(node) && attrFlagTrue(node!.attrs?.textFrame);
-}
-
 /** Canvas image-generator plate (empty image + generator overlay until promote). */
 export function isImageGeneratorNode(node: SceneNodeRef): boolean {
   return Boolean(node) && node!.key === 'image' && attrFlagTrue(node!.attrs?.imageGenerator);

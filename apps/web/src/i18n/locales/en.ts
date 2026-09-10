@@ -1724,8 +1724,6 @@ const en = {
     text: 'Text',
     editText: 'Edit text',
     openTextEditor: 'Open editor',
-    textBoxModeOn: 'Fixed text frame (scroll inside)',
-    textBoxModeOff: 'Exit fixed text frame',
     fullscreen: 'Fullscreen',
     exitFullscreen: 'Exit fullscreen',
     exit: 'Exit',

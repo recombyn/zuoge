@@ -260,7 +260,18 @@ describe('paste puts the copy where you asked for it', () => {
         return { x: b[0], y: b[1] };
     }
 
-    it('⌘V offsets the copy so it is visible beside the original', () => {
+    it('⌘V pastes at the pointer (union top-left)', () => {
+        const { scene, input, id } = copiedRect();
+        input.currentPos = { x: 200, y: 300 };
+        // Simulate a prior canvas pointer sample (mousedown / move).
+        (input as unknown as { pointerSceneReady: boolean }).pointerSceneReady = true;
+
+        input.onKeyDown(key('v', { meta: true }));
+
+        expect(pastedOrigin(scene, id)).toEqual({ x: 200, y: 300 });
+    });
+
+    it('⌘V without a canvas pointer keeps the classic +20 nudge', () => {
         const { scene, input, id } = copiedRect();
 
         input.onKeyDown(key('v', { meta: true }));

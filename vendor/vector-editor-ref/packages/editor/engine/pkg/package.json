@@ -4,7 +4,10 @@
   "description": "Geometry and scene-graph core for RCB vector kit, compiled to WebAssembly.",
   "version": "1.0.0-beta.3",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
   "files": [
     "engine_bg.wasm",
     "engine.js",

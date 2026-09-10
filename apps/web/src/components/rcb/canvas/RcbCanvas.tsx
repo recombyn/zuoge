@@ -31,7 +31,7 @@ import { RCB_DEFAULT_CAMERA, type RcbCamera } from '../core/types';
 import { cameraCssTransform, createCameraTransform } from '../camera/transform';
 import { setSceneWorldRoot } from '../shapes/shapeHostRegistry';
 import { DEFAULT_GRID_SIZE } from '../selection/alignGuides';
-import { textFrameBlocksBrowserZoom, wheelShouldStayLocal } from './wheelScrollOwners';
+import { wheelShouldStayLocal } from './wheelScrollOwners';
 import { tryConsumeLottieTimelineSpace } from '@/components/editor/nodes/AnimationNode/animationTimelineHotkeys';
 import KitCanvasHost from './KitCanvasHost';
 import { kitOwnsStagePointer, resolveEngineTool } from './toolMap';
@@ -297,10 +297,7 @@ function RcbCanvas({
 
     const onWheel = (e: WheelEvent) => {
       const target = e.target as Element | null;
-      // Text-frame + pinch: prevent browser page-zoom, then fall through to canvas zoom.
-      if (textFrameBlocksBrowserZoom(target, e)) {
-        e.preventDefault();
-      } else if (wheelShouldStayLocal(target, e)) {
+      if (wheelShouldStayLocal(target, e)) {
         // Scrollable panels/menus own wheel — do not pan/zoom or preventDefault.
         return;
       } else {
