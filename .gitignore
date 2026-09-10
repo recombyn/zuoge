@@ -92,10 +92,8 @@ apps/web/vitest.config.d.ts
 # (keep real source as TypeScript only under apps/web/src)
 apps/web/src/**/*.js
 apps/web/src/**/*.jsx
-# Exception: wasm-pack glue (rcb_wasm_geom.js) must ship for JS-only CI.
-!apps/web/src/components/rcb/render/vector/wasm/pkg/
 
-# Rust build artifacts for rcb-wasm-geom
+# Rust build artifacts for rcb-wasm-geom (crate kept; Kit ink does not load it)
 packages/rcb-wasm-geom/target/
 
 npm-debug.log*
@@ -156,9 +154,6 @@ e2e/.*.txt
 
 # FFmpeg.wasm core (~32MB) — copied locally by apps/web/scripts/copy-ffmpeg-core.mjs
 apps/web/public/ffmpeg/
-
-# RCB geom wasm — copied from src/.../wasm/pkg by apps/web/scripts/build-wasm.mjs
-apps/web/public/rcb-wasm/
 
 # Local infra not published with OSS (keep on disk only)
 infra/langfuse/
