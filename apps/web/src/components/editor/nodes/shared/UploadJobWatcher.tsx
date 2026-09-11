@@ -10,7 +10,7 @@ import {
 } from '@/components/rcb/scene/document/processJobAttrs';
 import { resumeOrWaitUploadJob } from '@/service/uploadJobs';
 import { getHttpErrorMessage } from '@/service/client';
-import { buildUploadFinishAttrs } from '@/utils/canvasUploadFlow';
+import { buildUploadFinishAttrs, ensureDurableVideoFinishAttrs } from '@/utils/canvasUploadFlow';
 import {
   hasActiveNodeUpload,
   isUploadAbortError,
@@ -89,10 +89,15 @@ function UploadJobWatcher() {
         if (cancelled) return;
 
         const finishNode = documentRef.current?.deltaSetLike?.[pendingId] || liveNode;
+        const finishAttrs = await ensureDurableVideoFinishAttrs(
+          buildUploadFinishAttrs(finishNode?.attrs, uploaded),
+          ac.signal
+        );
+        if (cancelled) return;
         finishImageProcess({
             nodeId: pendingId,
             ...(remoteReady ? { src: uploaded.url } : {}),
-            attrs: buildUploadFinishAttrs(finishNode?.attrs, uploaded),
+            attrs: finishAttrs,
           });
       } catch (err: unknown) {
         if (cancelled || isUploadAbortError(err)) return;

@@ -85,6 +85,9 @@ export function usePlayableVideoSrc(src: string, uploadKey?: string | null): str
       return undefined;
     }
 
+    // Clear playable when the logical src changes so a prior http URL does not
+    // flash the wrong clip. VideoHoverPlayback shows poster while auth resolves.
+    // Local blob/data previews may already be revoked on remote finish.
     setPlayable('');
 
     async function resolveBlob() {
