@@ -269,10 +269,13 @@ function VideoHoverPlayback({
   /** Frozen still + the mediaTime it was captured at (atlas / demoted fallback). */
   const [freeze, setFreeze] = useState<{ url: string; at: number }>(() => {
     const p = String(poster || '').trim();
-    // blob: posters are revoked across refresh — never seed the freeze <img> with them.
-    if (!p || p.startsWith('blob:')) return { url: '', at: -999 };
+    // Seed FO cover immediately (incl. blob: while durable poster uploads).
+    // Atlas demotion still prefers durable http — see freeze capture path.
+    if (!p) return { url: '', at: -999 };
     return { url: p, at: 0 };
   });
+  /** False until the shared <video> has decoded a frame for the current playSrc. */
+  const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
   const playSrc = usePlayableVideoSrc(src, uploadKey);
   const showUi = !hidden;
   const z = Math.max(0.05, zoom || 1);
@@ -335,9 +338,22 @@ function VideoHoverPlayback({
 
   useEffect(() => {
     const next = String(poster || '').trim();
-    if (!next || next.startsWith('blob:')) return;
-    setFreeze((prev) => (prev.url ? prev : { url: next, at: 0 }));
+    if (!next) return;
+    // Prefer durable http once it lands; keep blob cover until then.
+    setFreeze((prev) => {
+      if (!prev.url || prev.url.startsWith('blob:') || prev.url.startsWith('data:')) {
+        return { url: next, at: 0 };
+      }
+      if (!next.startsWith('blob:') && !next.startsWith('data:') && prev.url !== next) {
+        return { url: next, at: 0 };
+      }
+      return prev;
+    });
   }, [poster]);
+
+  useEffect(() => {
+    setHasDecodedFrame(false);
+  }, [playSrc, nodeId]);
 
   // Bind src once — never via React `src={}`. Re-run when the element mounts.
   useEffect(() => {
@@ -352,13 +368,37 @@ function VideoHoverPlayback({
       /* ignore */
     }
     freezeGenRef.current += 1;
-    // Prefer empty over revoked blob poster — live <video> paints the FO plate.
-    setFreeze({
-      url: posterUrl && !posterUrl.startsWith('blob:') ? posterUrl : '',
-      at: posterUrl && !posterUrl.startsWith('blob:') ? 0 : -999,
-    });
+    setHasDecodedFrame(false);
+    // Keep poster cover until loadeddata — empty freeze + dark video bg = black FO.
+    if (posterUrl) {
+      setFreeze({ url: posterUrl, at: 0 });
+    }
+    try {
+      el.setAttribute('poster', posterUrl || '');
+    } catch {
+      /* optional */
+    }
     el.src = playSrc;
   }, [playSrc, posterUrl, videoEl, nodeId]);
+
+  useEffect(() => {
+    const el = videoEl;
+    if (!el || !playSrc) return;
+    const mark = () => {
+      if (el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        setHasDecodedFrame(true);
+      }
+    };
+    mark();
+    el.addEventListener('loadeddata', mark);
+    el.addEventListener('seeked', mark);
+    el.addEventListener('playing', mark);
+    return () => {
+      el.removeEventListener('loadeddata', mark);
+      el.removeEventListener('seeked', mark);
+      el.removeEventListener('playing', mark);
+    };
+  }, [videoEl, playSrc]);
 
   useEffect(() => {
     const el = videoEl;
@@ -517,15 +557,21 @@ function VideoHoverPlayback({
   // Wait for SVG foreignObject mount so we never fall back to a parallel CSS stack.
   if (!svgMount) return null;
 
-  // Still only when this plate does NOT own the live decoder (demoted / no FO).
-  // Owning the decoder: always paint through <video> — pause/scrub seek the element.
+  // Loading cover must hide the dark shared <video> (bg #111827) — it stacks
+  // above the poster <img>. After decode, paused plates paint through <video>.
   const ownsDecoder = sharedVideoOwnerId === String(nodeId) && Boolean(videoEl);
+  const coverUrl = String(freeze.url || posterUrl || '').trim();
   const freezeMatches =
-    Boolean(freeze.url) &&
-    !freeze.url.startsWith('blob:') &&
-    Math.abs(mediaTime - freeze.at) <= 0.12;
-  const showStill = !playing && freezeMatches && !ownsDecoder;
-  const showVideo = ownsDecoder || playing || !showStill;
+    Boolean(coverUrl) && Math.abs(mediaTime - freeze.at) <= 0.12;
+  const loadingCover =
+    Boolean(coverUrl) &&
+    !playing &&
+    ownsDecoder &&
+    (!playSrc || !hasDecodedFrame);
+  const demotedStill =
+    Boolean(coverUrl) && !playing && freezeMatches && !ownsDecoder;
+  const showStill = loadingCover || demotedStill;
+  const showVideo = playing || (ownsDecoder && !loadingCover) || !showStill;
   const barVisible = showUi && !hideChrome && (plateHovered || barHovered || playing);
   // Layout must match FO box (drag-base while CSS-scale resizing), not the visual
   // chrome size — otherwise scrubber/video sit mid-plate during live resize.
@@ -553,9 +599,9 @@ function VideoHoverPlayback({
       data-video-hover-plate=""
       data-video-node-id={nodeId}
     >
-      {showStill ? (
+      {showStill && coverUrl ? (
         <img
-          src={freeze.url}
+          src={coverUrl}
           alt=""
           draggable={false}
           className="pointer-events-none absolute"

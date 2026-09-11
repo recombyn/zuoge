@@ -320,6 +320,10 @@ const GEOMETRY_ATTR_KEYS = new Set([
   'aspect-original-width',
   'aspect-original-height',
   'shapeType',
+  // Generator ratio presets patch W/H + these attrs together.
+  'videoGenAspect',
+  'imageGenAspect',
+  'lottieGenAspect',
 ]);
 
 /**

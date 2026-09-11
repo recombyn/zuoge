@@ -104,6 +104,16 @@ async function withDurableVideoPosterAttrs(
   return { ...extraAttrs, poster: durable };
 }
 
+/** Ensure video finish attrs carry a durable (non-blob) poster when possible. */
+export async function ensureDurableVideoFinishAttrs(
+  attrs: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+  const ac = signal ?? new AbortController().signal;
+  const next = await withDurableVideoPosterAttrs(attrs, ac);
+  return next || attrs;
+}
+
 /** Upload a file for a spawned placeholder node. */
 export async function uploadCanvasPlaceholderFile(opts: {
   nodeId: string;

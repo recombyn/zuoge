@@ -3141,6 +3141,10 @@ function pushRasterNodeToKit(scene: WasmScene, rcbId: string, node: SceneNodeInp
       if (lastKitStyleJson.get(existing) !== styleJson) {
         scene.setNodeStyleNoHistory(existing, styleJson);
         lastKitStyleJson.set(existing, styleJson);
+      } else {
+        // Wash style is constant; resize alone must still drop the retained
+        // scene picture or the gray plate stays at the pre-aspect size.
+        scene.invalidateCache?.(false);
       }
       return;
     }
@@ -3601,7 +3605,21 @@ export function syncKitGeometryFromDocument(
       // the new box (resize_node only stretches path/rect, not fill coords).
       applyKitNodeStyle(scene, kitId, node);
     }
-    handle.renderer.requestRender();
+    // engine.resize_node does not bump Kit caches. Empty-generator wash style
+    // is unchanged across aspect presets, so applyKitNodeStyle is a no-op and
+    // requestRender alone would replay the old landscape picture under a
+    // portrait selection outline. Drop retained picture + path caches without
+    // onMutate (false); same class of fix as refreshKitArtboardClipPaint.
+    if (typeof scene.invalidateCache === 'function') {
+      scene.invalidateCache(false);
+    } else {
+      try {
+        handle.renderer.invalidateScenePicture?.();
+      } catch {
+        /* optional */
+      }
+      handle.renderer.requestRender();
+    }
   });
 }
 
